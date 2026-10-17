@@ -46,7 +46,7 @@ def front : Template := do
   pure {{
     <section class="hero">
       <h1>"Cryptlib"</h1>
-      <p class="tagline">"Cryptography for Lean 4, where a primitive's type says what must be proved about it."</p>
+      <p class="tagline">"A Lean cryptography library"</p>
       <p class="buttons">
         <a class="button" href="api/">"API reference"</a>
       </p>
