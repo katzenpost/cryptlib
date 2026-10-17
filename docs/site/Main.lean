@@ -7,9 +7,6 @@ open Verso.Output Html Template Theme
 def repo := "https://github.com/katzenpost/cryptlib"
 
 def primary (version : String) : Template := do
-  let posts := match (← param? "posts") with
-    | none => Html.empty
-    | some html => {{ <ul class="posts">{{html}}</ul> }}
   return {{
     <html lang="en">
       <head>
@@ -32,7 +29,6 @@ def primary (version : String) : Template := do
         </header>
         <main>
           {{← param "content"}}
-          {{posts}}
         </main>
         <footer class="site">
           <p>
@@ -64,8 +60,6 @@ def theme (version : String) : Theme :=
 
 def cryptlib : Site := site CryptLib.Front /
   static "static" ← "static"
-  "blog" CryptLib.Blog with
-    CryptLib.Blog.Hello
 
 def main (args : List String) : IO UInt32 := do
   let version := (← IO.getEnv "CRYPTLIB_VERSION").getD "main"
