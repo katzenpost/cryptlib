@@ -146,7 +146,6 @@ header.site nav a:hover { color: var(--accent); }
   font-weight: 600;
   text-decoration: none;
 }
-.button.secondary { background: var(--accent-soft); color: var(--accent); }
 
 article.front {
   background: var(--card);
