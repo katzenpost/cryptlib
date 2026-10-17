@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Cryptlib.Primitives.NIKE.Field25519
 import Cryptlib.Primitives.NIKE.X25519_montgomery_ladder
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! Tests for `Field25519` and the limb-based ladder: every field operation against `Nat`
 arithmetic modulo `p`, on edge cases and random values, with the limb bound checked after each;
@@ -14,7 +14,7 @@ RFC 7748 vectors; and agreement with the `ZMod` ladder. -/
 open Cryptlib.Primitives.NIKE.Field25519 (Fe)
 open Cryptlib.Primitives.NIKE.X25519Common (p)
 open Cryptlib.Primitives.NIKE.X25519_montgomery_ladder (curve25519 curve25519_fe)
-open Cryptlib.Util.newhex (byteArrayToHex hexStringToByteArray)
+open Cryptlib.Util.HexBytes (byteArrayToHex hexStringToByteArray)
 
 def failures : IO (IO.Ref Nat) := IO.mkRef 0
 

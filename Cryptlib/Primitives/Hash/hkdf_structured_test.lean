@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Lean.Data.Json
 
 import Cryptlib.Primitives.Hash.HKDF
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # HKDF-BLAKE2b-512 known-answer tests
 
@@ -15,7 +15,7 @@ Checks `extract` and `expand` of `blake2b512_hkdf` against `testdata/hkdf_blake2
 
 open Lean
 open Cryptlib.Primitives.Hash.HKDF
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 
 structure HKDFVector where
   name   : String

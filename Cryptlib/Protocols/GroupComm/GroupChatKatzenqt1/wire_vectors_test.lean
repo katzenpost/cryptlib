@@ -8,7 +8,7 @@ import Lean.Data.Json
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Gcm
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Membership
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.ReplyWho
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # Group chat wire vectors
 
@@ -19,7 +19,7 @@ carries the same `JoinReply`. -/
 
 open Lean
 open Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 
 def hex (s : String) : Except String ByteArray :=
   match hexStringToByteArray s with

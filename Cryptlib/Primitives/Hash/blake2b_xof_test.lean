@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import Cryptlib.Primitives.Hash.Blake2b
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # BLAKE2Xb known-answer tests
 
@@ -13,7 +13,7 @@ Checks `Blake2b.xof` against `testdata/blake2b_xof.json`, from hpqc. `xof_size` 
 size and `length` the number of bytes read. -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Primitives.Hash.Blake2b (xof)
 
 def field (j : Json) (k : String) : Except String ByteArray := do

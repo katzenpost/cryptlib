@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Mathlib.Tactic.Set
 import Mathlib.Tactic.IntervalCases
-import Cryptlib.Protocols.Sphinx.constants
+import Cryptlib.Protocols.Sphinx.Constants
 import Cryptlib.Util.Bytes
 
 namespace Cryptlib.Protocols.Sphinx.Commands

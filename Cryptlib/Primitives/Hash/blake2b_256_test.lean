@@ -5,14 +5,14 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import Cryptlib.Primitives.Hash.Blake2b
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # BLAKE2b-256 (unkeyed and keyed) known-answer tests
 
 Checks `Blake2b.hash256`/`hash256Keyed` against `testdata/blake2b_256.json`, from hpqc. -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Primitives.Hash.Blake2b (hash256 hash256Keyed)
 
 def field (j : Json) (k : String) : Except String ByteArray := do

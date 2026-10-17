@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import Cryptlib.Primitives.KEM.Schemes
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # X25519 + ML-KEM-768 combiner: known-answer tests
 
@@ -14,7 +14,7 @@ ciphertext and shared secret. Each vector's `prf` field selects `kemX25519Blake2
 `kemX25519`. -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Primitives.KEM
 open Cryptlib.Primitives.KEM.KEM
 open MLKEM

@@ -7,7 +7,7 @@ import Lean.Data.Json
 
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.AckCodec
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.AckBytes
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # `Acks` field vectors
 
@@ -17,7 +17,7 @@ neither. -/
 
 open Lean
 open Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.AckCodec
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 
 def hexNats (s : String) : Except String (List ℕ) :=
   match hexStringToByteArray s with

@@ -7,9 +7,9 @@ import Lean.Data.Json
 import Cryptlib.Primitives.Hash.Sha512
 import Cryptlib.Primitives.MAC.HMAC
 import Cryptlib.Primitives.StreamCipher.AES256CTR
-import Cryptlib.Protocols.Sphinx.kdf
+import Cryptlib.Protocols.Sphinx.KDF
 import Cryptlib.Primitives.Cipher.ChaCha20
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-!
 # Sphinx primitive known-answer tests: hash, MAC, stream cipher, KDF, ChaCha20
@@ -17,7 +17,7 @@ import Cryptlib.Util.newhex
 Vectors are vendored from katzenpost; each `testdata/sphinx_*.json.sha256` records the copy. -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Primitives.Hash.Sha512 (sha512_256)
 open Cryptlib.Primitives.Cipher.ChaCha20 (keystream32)
 open Cryptlib.Primitives.MAC.HMAC (hmacSha256)

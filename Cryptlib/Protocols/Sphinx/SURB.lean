@@ -3,9 +3,9 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import Cryptlib.Protocols.Sphinx.constants
-import Cryptlib.Protocols.Sphinx.geometry
-import Cryptlib.Protocols.Sphinx.common
+import Cryptlib.Protocols.Sphinx.Constants
+import Cryptlib.Protocols.Sphinx.Geometry
+import Cryptlib.Protocols.Sphinx.Common
 import Cryptlib.Primitives.WideBlockCipher.WideBlockCipher
 import Cryptlib.Util.Bytes
 
