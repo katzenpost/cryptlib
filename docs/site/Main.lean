@@ -64,8 +64,6 @@ def theme (version : String) : Theme :=
 
 def cryptlib : Site := site CryptLib.Front /
   static "static" ← "static"
-  "primitives" CryptLib.Primitives
-  "getting-started" CryptLib.GettingStarted
   "blog" CryptLib.Blog with
     CryptLib.Blog.Hello
 
