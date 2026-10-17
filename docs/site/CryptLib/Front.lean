@@ -20,16 +20,25 @@ post-quantum cryptography), a Go, Python and Rust cryptography library used by t
 
 Beyond that we have two main goals:
 
-* Cryptlib can be used to write real, high-assurance cryptography applications in Lean.
-* Cryptlib can be used to prove security properties of cryptographic primitives and protocols.
+* Cryptlib can be used to write real software that a user can run on their computer, perhaps high assurance security software
+or perhaps protocol simulators.
+* Cryptlib can be used to prove security properties of cryptographic primitives and protocols, where we only need lean's type checking and aren't using any build artifacts.
 
-For each kind of cryptographic primitive, such as a NIKE (non-interactive key exchange), Cryptlib
-defines a Lean structure type that describes the primitive generically. In a language like Rust a
-trait is an empty husk that only declares function signatures. Cryptlib uses a structure instead,
-where some fields hold functions and others hold data types. So far this is how Rust or Go would
-represent a primitive generically. Lean lets us go a step further with dependent types: a field can
-also be a proposition. For example, our NIKE structure has a field stating that the group operation
-is commutative:
+So in that sense the "specification rides along with the code".
+
+For each kind of cryptographic primitive, such as a NIKE
+(non-interactive key exchange), Cryptlib defines a Lean structure type
+that describes the primitive generically. In a language like Rust a
+trait is an empty husk that only declares function signatures. It's
+still a useful contract; all instances must define the trait's
+methods. In Lean you do this with a structure type which has fields
+with function definitions. All instances of the structure type must
+define an implementation of the type's specified function
+fields. Cryptlib uses a structure where some fields hold functions and
+others hold data types. So far this is how Rust or Go would represent
+a primitive generically. Lean lets us go a step further with dependent
+types: a field can also be a proposition. For example, our NIKE
+structure has a field stating that the group operation is commutative:
 
 ```lean demo
 structure NIKE where
@@ -97,3 +106,5 @@ See our [NIKE-to-KEM adapter](https://github.com/katzenpost/cryptlib/blob/216538
 This is an example of dependent types enforcing a proof implicitly, and they keep doing so
 transitively as primitives are composed. In many ways this simplifies the proof obligations of the
 composed protocol.
+
+
