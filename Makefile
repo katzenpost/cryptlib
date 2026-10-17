@@ -77,9 +77,9 @@ build: mathlib-cache ## build everything, library and executables
 
 # A suite counts as failed if it exits non-zero or prints anything matching
 # "fail". Most suites signal a mismatch by throwing, which exits 1, but
-# Cryptlib/Data/test.lean only prints on mismatch and still exits 0. No
-# passing suite prints the word, so scanning for it costs nothing and catches
-# that case along with any future suite that reports the same way.
+# Cryptlib/Data/test.lean only prints on mismatch and still exits 0. Lines
+# starting with "ok" are skipped: a passing negative test can name the failure
+# it expected, such as decrypt_failed.
 test: build ## run every suite and report all failures
 	@rc=0; \
 	for bin in $(TEST_BINS); do \
@@ -87,7 +87,7 @@ test: build ## run every suite and report all failures
 	  printf '\n=== %s ===\n' "$$name"; \
 	  out=$$("$$bin" 2>&1); status=$$?; \
 	  printf '%s\n' "$$out"; \
-	  if [ $$status -ne 0 ] || printf '%s' "$$out" | grep -qi 'fail'; then \
+	  if [ $$status -ne 0 ] || printf '%s\n' "$$out" | grep -vE '^[[:space:]]*ok[[:space:]]' | grep -qi 'fail'; then \
 	    rc=1; printf '  ^^ %s FAILED\n' "$$name"; \
 	  fi; \
 	done; \

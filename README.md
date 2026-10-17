@@ -1,6 +1,8 @@
-# Crypt Walker
+# Cryptlib
 
 *A cryptographic library for Lean.*
+
+This library has not been audited by any third party.
 
 
 ## abstract
@@ -135,7 +137,7 @@ lake exe Cryptlib.Protocols.Sphinx.nike_selftest    # NIKE-Sphinx round-trip sel
 lake exe Cryptlib.Protocols.Sphinx.kem_selftest     # KEM-Sphinx round-trip self-tests
 lake exe Cryptlib.Protocols.Sphinx.nike_vectors_test  # NIKE-Sphinx full-packet vectors from katzenpost
 lake exe Cryptlib.Protocols.Sphinx.kem_vectors_test   # KEM-Sphinx full-packet vectors from katzenpost
-lake exe Cryptlib.Primitives.KEM.MLKEM.mlkem768_test   # ML-KEM-768 NIST ACVP known-answer vectors
+lake exe Cryptlib.Primitives.KEM.MLKEM.mlkem_test      # ML-KEM-768 NIST ACVP known-answer vectors
 lake exe Cryptlib.Primitives.Hash.blake2b_256_test     # BLAKE2b-256 (unkeyed and keyed) vectors from hpqc
 lake exe Cryptlib.Primitives.KEM.mlkem768_x25519_combiner_test  # X25519+ML-KEM-768 hybrid vectors from hpqc
 lake exe Cryptlib.Protocols.Sphinx.kem_hybrid_vectors_test     # KEM-Sphinx hybrid full-packet vectors from katzenpost
@@ -216,7 +218,7 @@ make bench BENCH_ARGS='--match "kem MLKEM768 decap"'    # one specific bench
 
 Any LeanBench flag works in `BENCH_ARGS`: e.g. `--samples 5`, `--tags unwrap`, or
 `--save baseline.json` then `--compare baseline.json`. To call Lake directly, use
-`lake -q --log-level=error exe Cryptlib.Bench.benchmark ...`; without those flags Lake replays
+`cd bench && lake -q --log-level=error exe cryptlib-bench ...`; without those flags Lake replays
 build warnings from our dependencies first. No numbers here — they depend entirely on the machine.
 
 ## licensing
