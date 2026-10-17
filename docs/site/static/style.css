@@ -155,25 +155,6 @@ article.front {
   margin-bottom: 2rem;
 }
 
-/* blog */
-
-ul.posts { list-style: none; padding: 0; }
-ul.posts > li {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
-}
-ul.posts .title { font-weight: 600; font-size: 1.1rem; }
-
-.metadata { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.25rem; }
-.metadata .authors, .metadata .date { display: inline-block; }
-.metadata .authors:has(+ .date)::after { content: " · "; }
-.metadata .author:has(+ .author)::after { content: ", "; }
-.metadata ul.categories { display: inline; list-style: none; padding: 0; margin-left: 0.5rem; }
-.metadata ul.categories li { display: inline; margin-right: 0.4rem; }
-
 /* footer */
 
 footer.site {
