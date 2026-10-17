@@ -52,8 +52,7 @@ def front : Template := do
       <h1>"Cryptlib"</h1>
       <p class="tagline">"Cryptography for Lean 4, where a primitive's type says what must be proved about it."</p>
       <p class="buttons">
-        <a class="button" href="overview/">"Overview"</a>
-        <a class="button secondary" href="api/">"API reference"</a>
+        <a class="button" href="api/">"API reference"</a>
       </p>
     </section>
     <article class="front">{{← param "content"}}</article>
@@ -65,7 +64,6 @@ def theme (version : String) : Theme :=
 
 def cryptlib : Site := site CryptLib.Front /
   static "static" ← "static"
-  "overview" CryptLib.Overview
   "primitives" CryptLib.Primitives
   "getting-started" CryptLib.GettingStarted
   "blog" CryptLib.Blog with
