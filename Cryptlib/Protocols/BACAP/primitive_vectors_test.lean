@@ -7,14 +7,14 @@ import Lean.Data.Json
 import Cryptlib.Primitives.Hash.Sha512
 import Cryptlib.Primitives.Hash.Blake2b
 import Cryptlib.Primitives.Sign.Ed25519_math
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # SHA-512/256, BLAKE2b-512 and Ed25519 vectors (from hpqc)
 
 Ed25519 vectors must verify, and must fail with one signature bit flipped. -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 
 def hexBytes (j : Json) (k : String) : Except String ByteArray := do
   let s ← (← j.getObjVal? k).getStr?

@@ -11,7 +11,7 @@ import LeanBench
 Each sample runs from a freshly seeded state; `decap` gets a fresh ciphertext per sample. Keys and
 ciphertexts are prepared outside the timed region. -/
 
-namespace Cryptlib.Bench.KEM
+namespace CryptlibBench.KEM
 
 open Cryptlib.Primitives.KEM.KEM (KEM)
 open Cryptlib.Util.Bytes (ofVector)
@@ -59,4 +59,4 @@ def benches (name : String) (kem : KEM) : IO (Array LeanBench.Bench) := do
         | .ok k _ => out.set (ofVector (kem.encodePlaintext k))
         | .error _ _ => fail "decap" }]
 
-end Cryptlib.Bench.KEM
+end CryptlibBench.KEM

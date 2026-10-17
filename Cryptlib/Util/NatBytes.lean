@@ -1,4 +1,4 @@
-namespace Cryptlib.Util.newnat
+namespace Cryptlib.Util.NatBytes
 
 def natToBytesAux (n : Nat) (acc : List UInt8) : List UInt8 :=
   if n == 0 then acc else natToBytesAux (n / 256) (UInt8.ofNat (n % 256) :: acc)
@@ -35,4 +35,4 @@ theorem natToBytes_length_le_32 (n : Nat) (h : n < 256 ^ 32) :
   simpa [natToBytes] using natToBytesAux_length_le 32 n [] h
 
 
-end Cryptlib.Util.newnat
+end Cryptlib.Util.NatBytes

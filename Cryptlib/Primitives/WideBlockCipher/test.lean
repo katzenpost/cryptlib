@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import Cryptlib.Primitives.WideBlockCipher.AEZ
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-!
 # AEZ v5 SPRP known-answer tests
@@ -15,7 +15,7 @@ Checks `WideBlockCipher.AEZ` against `sprp_aez.json`, covering both the `aezTiny
 -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Primitives.WideBlockCipher.AEZ
 
 def field (j : Json) (k : String) : Except String ByteArray := do

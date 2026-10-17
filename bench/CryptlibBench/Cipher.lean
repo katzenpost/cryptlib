@@ -12,7 +12,7 @@ import LeanBench
 
 Inputs are read from refs so the compiler cannot hoist the work out of the timed action. -/
 
-namespace Cryptlib.Bench.Cipher
+namespace CryptlibBench.Cipher
 
 open Cryptlib.Primitives.Cipher.ChaChaPoly (chacha20 poly1305)
 open Cryptlib.Primitives.Cipher.Polyval (polyval)
@@ -42,4 +42,4 @@ def benches : IO (Array LeanBench.Bench) := do
                         ByteArray.empty (← msg.get)) }
   pure bs
 
-end Cryptlib.Bench.Cipher
+end CryptlibBench.Cipher

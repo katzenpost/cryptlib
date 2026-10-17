@@ -3,21 +3,21 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import Cryptlib.Protocols.Sphinx.constants
-import Cryptlib.Protocols.Sphinx.geometry
-import Cryptlib.Protocols.Sphinx.commands
-import Cryptlib.Protocols.Sphinx.types
-import Cryptlib.Protocols.Sphinx.sphinx
-import Cryptlib.Protocols.Sphinx.common
-import Cryptlib.Protocols.Sphinx.nike_sphinx_theorems
-import Cryptlib.Protocols.Sphinx.kem_sphinx
-import Cryptlib.Protocols.Sphinx.surb
+import Cryptlib.Protocols.Sphinx.Constants
+import Cryptlib.Protocols.Sphinx.Geometry
+import Cryptlib.Protocols.Sphinx.Commands
+import Cryptlib.Protocols.Sphinx.Types
+import Cryptlib.Protocols.Sphinx.Interface
+import Cryptlib.Protocols.Sphinx.Common
+import Cryptlib.Protocols.Sphinx.NIKESphinxTheorems
+import Cryptlib.Protocols.Sphinx.KEMSphinx
+import Cryptlib.Protocols.Sphinx.SURB
 import Cryptlib.Primitives.WideBlockCipher.WideBlockCipher
 import Cryptlib.Primitives.WideBlockCipher.AEZ
 import Cryptlib.Primitives.MAC.MAC
 import Cryptlib.Primitives.KDF.KDF
 import Cryptlib.Primitives.KDF.HKDF
-import Cryptlib.Protocols.Sphinx.kdf
+import Cryptlib.Protocols.Sphinx.KDF
 import Cryptlib.Primitives.StreamCipher.StreamCipher
 import Cryptlib.Primitives.StreamCipher.AES256CTR
 import Cryptlib.Primitives.KEM.KEM

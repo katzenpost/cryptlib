@@ -1,8 +1,8 @@
 
 import Cryptlib.Data.MerkleHashTree
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Data.MerkleHashTree
 
 instance : BEq ByteArray where

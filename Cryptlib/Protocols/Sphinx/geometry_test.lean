@@ -4,8 +4,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Lean.Data.Json
-import Cryptlib.Protocols.Sphinx.geometry_cbor
-import Cryptlib.Util.newhex
+import Cryptlib.Protocols.Sphinx.GeometryCbor
+import Cryptlib.Util.HexBytes
 
 /-! # Sphinx geometry tests
 
@@ -15,7 +15,7 @@ Checks `ofNIKE`/`ofKEM`, the CBOR encoding, `hash` and `validate` against
 
 open Lean
 open Cborg
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Protocols.Sphinx.Geometry
 
 def hexField (j : Json) (k : String) : Except String ByteArray := do

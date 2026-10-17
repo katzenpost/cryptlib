@@ -4,11 +4,11 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Lean.Data.Json
-import Cryptlib.Protocols.Sphinx.geometry
-import Cryptlib.Protocols.Sphinx.kem_sphinx_theorems
-import Cryptlib.Protocols.Sphinx.surb
+import Cryptlib.Protocols.Sphinx.Geometry
+import Cryptlib.Protocols.Sphinx.KEMSphinxTheorems
+import Cryptlib.Protocols.Sphinx.SURB
 import Cryptlib.Primitives.NIKE.X25519_montgomery_ladder
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 import Cryptlib.Util.Bytes
 
 /-!
@@ -18,7 +18,7 @@ Replays `unwrapKEM` hop by hop over externally built KEM-Sphinx packets
 (`withSURB ∈ {false, true} × nrHops 1..5`). -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Protocols.Sphinx.Geometry
 open Cryptlib.Protocols.Sphinx.Commands
 open Cryptlib.Protocols.Sphinx.KEMSphinx

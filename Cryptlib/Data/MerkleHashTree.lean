@@ -8,8 +8,8 @@ import Init.Data.ToString
 import Mathlib.Tactic
 
 import Cryptlib.Primitives.Hash.Sha2
-import Cryptlib.Util.newnat
-import Cryptlib.Util.newhex
+import Cryptlib.Util.NatBytes
+import Cryptlib.Util.HexBytes
 
 namespace Cryptlib.Data.MerkleHashTree
 

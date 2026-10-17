@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import Cryptlib.Primitives.Hash.Sha512
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-!
 # SHA-512 known-answer tests
@@ -15,7 +15,7 @@ vectors whose padding spans more than one block.
 -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Primitives.Hash.Sha512
 
 structure HashVec where

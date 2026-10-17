@@ -11,7 +11,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: leanprover/lean-action@v1
         with:
-          build-args: "Cryptlib Cryptlib.Data.test Cryptlib.Primitives.NIKE.test Cryptlib.Primitives.KEM.test Cryptlib.Primitives.KEM.vectors Cryptlib.Primitives.Hash.test Cryptlib.Primitives.Hash.hkdf_test Cryptlib.Primitives.KDF.argon2_test Cryptlib.Primitives.Cipher.test Cryptlib.Bench.benchmark Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.ack_codec_test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.wire_vectors_test Cryptlib.Protocols.BACAP.primitive_vectors_test Cryptlib.Protocols.BACAP.gen_vectors Cryptlib.Protocols.BACAP.test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.replay Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.scenarios"
+          build-args: "Cryptlib Cryptlib.Data.test Cryptlib.Primitives.NIKE.test Cryptlib.Primitives.KEM.test Cryptlib.Primitives.KEM.vectors Cryptlib.Primitives.Hash.test Cryptlib.Primitives.Hash.hkdf_test Cryptlib.Primitives.KDF.argon2_test Cryptlib.Primitives.Cipher.test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.ack_codec_test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.wire_vectors_test Cryptlib.Protocols.BACAP.primitive_vectors_test Cryptlib.Protocols.BACAP.gen_vectors Cryptlib.Protocols.BACAP.test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.replay Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.scenarios"
+      - name: Build the benchmarks (their own Lake project)
+        working-directory: bench
+        run: lake build
       - name: Run tests
         env:
           # panics in compiled Lean print a message but exit 0 unless this is set

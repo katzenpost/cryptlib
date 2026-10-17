@@ -54,7 +54,7 @@ TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 # Bare `lake build` builds only defaultTargets, which is the library. The
 # executables have to be named or the test targets run whatever binary was left
 # in .lake/build/bin by an earlier build.
-EXES := $(TESTS) Cryptlib.Protocols.BACAP.gen_vectors Cryptlib.Bench.benchmark Cryptlib.Protocols.Sphinx.gen_nike_vectors Cryptlib.Protocols.Sphinx.gen_kem_vectors Cryptlib.Primitives.KEM.gen_mlkem768_x25519_combiner_vectors Cryptlib.Primitives.KEM.gen_mlkem_hedged_vectors Cryptlib.Primitives.MultiRecipientHybrid.gen_multirecipient_hybrid_vectors
+EXES := $(TESTS) Cryptlib.Protocols.BACAP.gen_vectors Cryptlib.Protocols.Sphinx.gen_nike_vectors Cryptlib.Protocols.Sphinx.gen_kem_vectors Cryptlib.Primitives.KEM.gen_mlkem768_x25519_combiner_vectors Cryptlib.Primitives.KEM.gen_mlkem_hedged_vectors Cryptlib.Primitives.MultiRecipientHybrid.gen_multirecipient_hybrid_vectors
 
 .DEFAULT_GOAL := help
 
@@ -202,7 +202,8 @@ BENCH_ARGS ?=
 
 # Quiet: otherwise Lake replays LeanBench's missing-docstring warnings and VCVio's native-backend
 # notices on every run.
-BENCH := $(LAKE) -q --log-level=error exe Cryptlib.Bench.benchmark
+# The benchmarks are their own Lake project in bench/, so the library does not depend on LeanBench.
+BENCH := cd bench && $(LAKE) -q --log-level=error exe cryptlib-bench
 
 bench: ## run every benchmark (NIKE, KEM, Sphinx); pass LeanBench flags via BENCH_ARGS
 	@$(BENCH) $(BENCH_ARGS)

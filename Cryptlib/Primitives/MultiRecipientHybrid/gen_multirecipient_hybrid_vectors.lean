@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import Cryptlib.Primitives.MultiRecipientHybrid.Schemes
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # Multi-recipient hybrid vector generator
 
@@ -16,7 +16,7 @@ open Lean
 open Cryptlib.Primitives.KEM (kemX25519Blake2b kemMLKEM768X25519Blake2b)
 open Cryptlib.Primitives.MultiRecipientHybrid.MultiRecipientHybrid (Ciphertext)
 open Cryptlib.Primitives.MultiRecipientHybrid.Schemes (hybridMLKEM768X25519Blake2b)
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Util.Bytes (ofVector toVecN)
 
 def H := hybridMLKEM768X25519Blake2b

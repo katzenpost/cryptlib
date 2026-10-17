@@ -7,13 +7,13 @@ import Mathlib.Algebra.Field.Basic
 import Mathlib.Data.ZMod.Basic
 import Mathlib.NumberTheory.LucasPrimality
 
-import Cryptlib.Util.newnat
-import Cryptlib.Util.newhex
+import Cryptlib.Util.NatBytes
+import Cryptlib.Util.HexBytes
 import Cryptlib.Primitives.NIKE.NIKE
 import Cryptlib.Primitives.NIKE.X25519Common
 import Cryptlib.Primitives.NIKE.Field25519
 
-open Cryptlib.Util.newnat
+open Cryptlib.Util.NatBytes
 open Cryptlib.Primitives.NIKE.NIKE
 open Cryptlib.Primitives.NIKE.X25519Common
 

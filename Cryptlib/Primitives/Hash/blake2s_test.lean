@@ -1,11 +1,11 @@
 import Lean.Data.Json
 
 import Cryptlib.Primitives.Hash.Blake2s
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 open Lean
 open Cryptlib.Primitives.Hash.Blake2s
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 
 def hexField (j : Json) (k : String) : Except String ByteArray := do
   match hexStringToByteArray (← (← j.getObjVal? k).getStr?) with
