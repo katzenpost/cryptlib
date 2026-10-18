@@ -103,19 +103,42 @@ Proved of `Member/`, the model katzenqt's traces are replayed through.
   (`MemberProofs.acks_sent_safe`). The calls include the client changing its retention policy
   between them, as a user's disappearing messages setting does. The one assumption is that a walk the client reports kept no
   more boxes than it stepped past (`Event.WF`).
+- **A member whose client writes writes nothing itself.** Once a client writes for a member, the
+  member writes nothing from its own pool and derives no boxes to write, whatever events it is
+  handed: those would name boxes the client hands out too (`flush_client`,
+  `clientWrites_allocates`).
 - **Acknowledgements of our own stream are checked.** One counts only for a box the Sent-box
   check finds by its `Idx64` (`takeAcks_credit`, `checkAt_some`).
 - **Numbering has no gaps.** A control message numbers members at consecutive indexes from the
   next free one, counting what is composed and not yet written (`controlOf_consecutive`).
+- **Numbering stays inside the roster.** Neither a control message nor an `Introduction` assigns
+  an index past the last one a one-byte roster index can name (`controlOf_lt`,
+  `introductionOf_lt`). A member whose roster is full leaves the rest unnumbered, and
+  introduces no one it could number.
+- **What a member numbers reads back as written.** A control message names each member it numbers
+  by a whole key prefix, no prefix twice, so its `Numbers` field is one the encoding carries
+  (`controlOf_wf`); a member whose prefix is taken waits for the next control message. So every
+  `Numbers` field a member composes decodes to itself (`controlOf_numbers_roundtrip`,
+  `introductionOf_numbers_roundtrip`).
 - **A new member gets the index it was promised.** An `Introduction` gives the new member the
-  index the reply promised, when nothing composed before it is still unwritten
-  (`introduction_index`). Otherwise it gives a later one (`introduction_index_pending`), which is
-  why the spec says to wait.
+  index the reply promised, when the roster has room and nothing composed before it is still
+  unwritten (`introduction_index`). Otherwise it gives a later one
+  (`introduction_index_pending`), which is why the spec says to wait.
 - **Retention and backfill.** Retention drops plaintext only once every member still read has
   acknowledged it, or the policy has expired it (`retain_spec`). A box is rewritten at most once
   an epoch (`backfill_once`).
+- **What a member remembers stays bounded.** A member records what it delivers only while a policy
+  expires received content, and an epoch without one clears the record (`deliver_received`,
+  `onEpoch_received`). A scan remembers looking only for acknowledged boxes still heard and
+  ahead of it, each once, so never more than are heard (`scan_tried`, `scan_tried_nodup`,
+  `scan_tried_length`).
 - **Names are right in the member too.** `Roster.resolve_sound`, carried to the member's rosters
-  (`GroupProofs.resolve_sound`).
+  (`GroupProofs.resolve_sound`). A member removed is no longer one a prefix can name, and what
+  stands in its places never is (`retire_forgets`, `retire_keys`).
+- **One membership hash rule.** A control message carries the member's view of the group, itself
+  and every member it reads, and an `Introduction` that view less the member it introduces
+  (`controlOf_hash`, `introductionOf_hash`). Each is fixed when the message is composed, so a
+  rewrite writes the same box. A sentinel on the wire reads as no hash.
 - **The wire formats round trip.** `Numbers` and `IntroducedAt` decode back to what was encoded
   (`decodeNumbers_encodeNumbers`, `decodeIntroducedAt_encodeIntroducedAt`). So does every
   `GroupChatMessage` this client writes (`Gcm.decode_encode`), on CBOR headers that read back as

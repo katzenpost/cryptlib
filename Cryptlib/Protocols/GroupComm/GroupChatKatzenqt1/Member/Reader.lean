@@ -31,7 +31,8 @@ structure Reader where
   /-- The first box passed unread and no longer kept; acknowledgements stop before it. -/
   lost : Option (Nat × Option Index) := none
   mode : Mode := .idle
-  /-- The `Idx64` of each acknowledged box a scan has already looked for. -/
+  /-- The `Idx64` of each acknowledged box ahead that a scan has already looked for, while it is
+  still heard: no more than there are members. -/
   tried : List Nat := []
   deriving DecidableEq, Inhabited
 
@@ -41,14 +42,24 @@ def read (r : Reader) : Reader × List Effect :=
   if r.mode ≠ .idle then (r, [])
   else ({ r with mode := .reading }, [.readBox r.stream r.readCap r.next false])
 
-/-- Acknowledged boxes a scan has not looked for yet. -/
+/-- Each of `l` once, where it first appears. -/
+def firstEach (l : List Nat) : List Nat :=
+  l.foldl (fun acc x => if acc.contains x then acc else acc ++ [x]) []
+
+/-- Acknowledged boxes ahead of here a scan has not looked for yet, each once. A walk only goes
+forward, so one behind is never found. -/
 def ahead (r : Reader) (heard : List Nat) : List Nat :=
-  heard.filter fun h => h ≠ counter r.next && !r.tried.contains h
+  firstEach (heard.filter fun h => counter r.next < h && !r.tried.contains h)
 
 def rechecks (r : Reader) : List Effect := r.kept.map fun e => .readBox r.stream r.readCap e.1 true
 
+/-- What a scan still needs to remember having looked for: boxes ahead that are still heard. -/
+def prune (r : Reader) (heard : List Nat) : Reader :=
+  { r with tried := r.tried.filter fun t => counter r.next < t && heard.contains t }
+
 /-- Recheck what was kept, then look for acknowledged boxes ahead, or probe forward from here. -/
 def scan (r : Reader) (heard : List Nat) (window : Nat) : Reader × List Effect :=
+  let r := r.prune heard
   if (r.ahead heard).isEmpty then
     ({ r with mode := .scanning }, r.rechecks ++ [.readBox r.stream r.readCap r.next false])
   else

@@ -103,7 +103,8 @@ def number (r : Rosters) (owner : Key) (index : Nat) (entry : Entry) : Rosters :
   { r with entries := r.entries.set owner ((r.entries.getD owner {}).setDefault index entry) }
 
 /-- Forget `member`'s key, keeping every place it holds, under `token`. A place named by a prefix
-is `member`'s only if the prefix names no other member known. -/
+is `member`'s only if the prefix names no other member known. `token` stands in a place, never
+among the keys a prefix can name. -/
 def retire (r : Rosters) (member token : Key) : Rosters :=
   let renamed := fun (k : Key) => if k = member then token else k
   let entries := r.entries.mapValues fun roster => roster.mapValues fun e =>
@@ -118,7 +119,7 @@ def retire (r : Rosters) (member token : Key) : Rosters :=
   { entries := entries
     started := Dict.ofList (r.started.pairs.map fun (o, (i, top)) => (renamed o, (renamed i, top)))
     introductions := Dict.ofList (r.introductions.pairs.map fun ((i, b), k) => ((renamed i, b), renamed k))
-    keys := r.keys.map renamed }
+    keys := r.keys.filter (· ≠ member) }
 
 end Rosters
 

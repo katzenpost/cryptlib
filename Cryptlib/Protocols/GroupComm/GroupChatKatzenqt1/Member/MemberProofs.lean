@@ -115,7 +115,7 @@ theorem good_read {m : Key} {r : Reader} (h : Good m r) : Good m r.read.1 := by
 
 theorem good_scan {m : Key} {r : Reader} (h : Good m r) (heard : List Nat) (w : Nat) :
     Good m (r.scan heard w).1 := by
-  unfold Reader.scan; split_ifs <;> exact h.congr rfl rfl rfl rfl rfl
+  unfold Reader.scan Reader.prune; dsimp only; split_ifs <;> exact h.congr rfl rfl rfl rfl rfl
 
 theorem good_found {m : Key} {r : Reader} (h : Good m r) (index : Index) (result : ReadResult)
     (next : Option Index) (w : Nat) : Good m (r.found index result next w).2.1 := by
@@ -178,7 +178,7 @@ theorem keeps_started (m : Key) (i : Index) : Keeps (Group.started m i) := by
 macro "frame" : tactic => `(tactic| (apply Keeps.frame; intro _; rfl))
 
 theorem takeAck_readers (s : Key) (g : Group) (a : Nat × Nat) : (g.takeAck s a).readers = g.readers := by
-  unfold Group.takeAck; split <;> (try split_ifs) <;> (try split) <;> rfl
+  unfold Group.takeAck; split <;> (try split_ifs) <;> rfl
 
 theorem keeps_followIfNew (rc : ByteArray) : Keeps (Group.followIfNew rc) := by
   unfold Group.followIfNew
@@ -282,8 +282,13 @@ theorem keeps_boxRead (s : Key) (b : Index) (res : ReadResult) (n : Option Index
 
 /-! ## Writing -/
 
-theorem keeps_written (t : Nat) (b : Index) (pt : Option Payload) : Keeps (Group.written t b pt) := by
-  unfold Group.written; apply Keeps.frame; intro g; split <;> rfl
+theorem keeps_landed (t : Nat) (b : Index) (pt : Option Payload) : Keeps (Group.landed t b pt) := by
+  unfold Group.landed; apply Keeps.frame; intro g; split <;> rfl
+
+theorem keeps_clientWrites : Keeps Group.clientWrites := by unfold Group.clientWrites; frame
+
+theorem keeps_written (t : Nat) (b : Index) (pt : Option Payload) : Keeps (Group.written t b pt) :=
+  Keeps.bind keeps_clientWrites fun _ => keeps_landed t b pt
 
 theorem keeps_write (o : Outgoing) : Keeps (Group.write o) := by
   unfold Group.write
@@ -291,7 +296,7 @@ theorem keeps_write (o : Outgoing) : Keeps (Group.write o) := by
   split
   · exact Keeps.pure _
   · apply Keeps.bind; · frame
-    intro _; exact Keeps.bind (keeps_written _ _ _) fun _ => Keeps.pure _
+    intro _; exact Keeps.bind (keeps_landed _ _ _) fun _ => Keeps.pure _
 
 theorem keeps_stage (m : Message) (p : Pending) : Keeps (Group.stage m p) := by
   unfold Group.stage
@@ -324,8 +329,12 @@ theorem keeps_introduction (name : String) (rc : ByteArray) : Keeps (Group.intro
   apply Keeps.get; intro _ _
   exact Keeps.bind (keeps_followIfNew _) fun _ => Keeps.bind keeps_release fun _ => Keeps.pure _
 
-theorem keeps_introduceNow (name : String) (rc : ByteArray) : Keeps (Group.introduceNow name rc) :=
+theorem keeps_stageIntroduction (name : String) (rc : ByteArray) :
+    Keeps (Group.stageIntroduction name rc) :=
   Keeps.bind (keeps_introduction _ _) fun _ => keeps_stage _ _
+
+theorem keeps_introduceNow (name : String) (rc : ByteArray) : Keeps (Group.introduceNow name rc) :=
+  Keeps.bind keeps_clientWrites fun _ => keeps_stageIntroduction _ _
 
 theorem keeps_flushSome : ∀ n, Keeps (Group.flushSome n)
   | 0 => by unfold Group.flushSome; exact Keeps.pure _
@@ -353,7 +362,7 @@ theorem keeps_commitInduction : Keeps Group.commitInduction := by
   apply Keeps.get; intro _ _
   split
   · exact Keeps.pure _
-  · exact Keeps.bind (keeps_introduceNow _ _) fun o => Keeps.bind (keeps_write o) fun _ =>
+  · exact Keeps.bind (keeps_stageIntroduction _ _) fun o => Keeps.bind (keeps_write o) fun _ =>
       Keeps.bind keeps_flush fun _ => Keeps.pure _
 
 theorem keeps_progress : Keeps Group.progress := by
@@ -461,6 +470,7 @@ theorem keeps_stageAll : ∀ l, Keeps (Group.stageAll l)
 
 theorem compose_keeps (c : Option ByteArray) : Keeps (Group.compose c) := by
   unfold Group.compose
+  apply Keeps.bind keeps_clientWrites; intro _
   apply Keeps.get; intro _ _
   dsimp only
   split
@@ -483,6 +493,26 @@ theorem introduceNow_keeps (name : String) (rc : ByteArray) : Keeps (Group.intro
 theorem cancelInduction_keeps : Keeps Group.cancelInduction := keeps_release
 
 theorem remove_keeps (m : Key) : Keeps (Group.remove m) := keeps_remove m
+
+/-! ## A member whose client writes -/
+
+theorem flushSome_client (g : Group) (h : g.allocates = false) :
+    ∀ n, (Group.flushSome n).run g = ([], g)
+  | 0 => by unfold Group.flushSome; rfl
+  | n + 1 => by
+    unfold Group.flushSome
+    simp [h, StateT.run, get, getThe, MonadStateOf.get, StateT.get, bind, StateT.bind, pure, StateT.pure]
+
+/-- Once its client writes for it, a member writes nothing from its own pool and derives no boxes to:
+those would be boxes its client hands out too. -/
+theorem flush_client (g : Group) (h : g.allocates = false) : Group.flush.run g = ([], g) := by
+  have hf : Group.flushSome g.pool.length g = ([], g) := flushSome_client g h _
+  unfold Group.flush
+  simp [h, hf, StateT.run, get, getThe, MonadStateOf.get, StateT.get, bind, StateT.bind, pure,
+    StateT.pure]
+
+/-- And it never takes writing back. -/
+theorem clientWrites_allocates (g : Group) : (Group.clientWrites.run g).2.allocates = false := rfl
 
 /-! ## Starting -/
 

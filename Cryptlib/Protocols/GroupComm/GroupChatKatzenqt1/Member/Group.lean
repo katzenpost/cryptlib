@@ -7,6 +7,7 @@ import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Rosters
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Reader
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.SentBox
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Ledger
+import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Membership
 
 /-! # One member of one group chat
 
@@ -67,7 +68,12 @@ structure Group where
   joinedThrough : Option Key := none
   /-- `IntroducedAt` read before the `Introduction` it names. -/
   awaitingStart : Dict Key Index := {}
-  /-- Content delivered, by sender and box, and the epoch it came. -/
+  /-- Whether this member picks the boxes it writes, as it does driven by events. A client that
+  writes for itself takes that over with its first call to write, and from then on the member
+  writes nothing by itself: its pool would name boxes the client hands out too. -/
+  allocates : Bool := true
+  /-- Content delivered, by sender and box, and the epoch it came, while the policy keeps received
+  content only for a time. -/
   received : Dict (Key × Index) Nat := {}
   deriving DecidableEq, Inhabited
 
@@ -139,6 +145,11 @@ def scanStream (stream : Key) : GM (List Effect) := do
     setReader r
     pure es
 
+/-- Our view of the group, as a message we make ourselves says it: ourselves and every member we
+read, but for `leaving`. -/
+def membership (g : Group) (leaving : Option Key := none) : ByteArray :=
+  membershipHash ((g.readCap :: g.readers.values.map (·.readCap)).filter fun c => some (keyOf c) ≠ leaving)
+
 /-- Whether `member` is in our roster, or will be once what we have composed is written. -/
 def numbered (g : Group) (member : Key) : Bool :=
   (g.rosters.indexOf g.me member).isSome ||
@@ -207,7 +218,9 @@ def deliver (sender : Key) (index : Index) (message : Message) : GM (List Effect
   match message.content with
   | none => pure []
   | some content =>
-    modify fun g => { g with received := g.received.set (sender, index) g.epoch }
+    modify fun g => { g with
+      received := if g.policy.keepReceived.isNone then g.received
+        else g.received.set (sender, index) g.epoch }
     pure [.deliver sender index content]
 
 def ingestIntroduction (sender : Key) (index : Index) (message : Message) : GM Unit :=
@@ -250,25 +263,34 @@ def boxRead (stream : Key) (index : Index) (result : ReadResult) (next : Option 
 def size (g : Group) : Nat :=
   (g.pending.values.flatMap (·.numbers)).foldl (fun m (n, _) => max m (n + 1)) (g.rosters.size g.me)
 
-def owesControl (g : Group) : Bool :=
-  !g.ledger.holding &&
-    (g.introducedAt.isSome || g.unnumbered.any fun a => g.rosters.introductions.contains a)
+/-- Whether our roster has an index left for one more member. Without one an `Introduction`
+numbers nobody, and its member cannot join. -/
+def room (g : Group) : Bool := g.size < rosterMax
 
-/-- Number every member whose `Introduction` we have read and whose introducer we have numbered,
-from the next index on: the message, what it does once written, and who is left unnumbered. -/
+/-- Number every member whose `Introduction` we have read, from the next index on while our roster
+has room, once per key prefix so that the `Numbers` field can name each: the message, what it does
+once written, and who is left unnumbered. One whose prefix is taken waits for the next control
+message. -/
 def controlStep (g : Group) (acc : Nat × Numbers × List (Nat × Option At) × List At) (a : At) :
     Nat × Numbers × List (Nat × Option At) × List At :=
   match g.rosters.introductions.get? a with
   | none => acc
-  | some new => (acc.1 + 1, acc.2.1 ++ [(acc.1, some (prefixOf new))],
+  | some new =>
+    if rosterMax ≤ acc.1 || (prefixOf new).size ≠ prefixSize ||
+        acc.2.1.any (·.2 = some (prefixOf new)) then acc
+    else (acc.1 + 1, acc.2.1 ++ [(acc.1, some (prefixOf new))],
       acc.2.2.1 ++ [(acc.1, some a)], acc.2.2.2.eraseP (· = a))
 
 def controlOf (g : Group) : Message × Pending × List At :=
   let r := g.unnumbered.foldl g.controlStep (g.size, [], [], g.unnumbered)
-  ({ numbers := r.2.1, introducedAt := g.introducedAt }, { numbers := r.2.2.1, control := true }, r.2.2.2)
+  ({ numbers := r.2.1, introducedAt := g.introducedAt, membershipHash := some g.membership },
+    { numbers := r.2.2.1, control := true }, r.2.2.2)
 
-/-- Number every member whose `Introduction` we have read and whose introducer we have numbered,
-and say where we were introduced. -/
+/-- A control message is owed when it would number someone or say where we were introduced. -/
+def owesControl (g : Group) : Bool :=
+  !g.ledger.holding && (g.introducedAt.isSome || !g.controlOf.1.numbers.isEmpty)
+
+/-- Number whom a control message can, and say where we were introduced. -/
 def control : GM (Message × Pending) := do
   let g ← get
   let (m, p, unnumbered) := g.controlOf
@@ -285,8 +307,9 @@ def hold : GM Unit := modify fun g =>
 already, and what it does once written. -/
 def introductionOf (g : Group) (name : String) (readCap : ByteArray) : Message × Pending :=
   let new := keyOf readCap
-  let assigned : List (Nat × Option At) := if g.numbered new then [] else [(g.size, none)]
-  ({ introduction := some ⟨name, readCap⟩, numbers := assigned.map fun (n, _) => (n, none) },
+  let assigned : List (Nat × Option At) := if g.numbered new || !g.room then [] else [(g.size, none)]
+  ({ introduction := some ⟨name, readCap⟩, numbers := assigned.map fun (n, _) => (n, none),
+     membershipHash := some (g.membership (some new)) },
     { numbers := assigned, introduced := some new, control := true })
 
 def introduction (name : String) (readCap : ByteArray) : GM (Message × Pending) := do
@@ -322,8 +345,9 @@ def stage (message : Message) (pending : Pending) : GM Outgoing := do
   modify fun g => { g with tokens := g.tokens + 1, pending := g.pending.set (g.tokens + 1) pending }
   pure ⟨(← get).tokens, message⟩
 
-/-- The message `token` landed in the box `index` of our stream. -/
-def written (token : Nat) (index : Index) (plaintext : Option Payload) : GM Unit := modify fun g =>
+/-- The message `token` landed in the box `index` of our stream, which we picked or our client
+did. -/
+def landed (token : Nat) (index : Index) (plaintext : Option Payload) : GM Unit := modify fun g =>
   match g.pending.get? token with
   | none => g
   | some p =>
@@ -344,7 +368,7 @@ def write (o : Outgoing) : GM (List Effect) := do
   | [] => pure []
   | index :: rest =>
     modify fun g => { g with pool := rest }
-    written o.token index (some (.message o.message))
+    landed o.token index (some (.message o.message))
     pure [.writeBox index (.message o.message)]
 
 /-- The message to send next: control if owed, else the oldest content. -/
@@ -360,7 +384,7 @@ def flushSome : Nat → GM (List Effect)
   | 0 => pure []
   | n + 1 => do
     let g ← get
-    if g.pool.isEmpty || !(g.owesControl || !g.outbox.isEmpty) then pure []
+    if !g.allocates || g.pool.isEmpty || !(g.owesControl || !g.outbox.isEmpty) then pure []
     else
       let (m, p) ← next
       let (m, p) ← withAcks m p
@@ -370,7 +394,7 @@ def flushSome : Nat → GM (List Effect)
 def flush : GM (List Effect) := do
   let effects ← flushSome (← get).pool.length
   let g ← get
-  if g.pool.length < 2 && !g.deriving_ then
+  if g.allocates && g.pool.length < 2 && !g.deriving_ then
     set { g with deriving_ := true }
     pure (effects ++ [.deriveIndexes g.me g.tip poolSize])
   else pure effects
@@ -405,7 +429,7 @@ def reply (g : Group) (ownStart : Index) : JoinReply :=
     introducer := place.getD g.me 0
     newcomer := size }
 
-def introduceNow (name : String) (readCap : ByteArray) : GM Outgoing := do
+def stageIntroduction (name : String) (readCap : ByteArray) : GM Outgoing := do
   let (m, p) ← introduction name readCap
   stage m p
 
@@ -415,7 +439,7 @@ def commitInduction : GM (List Effect) := do
   | none => pure []
   | some (name, readCap) =>
     let r := g.reply (g.pool.headD .empty)
-    let es ← write (← introduceNow name readCap)
+    let es ← write (← stageIntroduction name readCap)
     pure (es ++ [.sendJoinReply readCap r] ++ (← flush))
 
 /-- Do whatever has become possible: write what is owed, finish catching up, commit an
@@ -426,7 +450,8 @@ def holdIfSettled : GM Unit := do
 
 def commitIfReady : GM (List Effect) := do
   let g ← get
-  if g.ledger.induction = .inducting && g.ledger.commit && !g.pool.isEmpty then commitInduction
+  if g.ledger.induction = .inducting && g.ledger.commit && g.allocates && !g.pool.isEmpty then
+    commitInduction
   else pure []
 
 def progress : GM (List Effect) := do
@@ -469,7 +494,9 @@ def onEpoch (epoch : Nat) : GM (List Effect) := do
   let expired : List (Key × Index) := match g.policy.keepReceived with
     | some keep => (g.received.pairs.filter fun (_, at_) => at_ + keep ≤ epoch).map (·.1)
     | none => []
-  set { g with received := g.received.filter fun k _ => !expired.contains k }
+  set { g with
+    received := if g.policy.keepReceived.isNone then {}
+      else g.received.filter fun k _ => !expired.contains k }
   let effects := expired.map fun (sender, index) => Effect.expire sender index
   let g ← get
   let (sent, backfill) := g.sent.backfill epoch g.everyoneAcked
@@ -535,9 +562,18 @@ def stageAll : List (Message × Pending) → GM (List Outgoing)
     let o ← stage m p
     pure (o :: (← stageAll rest))
 
+/-- The client writes for this member from now on. -/
+def clientWrites : GM Unit := modify fun g => { g with allocates := false }
+
+/-- The message `token` landed in the box `index` of our stream. -/
+def written (token : Nat) (index : Index) (plaintext : Option Payload) : GM Unit := do
+  clientWrites
+  landed token index plaintext
+
 /-- The messages to send now, in order: a control message if one is owed, then `content`. Each
 takes effect when `written`. -/
 def compose (content : Option ByteArray := none) : GM (List Outgoing) := do
+  clientWrites
   let owed : List (Message × Pending) ← if (← get).owesControl then (fun x => [x]) <$> control else pure []
   stageAll (owed ++ content.toList.map fun c => ({ content := some c }, Pending.mk [] none {} false))
 
@@ -563,6 +599,11 @@ def beginInduction : GM (List Outgoing) := do
   let out ← compose
   hold
   pure out
+
+/-- Commit the induction under way: the `Introduction` of the member read by `readCap`, to send. -/
+def introduceNow (name : String) (readCap : ByteArray) : GM Outgoing := do
+  clientWrites
+  stageIntroduction name readCap
 
 def cancelInduction : GM Unit := release
 
