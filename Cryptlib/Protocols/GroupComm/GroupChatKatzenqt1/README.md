@@ -115,6 +115,11 @@ Proved of `Member/`, the model katzenqt's traces are replayed through.
   an index past the last one a one-byte roster index can name (`controlOf_lt`,
   `introductionOf_lt`). A member whose roster is full leaves the rest unnumbered, and
   introduces no one it could number.
+- **What a member numbers reads back as written.** A control message names each member it numbers
+  by a whole key prefix, no prefix twice, so its `Numbers` field is one the encoding carries
+  (`controlOf_wf`); a member whose prefix is taken waits for the next control message. So every
+  `Numbers` field a member composes decodes to itself (`controlOf_numbers_roundtrip`,
+  `introductionOf_numbers_roundtrip`).
 - **A new member gets the index it was promised.** An `Introduction` gives the new member the
   index the reply promised, when the roster has room and nothing composed before it is still
   unwritten (`introduction_index`). Otherwise it gives a later one
