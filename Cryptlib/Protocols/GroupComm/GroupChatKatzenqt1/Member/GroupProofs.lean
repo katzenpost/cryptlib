@@ -173,15 +173,15 @@ theorem retire_keys (r : Rosters) (member token : Key) :
 
 @[simp] theorem takeAck_sent (sender : Key) (g : Group) (a : Nat × Nat) :
     (g.takeAck sender a).sent = g.sent := by
-  unfold Group.takeAck; split <;> (try split_ifs) <;> (try split) <;> rfl
+  unfold Group.takeAck; split <;> (try split_ifs) <;> rfl
 
 @[simp] theorem takeAck_rosters (sender : Key) (g : Group) (a : Nat × Nat) :
     (g.takeAck sender a).rosters = g.rosters := by
-  unfold Group.takeAck; split <;> (try split_ifs) <;> (try split) <;> rfl
+  unfold Group.takeAck; split <;> (try split_ifs) <;> rfl
 
 @[simp] theorem takeAck_readCap (sender : Key) (g : Group) (a : Nat × Nat) :
     (g.takeAck sender a).readCap = g.readCap := by
-  unfold Group.takeAck; split <;> (try split_ifs) <;> (try split) <;> rfl
+  unfold Group.takeAck; split <;> (try split_ifs) <;> rfl
 
 theorem takeAck_credit (sender : Key) (g : Group) (a : Nat × Nat) (m : Key) :
     (g.takeAck sender a).ledger.ackedBy.get? m = g.ledger.ackedBy.get? m ∨
