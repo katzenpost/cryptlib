@@ -103,6 +103,10 @@ Proved of `Member/`, the model katzenqt's traces are replayed through.
   (`MemberProofs.acks_sent_safe`). The calls include the client changing its retention policy
   between them, as a user's disappearing messages setting does. The one assumption is that a walk the client reports kept no
   more boxes than it stepped past (`Event.WF`).
+- **A member whose client writes writes nothing itself.** Once a client writes for a member, the
+  member writes nothing from its own pool and derives no boxes to write, whatever events it is
+  handed: those would name boxes the client hands out too (`flush_client`,
+  `clientWrites_allocates`).
 - **Acknowledgements of our own stream are checked.** One counts only for a box the Sent-box
   check finds by its `Idx64` (`takeAcks_credit`, `checkAt_some`).
 - **Numbering has no gaps.** A control message numbers members at consecutive indexes from the

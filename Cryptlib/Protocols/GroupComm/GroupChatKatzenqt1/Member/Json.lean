@@ -131,7 +131,7 @@ def group (g : Group) : Json := Json.mkObj [
   ("introduced_at", opt (fun r => Json.mkObj [("introducer", nat r.introducer), ("index", hex r.index)])
     g.introducedAt),
   ("joined_through", opt hex g.joinedThrough), ("awaiting_start", pairs hex hex g.awaitingStart),
-  ("received", pairs at_ nat g.received)]
+  ("allocates", toJson g.allocates), ("received", pairs at_ nat g.received)]
 
 /-! ## Reading -/
 
