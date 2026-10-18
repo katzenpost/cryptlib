@@ -8,6 +8,7 @@ import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Roster
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Group
 import Cryptlib.Protocols.GroupComm.Common.DictProofs
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.ReaderProofs
+import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.WireProofs
 
 /-! # What a member guarantees
 
@@ -306,10 +307,89 @@ theorem controlOf_lt_fold (g : Group) :
     · exact h
     · split
       · exact h
-      · intro x hx
+      · next hc =>
+        have : ¬ rosterMax ≤ acc.1 := fun h' => hc (by simp [h'])
+        intro x hx
         rcases List.mem_append.1 hx with hx | hx
         · exact h x hx
         · simp only [List.mem_singleton] at hx; subst hx; dsimp only; omega
+
+theorem consecutive_append (first : Nat) (ps : List ByteArray) (p : ByteArray) :
+    consecutive first (ps ++ [p]) = consecutive first ps ++ [(first + ps.length, some p)] := by
+  simp [consecutive, List.zipIdx_append]
+
+/-- What a control message numbers so far: members at consecutive indexes from the next free one,
+each named by a whole prefix, no prefix twice, none past the roster's end. -/
+def NumbersSoFar (g : Group) (acc : Nat × Numbers × List (Nat × Option At) × List At) : Prop :=
+  ∃ ps, acc.2.1 = consecutive g.size ps ∧ acc.1 = g.size + ps.length ∧
+    (∀ p ∈ ps, p.size = prefixSize) ∧ ps.Nodup ∧ (ps ≠ [] → acc.1 ≤ rosterMax)
+
+theorem controlOf_wf_fold (g : Group) :
+    ∀ (as : List At) (acc : Nat × Numbers × List (Nat × Option At) × List At),
+      NumbersSoFar g acc → NumbersSoFar g (as.foldl g.controlStep acc)
+  | [], _, h => h
+  | a :: as, acc, h => by
+    simp only [List.foldl_cons]
+    apply controlOf_wf_fold g as
+    unfold Group.controlStep
+    split
+    · exact h
+    · split
+      · exact h
+      · next new _ hc =>
+        obtain ⟨ps, hn, h1, hsize, hnodup, _⟩ := h
+        simp only [Bool.or_eq_true, decide_eq_true_eq, not_or, List.any_eq_true] at hc
+        obtain ⟨⟨hroom, hlen⟩, hfresh⟩ := hc
+        refine ⟨ps ++ [prefixOf new], ?_, ?_, ?_, ?_, fun _ => ?_⟩
+        · rw [consecutive_append, hn, h1]
+        · simp [h1]; omega
+        · intro p hp
+          rcases List.mem_append.1 hp with hp | hp
+          · exact hsize p hp
+          · simp only [List.mem_singleton] at hp; subst hp; simpa using hlen
+        · refine List.nodup_append.2 ⟨hnodup, List.nodup_singleton _, fun x hx y hy hxy => ?_⟩
+          simp only [List.mem_singleton] at hy
+          have hmap : (consecutive g.size ps).map (·.2) = ps.map some := by
+            conv_rhs => rw [← List.zipIdx_map_fst 0 ps]
+            simp only [consecutive, List.map_map, Function.comp_def]
+          have hsome : some (prefixOf new) ∈ (consecutive g.size ps).map (·.2) := by
+            rw [hmap, ← hy, ← hxy]; exact List.mem_map_of_mem hx
+          obtain ⟨z, hz, hz2⟩ := List.mem_map.1 hsome
+          exact hfresh ⟨z, hn ▸ hz, hz2⟩
+        · simp; omega
+
+/-- A control message's `Numbers` field is one the encoding carries, when it numbers anyone. -/
+theorem controlOf_wf (g : Group) : g.controlOf.1.numbers = [] ∨ NumbersWF g.controlOf.1.numbers := by
+  obtain ⟨ps, hn, h1, hs, hnd, hle⟩ := controlOf_wf_fold g g.unnumbered (g.size, [], [], g.unnumbered)
+    ⟨[], rfl, by simp, by simp, List.nodup_nil, by simp⟩
+  have hn' : g.controlOf.1.numbers = consecutive g.size ps := hn
+  by_cases hps : ps = []
+  · left; rw [hn', hps]; rfl
+  · right
+    refine Or.inr ⟨g.size, ps, hn', hps, hs, hnd, ?_⟩
+    have := hle hps
+    simp only [rosterMax] at this
+    omega
+
+/-- Every `Numbers` field a member composes reads back as it wrote it: a control message's, and an
+`Introduction`'s. -/
+theorem controlOf_numbers_roundtrip (g : Group) :
+    decodeNumbers (encodeNumbers g.controlOf.1.numbers) = g.controlOf.1.numbers := by
+  rcases controlOf_wf g with h | h
+  · rw [h]; rfl
+  · exact decodeNumbers_encodeNumbers h
+
+theorem introductionOf_numbers_roundtrip (g : Group) (name : String) (readCap : ByteArray) :
+    decodeNumbers (encodeNumbers (g.introductionOf name readCap).1.numbers) =
+      (g.introductionOf name readCap).1.numbers := by
+  unfold Group.introductionOf
+  by_cases h : g.numbered (keyOf readCap) || !g.room
+  · simp [h]; rfl
+  · simp only [Bool.or_eq_true, Bool.not_eq_true', not_or, Bool.not_eq_false] at h
+    simp only [h.1, h.2, Bool.false_or, Bool.not_true, Bool.false_eq_true, ite_false, List.map_cons,
+      List.map_nil]
+    have hr : g.size < 256 := by have := h.2; unfold Group.room rosterMax at this; simpa using this
+    exact decodeNumbers_encodeNumbers (Or.inl ⟨g.size, hr, rfl⟩)
 
 /-- A control message numbers members at consecutive indexes from the next free one, counting
 composed messages, and its pending numbering assigns the same ones. -/

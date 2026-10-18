@@ -267,19 +267,17 @@ def size (g : Group) : Nat :=
 numbers nobody, and its member cannot join. -/
 def room (g : Group) : Bool := g.size < rosterMax
 
-def owesControl (g : Group) : Bool :=
-  !g.ledger.holding &&
-    (g.introducedAt.isSome || g.room && g.unnumbered.any fun a => g.rosters.introductions.contains a)
-
-/-- Number every member whose `Introduction` we have read and whose introducer we have numbered,
-from the next index on while our roster has room: the message, what it does once written, and who
-is left unnumbered. -/
+/-- Number every member whose `Introduction` we have read, from the next index on while our roster
+has room, once per key prefix so that the `Numbers` field can name each: the message, what it does
+once written, and who is left unnumbered. One whose prefix is taken waits for the next control
+message. -/
 def controlStep (g : Group) (acc : Nat × Numbers × List (Nat × Option At) × List At) (a : At) :
     Nat × Numbers × List (Nat × Option At) × List At :=
   match g.rosters.introductions.get? a with
   | none => acc
   | some new =>
-    if rosterMax ≤ acc.1 then acc
+    if rosterMax ≤ acc.1 || (prefixOf new).size ≠ prefixSize ||
+        acc.2.1.any (·.2 = some (prefixOf new)) then acc
     else (acc.1 + 1, acc.2.1 ++ [(acc.1, some (prefixOf new))],
       acc.2.2.1 ++ [(acc.1, some a)], acc.2.2.2.eraseP (· = a))
 
@@ -288,8 +286,11 @@ def controlOf (g : Group) : Message × Pending × List At :=
   ({ numbers := r.2.1, introducedAt := g.introducedAt, membershipHash := some g.membership },
     { numbers := r.2.2.1, control := true }, r.2.2.2)
 
-/-- Number every member whose `Introduction` we have read and whose introducer we have numbered,
-and say where we were introduced. -/
+/-- A control message is owed when it would number someone or say where we were introduced. -/
+def owesControl (g : Group) : Bool :=
+  !g.ledger.holding && (g.introducedAt.isSome || !g.controlOf.1.numbers.isEmpty)
+
+/-- Number whom a control message can, and say where we were introduced. -/
 def control : GM (Message × Pending) := do
   let g ← get
   let (m, p, unnumbered) := g.controlOf
