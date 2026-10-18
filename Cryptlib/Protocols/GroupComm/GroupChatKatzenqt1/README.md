@@ -107,10 +107,14 @@ Proved of `Member/`, the model katzenqt's traces are replayed through.
   check finds by its `Idx64` (`takeAcks_credit`, `checkAt_some`).
 - **Numbering has no gaps.** A control message numbers members at consecutive indexes from the
   next free one, counting what is composed and not yet written (`controlOf_consecutive`).
+- **Numbering stays inside the roster.** Neither a control message nor an `Introduction` assigns
+  an index past the last one a one-byte roster index can name (`controlOf_lt`,
+  `introductionOf_lt`). A member whose roster is full leaves the rest unnumbered, and
+  introduces no one it could number.
 - **A new member gets the index it was promised.** An `Introduction` gives the new member the
-  index the reply promised, when nothing composed before it is still unwritten
-  (`introduction_index`). Otherwise it gives a later one (`introduction_index_pending`), which is
-  why the spec says to wait.
+  index the reply promised, when the roster has room and nothing composed before it is still
+  unwritten (`introduction_index`). Otherwise it gives a later one
+  (`introduction_index_pending`), which is why the spec says to wait.
 - **Retention and backfill.** Retention drops plaintext only once every member still read has
   acknowledged it, or the policy has expired it (`retain_spec`). A box is rewritten at most once
   an epoch (`backfill_once`).

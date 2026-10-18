@@ -250,17 +250,24 @@ def boxRead (stream : Key) (index : Index) (result : ReadResult) (next : Option 
 def size (g : Group) : Nat :=
   (g.pending.values.flatMap (·.numbers)).foldl (fun m (n, _) => max m (n + 1)) (g.rosters.size g.me)
 
+/-- Whether our roster has an index left for one more member. Without one an `Introduction`
+numbers nobody, and its member cannot join. -/
+def room (g : Group) : Bool := g.size < rosterMax
+
 def owesControl (g : Group) : Bool :=
   !g.ledger.holding &&
-    (g.introducedAt.isSome || g.unnumbered.any fun a => g.rosters.introductions.contains a)
+    (g.introducedAt.isSome || g.room && g.unnumbered.any fun a => g.rosters.introductions.contains a)
 
 /-- Number every member whose `Introduction` we have read and whose introducer we have numbered,
-from the next index on: the message, what it does once written, and who is left unnumbered. -/
+from the next index on while our roster has room: the message, what it does once written, and who
+is left unnumbered. -/
 def controlStep (g : Group) (acc : Nat × Numbers × List (Nat × Option At) × List At) (a : At) :
     Nat × Numbers × List (Nat × Option At) × List At :=
   match g.rosters.introductions.get? a with
   | none => acc
-  | some new => (acc.1 + 1, acc.2.1 ++ [(acc.1, some (prefixOf new))],
+  | some new =>
+    if rosterMax ≤ acc.1 then acc
+    else (acc.1 + 1, acc.2.1 ++ [(acc.1, some (prefixOf new))],
       acc.2.2.1 ++ [(acc.1, some a)], acc.2.2.2.eraseP (· = a))
 
 def controlOf (g : Group) : Message × Pending × List At :=
@@ -285,7 +292,7 @@ def hold : GM Unit := modify fun g =>
 already, and what it does once written. -/
 def introductionOf (g : Group) (name : String) (readCap : ByteArray) : Message × Pending :=
   let new := keyOf readCap
-  let assigned : List (Nat × Option At) := if g.numbered new then [] else [(g.size, none)]
+  let assigned : List (Nat × Option At) := if g.numbered new || !g.room then [] else [(g.size, none)]
   ({ introduction := some ⟨name, readCap⟩, numbers := assigned.map fun (n, _) => (n, none) },
     { numbers := assigned, introduced := some new, control := true })
 
