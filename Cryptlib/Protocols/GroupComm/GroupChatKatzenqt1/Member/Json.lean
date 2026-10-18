@@ -39,7 +39,8 @@ def message (m : Message) : Json := Json.mkObj [
     m.introduction),
   ("numbers", arr (m.numbers.map fun (k, p) => arr [nat k, opt hex p])),
   ("introduced_at", opt introRef m.introducedAt),
-  ("acks", arr (m.acks.map fun (i, v) => arr [nat i, nat v]))]
+  ("acks", arr (m.acks.map fun (i, v) => arr [nat i, nat v])),
+  ("membership_hash", opt hex m.membershipHash)]
 
 /-- A message decoded, or bytes the member never looks into, as `{"bytes": hex}`. -/
 def payload : Payload → Json
@@ -176,7 +177,8 @@ def readMessage (j : Json) : Parse Message := do
       pure ⟨← (← field i "name").getStr?, ← bytes (← field i "read_cap")⟩) (← field j "introduction")
     numbers := ← list (pair num (optional bytes)) (← field j "numbers")
     introducedAt := ← optional readIntroRef (← field j "introduced_at")
-    acks := ← list (pair num num) (← field j "acks") }
+    acks := ← list (pair num num) (← field j "acks")
+    membershipHash := ← optional bytes (← field j "membership_hash") }
 
 def readPayload (j : Json) : Parse Payload :=
   match j.getObjVal? "bytes" with

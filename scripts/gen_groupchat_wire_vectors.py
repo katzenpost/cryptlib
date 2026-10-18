@@ -42,6 +42,7 @@ def message_json(m: "wire.Message | None") -> "dict | None":
             if m.introduced_at is not None else None
         ),
         "acks": [[i, v] for i, v in sorted(m.acks.items())],
+        "membership_hash": m.membership_hash.hex() if m.membership_hash is not None else None,
     }
 
 
@@ -97,6 +98,19 @@ read_case("null-fields", cbor2.dumps(
 read_case("newer-version", cbor2.dumps({"version": 4, "membership_hash": hash_, "text": "hi"}))
 read_case("short-hash", cbor2.dumps({"version": 3, "membership_hash": bytes(31), "text": "hi"}))
 read_case("not-a-map", cbor2.dumps([1, 2, 3]))
+read_case("control-stamped", gcm(
+    version=3, membership_hash=hash_, msg_type=models.GroupChatTypeEnum.CONTROL,
+    numbers=wire.encode_numbers(((3, caps[0][:8]),)),
+))
+read_case("introduction-stamped", gcm(
+    version=3, membership_hash=hash_, msg_type=models.GroupChatTypeEnum.INTRODUCTION,
+    introduction=models.GroupChatPleaseAdd(display_name="carol", read_cap=caps[3]),
+    numbers=wire.encode_numbers(((5, None),)),
+))
+read_case("control-legacy-sentinel", gcm(
+    version=3, membership_hash=b"TODO" * 8, msg_type=models.GroupChatTypeEnum.CONTROL,
+    numbers=wire.encode_numbers(((3, caps[0][:8]),)),
+))
 read_case("garbage", b"\xff\x00")
 read_case("bad-acks", gcm(version=3, membership_hash=hash_, text="x", acks=b"\x05\x01"))
 
@@ -109,6 +123,10 @@ for name, m in (
         introduced_at=wire.IntroRef(0, rb(104)), acks={1: 9, 3: 2**40})),
     ("content-acks", wire.Message(
         content=gcm(version=3, membership_hash=hash_, text="again"), acks={0: 1})),
+    ("control-stamped", wire.Message(numbers=((0, caps[0][:8]),), membership_hash=hash_)),
+    ("introduction-stamped", wire.Message(
+        introduction=wire.Introduction("dave", caps[3]), numbers=((3, None),),
+        membership_hash=models.canonical_membership_hash(caps[:3]))),
 ):
     written.append({"name": name, "message": message_json(m),
                     "box": (b"F" + acks.CODEC.encode(m)).hex()})
