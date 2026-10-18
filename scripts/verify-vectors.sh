@@ -134,6 +134,38 @@ check_acks() {
 }
 check_acks || ok=0
 
+# groupchat_wire_vectors.json and the traces are generated with katzenqt's own Python, from its
+# virtualenv: regenerate both and compare.
+check_generated() {
+  local python="$KATZENQT_DIR/.venv/bin/python"
+  if [ ! -x "$python" ]; then
+    printf '  SKIP  %s not found -- the group chat vectors need katzenqt'"'"'s virtualenv\n' "$python"
+    return 1
+  fi
+  local a b traces status=0
+  a=$(sha256_of testdata/groupchat_wire_vectors.json)
+  b=$("$python" -I scripts/gen_groupchat_wire_vectors.py "$KATZENQT_DIR" | sha256sum | cut -d' ' -f1)
+  if [ "$a" = "$b" ]; then
+    printf '  MATCH     testdata/groupchat_wire_vectors.json\n'
+  else
+    printf '  MISMATCH  testdata/groupchat_wire_vectors.json\n'
+    printf '            Cryptlib: %s\n            regenerated: %s\n' "$a" "$b"
+    status=1
+  fi
+  traces=$(mktemp -d)
+  if (cd "$KATZENQT_DIR" && "$python" tools/groupchat_traces.py "$traces" 0 >/dev/null) &&
+    diff -rq "$traces" testdata/groupchat_traces >/dev/null; then
+    printf '  MATCH     testdata/groupchat_traces/\n'
+  else
+    printf '  MISMATCH  testdata/groupchat_traces/\n'
+    diff -rq "$traces" testdata/groupchat_traces | sed 's/^/            /'
+    status=1
+  fi
+  rm -rf "$traces"
+  return $status
+}
+check_generated || ok=0
+
 # katzenqt's group chat scenarios, which the Lean member runs as katzenqt's simulator does.
 katzenqt_pairs=()
 for f in testdata/groupchat_scenarios/*.txt; do
