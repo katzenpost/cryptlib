@@ -7,6 +7,7 @@ import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Rosters
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Reader
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.SentBox
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Ledger
+import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Membership
 
 /-! # One member of one group chat
 
@@ -144,6 +145,11 @@ def scanStream (stream : Key) : GM (List Effect) := do
     setReader r
     pure es
 
+/-- Our view of the group, as a message we make ourselves says it: ourselves and every member we
+read, but for `leaving`. -/
+def membership (g : Group) (leaving : Option Key := none) : ByteArray :=
+  membershipHash ((g.readCap :: g.readers.values.map (·.readCap)).filter fun c => some (keyOf c) ≠ leaving)
+
 /-- Whether `member` is in our roster, or will be once what we have composed is written. -/
 def numbered (g : Group) (member : Key) : Bool :=
   (g.rosters.indexOf g.me member).isSome ||
@@ -279,7 +285,8 @@ def controlStep (g : Group) (acc : Nat × Numbers × List (Nat × Option At) × 
 
 def controlOf (g : Group) : Message × Pending × List At :=
   let r := g.unnumbered.foldl g.controlStep (g.size, [], [], g.unnumbered)
-  ({ numbers := r.2.1, introducedAt := g.introducedAt }, { numbers := r.2.2.1, control := true }, r.2.2.2)
+  ({ numbers := r.2.1, introducedAt := g.introducedAt, membershipHash := some g.membership },
+    { numbers := r.2.2.1, control := true }, r.2.2.2)
 
 /-- Number every member whose `Introduction` we have read and whose introducer we have numbered,
 and say where we were introduced. -/
@@ -300,7 +307,8 @@ already, and what it does once written. -/
 def introductionOf (g : Group) (name : String) (readCap : ByteArray) : Message × Pending :=
   let new := keyOf readCap
   let assigned : List (Nat × Option At) := if g.numbered new || !g.room then [] else [(g.size, none)]
-  ({ introduction := some ⟨name, readCap⟩, numbers := assigned.map fun (n, _) => (n, none) },
+  ({ introduction := some ⟨name, readCap⟩, numbers := assigned.map fun (n, _) => (n, none),
+     membershipHash := some (g.membership (some new)) },
     { numbers := assigned, introduced := some new, control := true })
 
 def introduction (name : String) (readCap : ByteArray) : GM (Message × Pending) := do

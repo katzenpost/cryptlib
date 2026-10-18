@@ -130,6 +130,10 @@ Proved of `Member/`, the model katzenqt's traces are replayed through.
 - **Names are right in the member too.** `Roster.resolve_sound`, carried to the member's rosters
   (`GroupProofs.resolve_sound`). A member removed is no longer one a prefix can name, and what
   stands in its places never is (`retire_forgets`, `retire_keys`).
+- **One membership hash rule.** A control message carries the member's view of the group, itself
+  and every member it reads, and an `Introduction` that view less the member it introduces
+  (`controlOf_hash`, `introductionOf_hash`). Each is fixed when the message is composed, so a
+  rewrite writes the same box. A sentinel on the wire reads as no hash.
 - **The wire formats round trip.** `Numbers` and `IntroducedAt` decode back to what was encoded
   (`decodeNumbers_encodeNumbers`, `decodeIntroducedAt_encodeIntroducedAt`). So does every
   `GroupChatMessage` this client writes (`Gcm.decode_encode`), on CBOR headers that read back as

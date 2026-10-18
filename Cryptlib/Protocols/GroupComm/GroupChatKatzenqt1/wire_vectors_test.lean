@@ -49,7 +49,8 @@ def readMessage (j : Json) : Except String Cryptlib.Protocols.GroupComm.GroupCha
   let acks ← (← (← j.getObjVal? "acks").getArr?).toList.mapM fun a => do
     let p ← a.getArr?
     pure (← p[0]!.getNat?, ← p[1]!.getNat?)
-  pure { content, introduction, numbers, introducedAt, acks }
+  let membershipHash ← opt j "membership_hash" fun v => do hex (← v.getStr?)
+  pure { content, introduction, numbers, introducedAt, acks, membershipHash }
 
 def message (j : Json) : Except String String := do
   let name ← str j "name"

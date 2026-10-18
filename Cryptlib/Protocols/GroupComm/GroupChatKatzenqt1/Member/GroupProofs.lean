@@ -329,6 +329,13 @@ every index it assigns. -/
 theorem controlOf_lt (g : Group) : ∀ x ∈ g.controlOf.1.numbers, x.1 < rosterMax :=
   controlOf_lt_fold g g.unnumbered (g.size, [], [], g.unnumbered) (by simp)
 
+/-- A control message says the member's whole view of the group, an `Introduction` its view before
+the member it introduces. Both are fixed when composed, so a rewrite writes the same box. -/
+theorem controlOf_hash (g : Group) : g.controlOf.1.membershipHash = some g.membership := rfl
+
+theorem introductionOf_hash (g : Group) (name : String) (readCap : ByteArray) :
+    (g.introductionOf name readCap).1.membershipHash = some (g.membership (some (keyOf readCap))) := rfl
+
 theorem size_eq (g : Group) (hp : ∀ p ∈ g.pending.values, p.numbers = []) :
     g.size = g.rosters.size g.me := by
   unfold Group.size

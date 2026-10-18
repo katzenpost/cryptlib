@@ -267,6 +267,12 @@ and introductions are written afresh. -/
 /-- The hash a control message or an introduction carries in place of the membership hash. -/
 def sentinel : ByteArray := ⟨(List.replicate hashSize (0 : UInt8)).toArray⟩
 
+/-- The sentinel older clients send. -/
+def oldSentinel : ByteArray := "TODOTODOTODOTODOTODOTODOTODOTODO".toUTF8
+
+/-- Whether `h` says no membership hash. -/
+def isSentinel (h : ByteArray) : Bool := h == sentinel || h == oldSentinel
+
 def isControl (g : Gcm) : Bool :=
   g.msgType = MsgType.control || g.msgType = MsgType.introduction
 
@@ -278,7 +284,9 @@ def toMessage (cbor : ByteArray) : Option Message := do
          introduction := intro
          numbers := decodeNumbers (g.numbers.getD .empty).data.toList
          introducedAt := g.introducedAt.bind fun b => decodeIntroducedAt b.data.toList
-         acks := (AckBytes.decode (g.acks.getD .empty)).getD [] }
+         acks := (AckBytes.decode (g.acks.getD .empty)).getD []
+         membershipHash := if isControl g && !isSentinel g.membershipHash then some g.membershipHash
+           else none }
 
 def nonEmpty (b : ByteArray) : Option ByteArray := if b.size = 0 then none else some b
 
@@ -287,9 +295,10 @@ message. -/
 def ofMessage (m : Message) : Option Gcm := do
   let g ← match m.content, m.introduction with
     | some c, _ => decode c
-    | none, some i => some { version := currentVersion, membershipHash := sentinel,
+    | none, some i => some { version := currentVersion, membershipHash := m.membershipHash.getD sentinel,
                               msgType := MsgType.introduction, introduction := some i }
-    | none, none => some { version := currentVersion, membershipHash := sentinel, msgType := MsgType.control }
+    | none, none => some { version := currentVersion, membershipHash := m.membershipHash.getD sentinel,
+                           msgType := MsgType.control }
   some { g with
     acks := nonEmpty (AckBytes.encode m.acks)
     numbers := nonEmpty ⟨(encodeNumbers m.numbers).toArray⟩

@@ -57,13 +57,15 @@ structure Introduction where
 abbrev Numbers := List (Nat × Option ByteArray)
 
 /-- A message carries content or control, never both. `acks` pairs roster indexes, ascending, with
-the `Idx64` of the box acknowledged. -/
+the `Idx64` of the box acknowledged. A message the member makes itself carries the membership hash
+it was composed with, so that a rewrite writes the same box; content carries its own. -/
 structure Message where
   content : Option ByteArray := none
   introduction : Option Introduction := none
   numbers : Numbers := []
   introducedAt : Option IntroRef := none
   acks : List (Nat × Nat) := []
+  membershipHash : Option ByteArray := none
   deriving DecidableEq, Inhabited
 
 /-! ## Numbers and IntroducedAt -/
