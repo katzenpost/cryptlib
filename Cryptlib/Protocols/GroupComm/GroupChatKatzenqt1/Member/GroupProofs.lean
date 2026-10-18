@@ -388,6 +388,22 @@ theorem introduction_index_pending (g : Group) (name : String) (readCap : ByteAr
   have := size_ge g hp hn
   omega
 
+/-! ## What a member keeps of what it reads -/
+
+/-- Without a policy that expires received content, a member keeps no record of what it delivers,
+and an epoch clears whatever an earlier policy kept. -/
+theorem deliver_received (sender : Key) (index : Index) (m : Message) (g : Group)
+    (h : g.policy.keepReceived = none) : ((Group.deliver sender index m).run g).2.received = g.received := by
+  unfold Group.deliver
+  split <;> simp [h, StateT.run, modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet, pure,
+    StateT.pure, bind, StateT.bind]
+
+theorem onEpoch_received (epoch : Nat) (g : Group) (h : g.policy.keepReceived = none) :
+    ((Group.onEpoch epoch).run g).2.received = {} := by
+  simp [Group.onEpoch, h, StateT.run, modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+    get, getThe, MonadStateOf.get, StateT.get, set, MonadStateOf.set, StateT.set, pure, StateT.pure,
+    bind, StateT.bind]
+
 /-! ## Retention and backfill -/
 
 /-- Retention keeps each record's box and kind, and drops plaintext only once every member has

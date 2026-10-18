@@ -67,7 +67,8 @@ structure Group where
   joinedThrough : Option Key := none
   /-- `IntroducedAt` read before the `Introduction` it names. -/
   awaitingStart : Dict Key Index := {}
-  /-- Content delivered, by sender and box, and the epoch it came. -/
+  /-- Content delivered, by sender and box, and the epoch it came, while the policy keeps received
+  content only for a time. -/
   received : Dict (Key × Index) Nat := {}
   deriving DecidableEq, Inhabited
 
@@ -207,7 +208,9 @@ def deliver (sender : Key) (index : Index) (message : Message) : GM (List Effect
   match message.content with
   | none => pure []
   | some content =>
-    modify fun g => { g with received := g.received.set (sender, index) g.epoch }
+    modify fun g => { g with
+      received := if g.policy.keepReceived.isNone then g.received
+        else g.received.set (sender, index) g.epoch }
     pure [.deliver sender index content]
 
 def ingestIntroduction (sender : Key) (index : Index) (message : Message) : GM Unit :=
@@ -476,7 +479,9 @@ def onEpoch (epoch : Nat) : GM (List Effect) := do
   let expired : List (Key × Index) := match g.policy.keepReceived with
     | some keep => (g.received.pairs.filter fun (_, at_) => at_ + keep ≤ epoch).map (·.1)
     | none => []
-  set { g with received := g.received.filter fun k _ => !expired.contains k }
+  set { g with
+    received := if g.policy.keepReceived.isNone then {}
+      else g.received.filter fun k _ => !expired.contains k }
   let effects := expired.map fun (sender, index) => Effect.expire sender index
   let g ← get
   let (sent, backfill) := g.sent.backfill epoch g.everyoneAcked

@@ -118,6 +118,11 @@ Proved of `Member/`, the model katzenqt's traces are replayed through.
 - **Retention and backfill.** Retention drops plaintext only once every member still read has
   acknowledged it, or the policy has expired it (`retain_spec`). A box is rewritten at most once
   an epoch (`backfill_once`).
+- **What a member remembers stays bounded.** A member records what it delivers only while a policy
+  expires received content, and an epoch without one clears the record (`deliver_received`,
+  `onEpoch_received`). A scan remembers looking only for acknowledged boxes still heard and
+  ahead of it, each once, so never more than are heard (`scan_tried`, `scan_tried_nodup`,
+  `scan_tried_length`).
 - **Names are right in the member too.** `Roster.resolve_sound`, carried to the member's rosters
   (`GroupProofs.resolve_sound`). A member removed is no longer one a prefix can name, and what
   stands in its places never is (`retire_forgets`, `retire_keys`).

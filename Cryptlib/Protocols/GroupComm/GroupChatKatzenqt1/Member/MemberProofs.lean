@@ -115,7 +115,7 @@ theorem good_read {m : Key} {r : Reader} (h : Good m r) : Good m r.read.1 := by
 
 theorem good_scan {m : Key} {r : Reader} (h : Good m r) (heard : List Nat) (w : Nat) :
     Good m (r.scan heard w).1 := by
-  unfold Reader.scan; split_ifs <;> exact h.congr rfl rfl rfl rfl rfl
+  unfold Reader.scan Reader.prune; dsimp only; split_ifs <;> exact h.congr rfl rfl rfl rfl rfl
 
 theorem good_found {m : Key} {r : Reader} (h : Good m r) (index : Index) (result : ReadResult)
     (next : Option Index) (w : Nat) : Good m (r.found index result next w).2.1 := by
