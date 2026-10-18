@@ -178,7 +178,7 @@ theorem keeps_started (m : Key) (i : Index) : Keeps (Group.started m i) := by
 macro "frame" : tactic => `(tactic| (apply Keeps.frame; intro _; rfl))
 
 theorem takeAck_readers (s : Key) (g : Group) (a : Nat × Nat) : (g.takeAck s a).readers = g.readers := by
-  unfold Group.takeAck; split <;> (try split_ifs) <;> (try split) <;> rfl
+  unfold Group.takeAck; split <;> (try split_ifs) <;> rfl
 
 theorem keeps_followIfNew (rc : ByteArray) : Keeps (Group.followIfNew rc) := by
   unfold Group.followIfNew
