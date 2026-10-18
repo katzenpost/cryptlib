@@ -7,7 +7,7 @@ import Lean.Data.Json
 import Cryptlib.Primitives.KEM.MLKEMHedged.MLKEMHedged512
 import Cryptlib.Primitives.KEM.MLKEMHedged.MLKEMHedged768
 import Cryptlib.Primitives.KEM.MLKEMHedged.MLKEMHedged1024
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # Hedged ML-KEM: known-answer tests shared with hpqc
 
@@ -20,7 +20,7 @@ open Lean
 open MLKEM
 open Cryptlib.Primitives.KEM.FIPS203 (hashH uBytes vBytes)
 open Cryptlib.Primitives.KEM.MLKEMHedged
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Util.Bytes (ofVector toVecN)
 
 def field (j : Json) (k : String) : Except String ByteArray := do

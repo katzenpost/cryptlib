@@ -3,14 +3,14 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import Cryptlib.Protocols.Sphinx.constants
-import Cryptlib.Protocols.Sphinx.geometry
-import Cryptlib.Protocols.Sphinx.commands
-import Cryptlib.Protocols.Sphinx.types
-import Cryptlib.Protocols.Sphinx.sphinx
-import Cryptlib.Protocols.Sphinx.common
-import Cryptlib.Protocols.Sphinx.surb
-import Cryptlib.Protocols.Sphinx.kdf
+import Cryptlib.Protocols.Sphinx.Constants
+import Cryptlib.Protocols.Sphinx.Geometry
+import Cryptlib.Protocols.Sphinx.Commands
+import Cryptlib.Protocols.Sphinx.Types
+import Cryptlib.Protocols.Sphinx.Interface
+import Cryptlib.Protocols.Sphinx.Common
+import Cryptlib.Protocols.Sphinx.SURB
+import Cryptlib.Protocols.Sphinx.KDF
 import Cryptlib.Primitives.Cipher.ChaCha20
 import Cryptlib.Primitives.WideBlockCipher.WideBlockCipher
 import Cryptlib.Primitives.WideBlockCipher.AEZ
@@ -21,10 +21,10 @@ import Cryptlib.Primitives.StreamCipher.StreamCipher
 import Cryptlib.Primitives.StreamCipher.AES256CTR
 import Cryptlib.Primitives.NIKE.NIKE
 import Cryptlib.Primitives.NIKE.Schemes
-import Cryptlib.Protocols.Sphinx.wrap_resistance
+import Cryptlib.Protocols.Sphinx.WrapResistance
 import Cryptlib.Primitives.Hash.Sha512
 import Cryptlib.Util.Bytes
-import Cryptlib.Protocols.Sphinx.nike_sphinx
+import Cryptlib.Protocols.Sphinx.NIKESphinx
 
 namespace Cryptlib.Protocols.Sphinx.NIKESphinx
 

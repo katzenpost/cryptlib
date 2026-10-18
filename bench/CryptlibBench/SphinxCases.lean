@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Cryptlib.Primitives.NIKE.Schemes
 import Cryptlib.Primitives.KEM.Schemes
 
-namespace Cryptlib.Protocols.Sphinx.BenchRegistry
+namespace CryptlibBench.SphinxCases
 
 open Cryptlib.Primitives.NIKE.NIKE (NIKE)
 open Cryptlib.Primitives.KEM.KEM (KEM)
@@ -42,4 +42,4 @@ def sphinxBenchCases : List BenchCase :=
     payloadSizes.map fun sz => { kind := .kem e.name e.scheme, payloadSize := sz }
   nikeCases ++ kemCases
 
-end Cryptlib.Protocols.Sphinx.BenchRegistry
+end CryptlibBench.SphinxCases

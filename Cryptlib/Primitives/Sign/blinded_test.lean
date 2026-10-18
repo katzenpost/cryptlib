@@ -4,13 +4,13 @@ import Lean.Data.Json
 import Cryptlib.Primitives.Hash.Sha512
 import Cryptlib.Primitives.Sign.Ed25519_blinded
 import Cryptlib.Primitives.Sign.Ed25519_math
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 open Lean
 open Cryptlib.Primitives.Sign.Ed25519Blinded
 open Cryptlib.Primitives.Sign.Ed25519Math
 open Cryptlib.Primitives.Hash.Sha512
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 
 private def hexToVec32 (s : String) : Option (Vector UInt8 32) := do
   let bytes ← hexStringToByteArray s

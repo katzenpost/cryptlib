@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import Cryptlib.Primitives.Cipher.AESGCMSIV
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-!
 # AES-256-GCM-SIV known-answer tests
@@ -15,7 +15,7 @@ ciphertexts that must be rejected. The underlying primitives get their own vecto
 -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Primitives.Cipher
 
 structure SIVVector where

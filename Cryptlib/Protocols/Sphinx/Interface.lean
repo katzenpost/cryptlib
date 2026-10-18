@@ -5,10 +5,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import VCVio.OracleComp.Constructions.SampleableType
 
-import Cryptlib.Protocols.Sphinx.types
-import Cryptlib.Protocols.Sphinx.geometry
-import Cryptlib.Protocols.Sphinx.indistinguishability
-import Cryptlib.Protocols.Sphinx.integrity
+import Cryptlib.Protocols.Sphinx.Types
+import Cryptlib.Protocols.Sphinx.Geometry
+import Cryptlib.Protocols.Sphinx.Indistinguishability
+import Cryptlib.Protocols.Sphinx.Integrity
 import Cryptlib.Primitives.WideBlockCipher.WideBlockCipher
 import Cryptlib.Primitives.MAC.MAC
 import Cryptlib.Primitives.KDF.KDF

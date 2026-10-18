@@ -3,9 +3,9 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import Cryptlib.Protocols.Sphinx.geometry
-import Cryptlib.Protocols.Sphinx.nike_sphinx_theorems
-import Cryptlib.Protocols.Sphinx.kem_sphinx_theorems
+import Cryptlib.Protocols.Sphinx.Geometry
+import Cryptlib.Protocols.Sphinx.NIKESphinxTheorems
+import Cryptlib.Protocols.Sphinx.KEMSphinxTheorems
 import Cryptlib.Primitives.NIKE.Schemes
 import Cryptlib.Primitives.KEM.Schemes
 

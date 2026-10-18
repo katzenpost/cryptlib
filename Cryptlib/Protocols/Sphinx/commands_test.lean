@@ -4,8 +4,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Lean.Data.Json
-import Cryptlib.Protocols.Sphinx.commands
-import Cryptlib.Util.newhex
+import Cryptlib.Protocols.Sphinx.Commands
+import Cryptlib.Util.HexBytes
 
 /-!
 # Sphinx routing-command known-answer tests
@@ -14,7 +14,7 @@ Checks `RoutingCommand.toBytes` against `testdata/sphinx_commands_vectors.json` 
 each through `fromBytesOne`. -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Protocols.Sphinx.Commands
 
 def field (j : Json) (k : String) : Except String ByteArray := do

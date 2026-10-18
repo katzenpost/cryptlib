@@ -3,11 +3,11 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import Cryptlib.Protocols.Sphinx.geometry
-import Cryptlib.Protocols.Sphinx.types
-import Cryptlib.Protocols.Sphinx.nike_sphinx_theorems
-import Cryptlib.Protocols.Sphinx.surb
-import Cryptlib.Util.newhex
+import Cryptlib.Protocols.Sphinx.Geometry
+import Cryptlib.Protocols.Sphinx.Types
+import Cryptlib.Protocols.Sphinx.NIKESphinxTheorems
+import Cryptlib.Protocols.Sphinx.SURB
+import Cryptlib.Util.HexBytes
 import Cryptlib.Util.Bytes
 
 /-!
@@ -16,7 +16,7 @@ import Cryptlib.Util.Bytes
 Builds packets with fresh keys and checks that unwrapping recovers the commands and payload, for
 every registered NIKE-Sphinx scheme. -/
 
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Protocols.Sphinx.Geometry
 open Cryptlib.Protocols.Sphinx.Types
 open Cryptlib.Protocols.Sphinx.Commands

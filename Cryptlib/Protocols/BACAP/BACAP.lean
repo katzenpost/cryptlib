@@ -9,4 +9,3 @@ import Cryptlib.Protocols.BACAP.Protocol
 import Cryptlib.Protocols.BACAP.Impl
 import Cryptlib.Protocols.BACAP.API
 import Cryptlib.Protocols.BACAP.Position
-import Cryptlib.Protocols.BACAP.test

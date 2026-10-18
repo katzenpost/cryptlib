@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import Cryptlib.Primitives.KEM.MLKEMHedged.MLKEMHedged
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-!
 # Hedged ML-KEM: NIST ACVP known-answer tests, for ML-KEM-512, -768 and -1024
@@ -20,7 +20,7 @@ open MLKEM
 open Cryptlib.Primitives.KEM.FIPS203 (encaps expandSeed checkEncapsulationKey checkDecapsulationKey
   uBytes vBytes stateFromSeed)
 open Cryptlib.Primitives.KEM.MLKEMHedged
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Util.Bytes (ofVector toVecN)
 
 def field (j : Json) (k : String) : Except String ByteArray := do

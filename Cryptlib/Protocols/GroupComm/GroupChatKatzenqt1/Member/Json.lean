@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Lean.Data.Json
 
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Group
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # JSON trace format
 
@@ -18,7 +18,7 @@ namespace Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Trace
 open Cryptlib.Protocols.GroupComm.Common
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 
 /-! ## Writing -/
 

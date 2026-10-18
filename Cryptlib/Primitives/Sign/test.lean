@@ -2,11 +2,11 @@ import Lean
 
 import Cryptlib.Primitives.Hash.Sha512
 import Cryptlib.Primitives.Sign.Ed25519_math
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 open Cryptlib.Primitives.Hash.Sha512
 open Cryptlib.Primitives.Sign.Ed25519Math
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 
 private def hexToVec32 (s : String) : Option (Vector UInt8 32) := do
   let bytes ← hexStringToByteArray s

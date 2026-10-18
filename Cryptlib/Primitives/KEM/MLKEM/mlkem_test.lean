@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import Cryptlib.Primitives.KEM.MLKEM.MLKEM
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # ML-KEM known-answer tests: NIST ACVP vectors for ML-KEM-512, -768 and -1024
 
@@ -15,7 +15,7 @@ Vectors in `testdata/mlkem<N>_{keygen,encapdecap,keycheck}.json`, extracted by
 open Lean
 open MLKEM
 open Cryptlib.Primitives.KEM.FIPS203
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Util.Bytes (ofVector toVecN)
 
 def field (j : Json) (k : String) : Except String ByteArray := do

@@ -10,7 +10,7 @@ import LeanBench
 
 Inputs are read from refs so the compiler cannot hoist the work out of the timed action. -/
 
-namespace Cryptlib.Bench.KDF
+namespace CryptlibBench.KDF
 
 open Cryptlib.Primitives.KDF.Argon2
 
@@ -29,4 +29,4 @@ def benches : IO (Array LeanBench.Bench) := do
                       out.set ((hash { memoryKiB := m, passes := 3 } (← pw.get) (← salt.get)).toOption.getD .empty) }
   pure bs
 
-end Cryptlib.Bench.KDF
+end CryptlibBench.KDF

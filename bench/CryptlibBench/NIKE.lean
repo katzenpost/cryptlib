@@ -10,7 +10,7 @@ import LeanBench
 
 A fresh private key is drawn before each sample, outside the timed region. -/
 
-namespace Cryptlib.Bench.NIKE
+namespace CryptlibBench.NIKE
 
 open Cryptlib.Primitives.NIKE.NIKE (NIKE)
 open Cryptlib.Util.Bytes (ofVector)
@@ -35,4 +35,4 @@ def benches (name : String) (nike : NIKE) : IO (Array LeanBench.Bench) := do
         let ss := nike.groupAction (← sk.get) ⟨nike.derivePublicKey p, nike.derive_safe p⟩
         out.set (ofVector (nike.encodeSharedSecret ss)) }]
 
-end Cryptlib.Bench.NIKE
+end CryptlibBench.NIKE
