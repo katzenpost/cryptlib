@@ -119,7 +119,8 @@ Proved of `Member/`, the model katzenqt's traces are replayed through.
   acknowledged it, or the policy has expired it (`retain_spec`). A box is rewritten at most once
   an epoch (`backfill_once`).
 - **Names are right in the member too.** `Roster.resolve_sound`, carried to the member's rosters
-  (`GroupProofs.resolve_sound`).
+  (`GroupProofs.resolve_sound`). A member removed is no longer one a prefix can name, and what
+  stands in its places never is (`retire_forgets`, `retire_keys`).
 - **The wire formats round trip.** `Numbers` and `IntroducedAt` decode back to what was encoded
   (`decodeNumbers_encodeNumbers`, `decodeIntroducedAt_encodeIntroducedAt`). So does every
   `GroupChatMessage` this client writes (`Gcm.decode_encode`), on CBOR headers that read back as
