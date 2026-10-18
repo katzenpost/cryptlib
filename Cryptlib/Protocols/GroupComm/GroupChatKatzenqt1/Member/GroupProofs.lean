@@ -8,6 +8,7 @@ import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Roster
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Group
 import Cryptlib.Protocols.GroupComm.Common.DictProofs
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.ReaderProofs
+import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.WireProofs
 
 /-! # What a member guarantees
 
@@ -157,19 +158,31 @@ theorem acksOf_safe (g : Group) (p : Pending) (hist : Key → History)
   obtain ⟨m, r, b, hk, hr, hrun, hb⟩ := acksOf_runs g p x hx
   exact ⟨m, b, hk, hb, hrun ▸ run_safe (inv m r hr)⟩
 
+/-- A member removed is no longer among the keys a prefix can name. -/
+theorem retire_forgets (r : Rosters) (member token : Key) : member ∉ (r.retire member token).keys := by
+  simp [Rosters.retire]
+
+/-- Removing a member makes no key nameable that was not before: the key standing in its places is
+never one a prefix names. -/
+theorem retire_keys (r : Rosters) (member token : Key) :
+    ∀ k ∈ (r.retire member token).keys, k ∈ r.keys := by
+  intro k hk
+  simp only [Rosters.retire, List.mem_filter] at hk
+  exact hk.1
+
 /-! ## Acknowledgements taken -/
 
 @[simp] theorem takeAck_sent (sender : Key) (g : Group) (a : Nat × Nat) :
     (g.takeAck sender a).sent = g.sent := by
-  unfold Group.takeAck; split <;> (try split_ifs) <;> (try split) <;> rfl
+  unfold Group.takeAck; split <;> (try split_ifs) <;> rfl
 
 @[simp] theorem takeAck_rosters (sender : Key) (g : Group) (a : Nat × Nat) :
     (g.takeAck sender a).rosters = g.rosters := by
-  unfold Group.takeAck; split <;> (try split_ifs) <;> (try split) <;> rfl
+  unfold Group.takeAck; split <;> (try split_ifs) <;> rfl
 
 @[simp] theorem takeAck_readCap (sender : Key) (g : Group) (a : Nat × Nat) :
     (g.takeAck sender a).readCap = g.readCap := by
-  unfold Group.takeAck; split <;> (try split_ifs) <;> (try split) <;> rfl
+  unfold Group.takeAck; split <;> (try split_ifs) <;> rfl
 
 theorem takeAck_credit (sender : Key) (g : Group) (a : Nat × Nat) (m : Key) :
     (g.takeAck sender a).ledger.ackedBy.get? m = g.ledger.ackedBy.get? m ∨
@@ -269,14 +282,114 @@ theorem controlOf_fold (g : Group) :
     · unfold Group.controlStep
       split
       · exact h1
-      · simp only [List.map_append, h1, List.map_cons, List.map_nil]
-        rw [show acc.1 + 1 - g.size = (acc.1 - g.size) + 1 by omega, List.range'_concat]
-        congr 2; omega
-    · unfold Group.controlStep; split <;> (try simp only) <;> omega
+      · split
+        · exact h1
+        · simp only [List.map_append, h1, List.map_cons, List.map_nil]
+          rw [show acc.1 + 1 - g.size = (acc.1 - g.size) + 1 by omega, List.range'_concat]
+          congr 2; omega
+    · unfold Group.controlStep; split <;> (try split) <;> (try simp only) <;> omega
     · unfold Group.controlStep
       split
       · exact h3
-      · simp [h3]
+      · split
+        · exact h3
+        · simp [h3]
+
+theorem controlOf_lt_fold (g : Group) :
+    ∀ (as : List At) (acc : Nat × Numbers × List (Nat × Option At) × List At),
+      (∀ x ∈ acc.2.1, x.1 < rosterMax) → ∀ x ∈ (as.foldl g.controlStep acc).2.1, x.1 < rosterMax
+  | [], _, h => h
+  | a :: as, acc, h => by
+    simp only [List.foldl_cons]
+    apply controlOf_lt_fold g as
+    unfold Group.controlStep
+    split
+    · exact h
+    · split
+      · exact h
+      · next hc =>
+        have : ¬ rosterMax ≤ acc.1 := fun h' => hc (by simp [h'])
+        intro x hx
+        rcases List.mem_append.1 hx with hx | hx
+        · exact h x hx
+        · simp only [List.mem_singleton] at hx; subst hx; dsimp only; omega
+
+theorem consecutive_append (first : Nat) (ps : List ByteArray) (p : ByteArray) :
+    consecutive first (ps ++ [p]) = consecutive first ps ++ [(first + ps.length, some p)] := by
+  simp [consecutive, List.zipIdx_append]
+
+/-- What a control message numbers so far: members at consecutive indexes from the next free one,
+each named by a whole prefix, no prefix twice, none past the roster's end. -/
+def NumbersSoFar (g : Group) (acc : Nat × Numbers × List (Nat × Option At) × List At) : Prop :=
+  ∃ ps, acc.2.1 = consecutive g.size ps ∧ acc.1 = g.size + ps.length ∧
+    (∀ p ∈ ps, p.size = prefixSize) ∧ ps.Nodup ∧ (ps ≠ [] → acc.1 ≤ rosterMax)
+
+theorem controlOf_wf_fold (g : Group) :
+    ∀ (as : List At) (acc : Nat × Numbers × List (Nat × Option At) × List At),
+      NumbersSoFar g acc → NumbersSoFar g (as.foldl g.controlStep acc)
+  | [], _, h => h
+  | a :: as, acc, h => by
+    simp only [List.foldl_cons]
+    apply controlOf_wf_fold g as
+    unfold Group.controlStep
+    split
+    · exact h
+    · split
+      · exact h
+      · next new _ hc =>
+        obtain ⟨ps, hn, h1, hsize, hnodup, _⟩ := h
+        simp only [Bool.or_eq_true, decide_eq_true_eq, not_or, List.any_eq_true] at hc
+        obtain ⟨⟨hroom, hlen⟩, hfresh⟩ := hc
+        refine ⟨ps ++ [prefixOf new], ?_, ?_, ?_, ?_, fun _ => ?_⟩
+        · rw [consecutive_append, hn, h1]
+        · simp [h1]; omega
+        · intro p hp
+          rcases List.mem_append.1 hp with hp | hp
+          · exact hsize p hp
+          · simp only [List.mem_singleton] at hp; subst hp; simpa using hlen
+        · refine List.nodup_append.2 ⟨hnodup, List.nodup_singleton _, fun x hx y hy hxy => ?_⟩
+          simp only [List.mem_singleton] at hy
+          have hmap : (consecutive g.size ps).map (·.2) = ps.map some := by
+            conv_rhs => rw [← List.zipIdx_map_fst 0 ps]
+            simp only [consecutive, List.map_map, Function.comp_def]
+          have hsome : some (prefixOf new) ∈ (consecutive g.size ps).map (·.2) := by
+            rw [hmap, ← hy, ← hxy]; exact List.mem_map_of_mem hx
+          obtain ⟨z, hz, hz2⟩ := List.mem_map.1 hsome
+          exact hfresh ⟨z, hn ▸ hz, hz2⟩
+        · simp; omega
+
+/-- A control message's `Numbers` field is one the encoding carries, when it numbers anyone. -/
+theorem controlOf_wf (g : Group) : g.controlOf.1.numbers = [] ∨ NumbersWF g.controlOf.1.numbers := by
+  obtain ⟨ps, hn, h1, hs, hnd, hle⟩ := controlOf_wf_fold g g.unnumbered (g.size, [], [], g.unnumbered)
+    ⟨[], rfl, by simp, by simp, List.nodup_nil, by simp⟩
+  have hn' : g.controlOf.1.numbers = consecutive g.size ps := hn
+  by_cases hps : ps = []
+  · left; rw [hn', hps]; rfl
+  · right
+    refine Or.inr ⟨g.size, ps, hn', hps, hs, hnd, ?_⟩
+    have := hle hps
+    simp only [rosterMax] at this
+    omega
+
+/-- Every `Numbers` field a member composes reads back as it wrote it: a control message's, and an
+`Introduction`'s. -/
+theorem controlOf_numbers_roundtrip (g : Group) :
+    decodeNumbers (encodeNumbers g.controlOf.1.numbers) = g.controlOf.1.numbers := by
+  rcases controlOf_wf g with h | h
+  · rw [h]; rfl
+  · exact decodeNumbers_encodeNumbers h
+
+theorem introductionOf_numbers_roundtrip (g : Group) (name : String) (readCap : ByteArray) :
+    decodeNumbers (encodeNumbers (g.introductionOf name readCap).1.numbers) =
+      (g.introductionOf name readCap).1.numbers := by
+  unfold Group.introductionOf
+  by_cases h : g.numbered (keyOf readCap) || !g.room
+  · simp [h]; rfl
+  · simp only [Bool.or_eq_true, Bool.not_eq_true', not_or, Bool.not_eq_false] at h
+    simp only [h.1, h.2, Bool.false_or, Bool.not_true, Bool.false_eq_true, ite_false, List.map_cons,
+      List.map_nil]
+    have hr : g.size < 256 := by have := h.2; unfold Group.room rosterMax at this; simpa using this
+    exact decodeNumbers_encodeNumbers (Or.inl ⟨g.size, hr, rfl⟩)
 
 /-- A control message numbers members at consecutive indexes from the next free one, counting
 composed messages, and its pending numbering assigns the same ones. -/
@@ -291,6 +404,18 @@ theorem controlOf_consecutive (g : Group) :
   simp only [List.length_map, List.length_range'] at this
   rw [this]
 
+/-- A control message numbers no member past the end of a roster, so its `Numbers` field can carry
+every index it assigns. -/
+theorem controlOf_lt (g : Group) : ∀ x ∈ g.controlOf.1.numbers, x.1 < rosterMax :=
+  controlOf_lt_fold g g.unnumbered (g.size, [], [], g.unnumbered) (by simp)
+
+/-- A control message says the member's whole view of the group, an `Introduction` its view before
+the member it introduces. Both are fixed when composed, so a rewrite writes the same box. -/
+theorem controlOf_hash (g : Group) : g.controlOf.1.membershipHash = some g.membership := rfl
+
+theorem introductionOf_hash (g : Group) (name : String) (readCap : ByteArray) :
+    (g.introductionOf name readCap).1.membershipHash = some (g.membership (some (keyOf readCap))) := rfl
+
 theorem size_eq (g : Group) (hp : ∀ p ∈ g.pending.values, p.numbers = []) :
     g.size = g.rosters.size g.me := by
   unfold Group.size
@@ -304,9 +429,24 @@ theorem reply_newcomer (g : Group) (s : Index) : (g.reply s).newcomer = g.roster
 /-- An `Introduction` gives the new member the index the reply promised, when everything composed
 before it has been written. -/
 theorem introduction_index (g : Group) (name : String) (readCap : ByteArray) (s : Index)
-    (hp : ∀ p ∈ g.pending.values, p.numbers = []) (hn : g.numbered (keyOf readCap) = false) :
+    (hp : ∀ p ∈ g.pending.values, p.numbers = []) (hn : g.numbered (keyOf readCap) = false)
+    (hr : g.room = true) :
     (g.introductionOf name readCap).1.numbers = [((g.reply s).newcomer, none)] := by
-  simp [Group.introductionOf, hn, size_eq g hp, reply_newcomer]
+  simp [Group.introductionOf, hn, hr, size_eq g hp, reply_newcomer]
+
+/-- An `Introduction` numbers its member only inside the roster, and numbers nobody once the
+roster is full. -/
+theorem introductionOf_lt (g : Group) (name : String) (readCap : ByteArray) :
+    ∀ x ∈ (g.introductionOf name readCap).1.numbers, x.1 < rosterMax := by
+  intro x hx
+  unfold Group.introductionOf at hx
+  by_cases h : g.numbered (keyOf readCap) || !g.room
+  · simp [h] at hx
+  · simp only [Bool.or_eq_true, Bool.not_eq_true', not_or, Bool.not_eq_false] at h
+    simp only [h.1, h.2, Bool.false_or, Bool.not_true] at hx
+    simp only [Bool.false_eq_true, ite_false, List.map_cons, List.map_nil, List.mem_singleton] at hx
+    subst hx
+    have := h.2; unfold Group.room at this; simpa using this
 
 theorem size_ge (g : Group) {p : Pending} (hp : p ∈ g.pending.values) {n : Nat} {a : Option At}
     (hn : (n, a) ∈ p.numbers) : n + 1 ≤ g.size := by
@@ -329,11 +469,27 @@ theorem size_ge (g : Group) {p : Pending} (hp : p ∈ g.pending.values) {n : Nat
 /-- If a composed message still holds the promised index, the `Introduction` gives a later one. -/
 theorem introduction_index_pending (g : Group) (name : String) (readCap : ByteArray) (s : Index)
     {p : Pending} (hp : p ∈ g.pending.values) {a : Option At} (hn : ((g.reply s).newcomer, a) ∈ p.numbers)
-    (hnew : g.numbered (keyOf readCap) = false) :
+    (hnew : g.numbered (keyOf readCap) = false) (hr : g.room = true) :
     ∃ k, (g.introductionOf name readCap).1.numbers = [(k, none)] ∧ (g.reply s).newcomer < k := by
-  refine ⟨g.size, by simp [Group.introductionOf, hnew], ?_⟩
+  refine ⟨g.size, by simp [Group.introductionOf, hnew, hr], ?_⟩
   have := size_ge g hp hn
   omega
+
+/-! ## What a member keeps of what it reads -/
+
+/-- Without a policy that expires received content, a member keeps no record of what it delivers,
+and an epoch clears whatever an earlier policy kept. -/
+theorem deliver_received (sender : Key) (index : Index) (m : Message) (g : Group)
+    (h : g.policy.keepReceived = none) : ((Group.deliver sender index m).run g).2.received = g.received := by
+  unfold Group.deliver
+  split <;> simp [h, StateT.run, modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet, pure,
+    StateT.pure, bind, StateT.bind]
+
+theorem onEpoch_received (epoch : Nat) (g : Group) (h : g.policy.keepReceived = none) :
+    ((Group.onEpoch epoch).run g).2.received = {} := by
+  simp [Group.onEpoch, h, StateT.run, modify, modifyGet, MonadStateOf.modifyGet, StateT.modifyGet,
+    get, getThe, MonadStateOf.get, StateT.get, set, MonadStateOf.set, StateT.set, pure, StateT.pure,
+    bind, StateT.bind]
 
 /-! ## Retention and backfill -/
 

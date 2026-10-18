@@ -292,7 +292,59 @@ theorem read_inv {r : Reader} {h : History} (inv : Inv r h) : Inv r.read.1 h := 
 
 theorem scan_inv {r : Reader} {h : History} (inv : Inv r h) (heard : List Nat) (window : Nat) :
     Inv (r.scan heard window).1 h := by
-  unfold Reader.scan; split_ifs <;> exact inv.congr rfl rfl rfl rfl
+  unfold Reader.scan Reader.prune; dsimp only; split_ifs <;> exact inv.congr rfl rfl rfl rfl
+
+/-! ## What a scan remembers -/
+
+theorem firstEach_aux : ∀ (l acc : List Nat), acc.Nodup →
+    (l.foldl (fun acc x => if acc.contains x then acc else acc ++ [x]) acc).Nodup ∧
+      ∀ x, x ∈ l.foldl (fun acc x => if acc.contains x then acc else acc ++ [x]) acc ↔ x ∈ acc ∨ x ∈ l
+  | [], acc, h => ⟨h, fun x => by simp⟩
+  | y :: ys, acc, h => by
+    simp only [List.foldl_cons]
+    by_cases hy : acc.contains y
+    · simp only [hy, ite_true]
+      obtain ⟨hn, hm⟩ := firstEach_aux ys acc h
+      refine ⟨hn, fun x => ?_⟩
+      rw [hm]; simp only [List.contains_iff_mem] at hy
+      simp only [List.mem_cons]; grind
+    · simp only [hy, Bool.false_eq_true, ite_false]
+      simp only [List.contains_iff_mem] at hy
+      obtain ⟨hn, hm⟩ := firstEach_aux ys (acc ++ [y]) (List.nodup_append.2 ⟨h, List.nodup_singleton y,
+        fun a ha b hb hab => by simp at hb; subst hb; subst hab; exact hy ha⟩)
+      refine ⟨hn, fun x => ?_⟩
+      rw [hm]; simp only [List.mem_append, List.mem_cons]; grind
+
+theorem firstEach_nodup (l : List Nat) : (Reader.firstEach l).Nodup := (firstEach_aux l [] List.nodup_nil).1
+
+theorem mem_firstEach {l : List Nat} {x : Nat} : x ∈ Reader.firstEach l ↔ x ∈ l := by
+  unfold Reader.firstEach; rw [(firstEach_aux l [] List.nodup_nil).2]; simp
+
+/-- A scan remembers looking only for acknowledged boxes still heard and still ahead of it. -/
+theorem scan_tried (r : Reader) (heard : List Nat) (window : Nat) :
+    ∀ t ∈ (r.scan heard window).1.tried, t ∈ heard ∧ counter r.next < t := by
+  unfold Reader.scan Reader.prune Reader.ahead
+  dsimp only
+  split_ifs <;> intro t ht <;> simp only [List.mem_append, List.mem_filter, mem_firstEach,
+    Bool.and_eq_true, decide_eq_true_eq, List.contains_iff_mem] at ht <;> grind
+
+theorem scan_tried_nodup {r : Reader} (hr : r.tried.Nodup) (heard : List Nat) (window : Nat) :
+    (r.scan heard window).1.tried.Nodup := by
+  unfold Reader.scan Reader.prune Reader.ahead
+  dsimp only
+  have hp : (r.tried.filter fun t => counter r.next < t && heard.contains t).Nodup := hr.filter _
+  split_ifs
+  · exact hp
+  · refine List.nodup_append.2 ⟨hp, firstEach_nodup _, ?_⟩
+    intro a ha b hb hab
+    subst hab
+    simp only [mem_firstEach, List.mem_filter, Bool.and_eq_true, Bool.not_eq_true'] at hb
+    grind
+
+/-- So a scan remembers no more than are heard: one box for each member acknowledging the stream. -/
+theorem scan_tried_length {r : Reader} (hr : r.tried.Nodup) (heard : List Nat) (window : Nat) :
+    (r.scan heard window).1.tried.length ≤ heard.length :=
+  ((scan_tried_nodup hr heard window).subperm fun t ht => (scan_tried r heard window t ht).1).length_le
 
 /-- What reading a box adds to the history. -/
 def foundHistory (r : Reader) (h : History) (index : Index) (result : ReadResult) (next : Option Index) :
