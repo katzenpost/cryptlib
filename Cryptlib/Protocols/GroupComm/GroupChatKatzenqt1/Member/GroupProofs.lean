@@ -269,14 +269,35 @@ theorem controlOf_fold (g : Group) :
     · unfold Group.controlStep
       split
       · exact h1
-      · simp only [List.map_append, h1, List.map_cons, List.map_nil]
-        rw [show acc.1 + 1 - g.size = (acc.1 - g.size) + 1 by omega, List.range'_concat]
-        congr 2; omega
-    · unfold Group.controlStep; split <;> (try simp only) <;> omega
+      · split
+        · exact h1
+        · simp only [List.map_append, h1, List.map_cons, List.map_nil]
+          rw [show acc.1 + 1 - g.size = (acc.1 - g.size) + 1 by omega, List.range'_concat]
+          congr 2; omega
+    · unfold Group.controlStep; split <;> (try split) <;> (try simp only) <;> omega
     · unfold Group.controlStep
       split
       · exact h3
-      · simp [h3]
+      · split
+        · exact h3
+        · simp [h3]
+
+theorem controlOf_lt_fold (g : Group) :
+    ∀ (as : List At) (acc : Nat × Numbers × List (Nat × Option At) × List At),
+      (∀ x ∈ acc.2.1, x.1 < rosterMax) → ∀ x ∈ (as.foldl g.controlStep acc).2.1, x.1 < rosterMax
+  | [], _, h => h
+  | a :: as, acc, h => by
+    simp only [List.foldl_cons]
+    apply controlOf_lt_fold g as
+    unfold Group.controlStep
+    split
+    · exact h
+    · split
+      · exact h
+      · intro x hx
+        rcases List.mem_append.1 hx with hx | hx
+        · exact h x hx
+        · simp only [List.mem_singleton] at hx; subst hx; dsimp only; omega
 
 /-- A control message numbers members at consecutive indexes from the next free one, counting
 composed messages, and its pending numbering assigns the same ones. -/
@@ -291,6 +312,11 @@ theorem controlOf_consecutive (g : Group) :
   simp only [List.length_map, List.length_range'] at this
   rw [this]
 
+/-- A control message numbers no member past the end of a roster, so its `Numbers` field can carry
+every index it assigns. -/
+theorem controlOf_lt (g : Group) : ∀ x ∈ g.controlOf.1.numbers, x.1 < rosterMax :=
+  controlOf_lt_fold g g.unnumbered (g.size, [], [], g.unnumbered) (by simp)
+
 theorem size_eq (g : Group) (hp : ∀ p ∈ g.pending.values, p.numbers = []) :
     g.size = g.rosters.size g.me := by
   unfold Group.size
@@ -304,9 +330,24 @@ theorem reply_newcomer (g : Group) (s : Index) : (g.reply s).newcomer = g.roster
 /-- An `Introduction` gives the new member the index the reply promised, when everything composed
 before it has been written. -/
 theorem introduction_index (g : Group) (name : String) (readCap : ByteArray) (s : Index)
-    (hp : ∀ p ∈ g.pending.values, p.numbers = []) (hn : g.numbered (keyOf readCap) = false) :
+    (hp : ∀ p ∈ g.pending.values, p.numbers = []) (hn : g.numbered (keyOf readCap) = false)
+    (hr : g.room = true) :
     (g.introductionOf name readCap).1.numbers = [((g.reply s).newcomer, none)] := by
-  simp [Group.introductionOf, hn, size_eq g hp, reply_newcomer]
+  simp [Group.introductionOf, hn, hr, size_eq g hp, reply_newcomer]
+
+/-- An `Introduction` numbers its member only inside the roster, and numbers nobody once the
+roster is full. -/
+theorem introductionOf_lt (g : Group) (name : String) (readCap : ByteArray) :
+    ∀ x ∈ (g.introductionOf name readCap).1.numbers, x.1 < rosterMax := by
+  intro x hx
+  unfold Group.introductionOf at hx
+  by_cases h : g.numbered (keyOf readCap) || !g.room
+  · simp [h] at hx
+  · simp only [Bool.or_eq_true, Bool.not_eq_true', not_or, Bool.not_eq_false] at h
+    simp only [h.1, h.2, Bool.false_or, Bool.not_true] at hx
+    simp only [Bool.false_eq_true, ite_false, List.map_cons, List.map_nil, List.mem_singleton] at hx
+    subst hx
+    have := h.2; unfold Group.room at this; simpa using this
 
 theorem size_ge (g : Group) {p : Pending} (hp : p ∈ g.pending.values) {n : Nat} {a : Option At}
     (hn : (n, a) ∈ p.numbers) : n + 1 ≤ g.size := by
@@ -329,9 +370,9 @@ theorem size_ge (g : Group) {p : Pending} (hp : p ∈ g.pending.values) {n : Nat
 /-- If a composed message still holds the promised index, the `Introduction` gives a later one. -/
 theorem introduction_index_pending (g : Group) (name : String) (readCap : ByteArray) (s : Index)
     {p : Pending} (hp : p ∈ g.pending.values) {a : Option At} (hn : ((g.reply s).newcomer, a) ∈ p.numbers)
-    (hnew : g.numbered (keyOf readCap) = false) :
+    (hnew : g.numbered (keyOf readCap) = false) (hr : g.room = true) :
     ∃ k, (g.introductionOf name readCap).1.numbers = [(k, none)] ∧ (g.reply s).newcomer < k := by
-  refine ⟨g.size, by simp [Group.introductionOf, hnew], ?_⟩
+  refine ⟨g.size, by simp [Group.introductionOf, hnew, hr], ?_⟩
   have := size_ge g hp hn
   omega
 
