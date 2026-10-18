@@ -157,6 +157,18 @@ theorem acksOf_safe (g : Group) (p : Pending) (hist : Key → History)
   obtain ⟨m, r, b, hk, hr, hrun, hb⟩ := acksOf_runs g p x hx
   exact ⟨m, b, hk, hb, hrun ▸ run_safe (inv m r hr)⟩
 
+/-- A member removed is no longer among the keys a prefix can name. -/
+theorem retire_forgets (r : Rosters) (member token : Key) : member ∉ (r.retire member token).keys := by
+  simp [Rosters.retire]
+
+/-- Removing a member makes no key nameable that was not before: the key standing in its places is
+never one a prefix names. -/
+theorem retire_keys (r : Rosters) (member token : Key) :
+    ∀ k ∈ (r.retire member token).keys, k ∈ r.keys := by
+  intro k hk
+  simp only [Rosters.retire, List.mem_filter] at hk
+  exact hk.1
+
 /-! ## Acknowledgements taken -/
 
 @[simp] theorem takeAck_sent (sender : Key) (g : Group) (a : Nat × Nat) :
