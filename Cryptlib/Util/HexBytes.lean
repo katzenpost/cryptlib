@@ -1,7 +1,7 @@
 
 import Mathlib.Data.String.Basic
 
-namespace Cryptlib.Util.newhex
+namespace Cryptlib.Util.HexBytes
 
 def byteToHex (b : UInt8) : String :=
   let high := hexDigitRepr (b.toNat / 16)
@@ -59,4 +59,4 @@ def falliableHexStringToByteArray (s : String) : ByteArray :=
         | none => panic! "Failed to convert hex string to ByteArray."
   | _, _ => panic! "Hex string length must be even or 1."
 
-end Cryptlib.Util.newhex
+end Cryptlib.Util.HexBytes

@@ -4,10 +4,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Lean.Data.Json
-import Cryptlib.Protocols.Sphinx.geometry
-import Cryptlib.Protocols.Sphinx.kem_sphinx_theorems
-import Cryptlib.Protocols.Sphinx.surb
-import Cryptlib.Util.newhex
+import Cryptlib.Protocols.Sphinx.Geometry
+import Cryptlib.Protocols.Sphinx.KEMSphinxTheorems
+import Cryptlib.Protocols.Sphinx.SURB
+import Cryptlib.Util.HexBytes
 import Cryptlib.Util.Bytes
 
 /-!
@@ -16,7 +16,7 @@ import Cryptlib.Util.Bytes
 As `kem_hybrid_vectors_test`, for `kemMLKEM768X25519Blake2b`. -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Protocols.Sphinx.Geometry
 open Cryptlib.Protocols.Sphinx.Commands
 open Cryptlib.Protocols.Sphinx.KEMSphinx

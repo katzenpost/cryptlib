@@ -5,7 +5,7 @@ import Cryptlib.Primitives.NIKE.X25519_montgomery_ladder
 import Cryptlib.Primitives.NIKE.X25519
 import Cryptlib.Primitives.NIKE.Schemes
 
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Primitives.NIKE.NIKE
 
 def hexToVec32 (s : String) : Option (Vector UInt8 32) := do

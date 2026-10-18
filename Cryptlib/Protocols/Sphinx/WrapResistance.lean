@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import VCVio.CryptoFoundations.HardnessAssumptions.DiffieHellman
 import Cryptlib.Primitives.NIKE.X25519
-import Cryptlib.Protocols.Sphinx.nike_sphinx
+import Cryptlib.Protocols.Sphinx.NIKESphinx
 import Cryptlib.Util.UniformHit
 
 /-! # Wrap-resistance (§4.3)

@@ -7,11 +7,11 @@ import Cryptlib.Primitives.Hash.Blake2s
 import Cryptlib.Primitives.Hash.HKDF
 import Cryptlib.Primitives.KDF.HKDF
 import Cryptlib.Primitives.MAC.HMAC
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 open Lean
 open Cryptlib.Primitives.Hash.Hash
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 
 /-! RFC 4231 HMAC and RFC 5869 HKDF vectors (`testdata/hmac_hkdf.json`), run against the generic
 constructions at every `Hash` instance named in the file. -/

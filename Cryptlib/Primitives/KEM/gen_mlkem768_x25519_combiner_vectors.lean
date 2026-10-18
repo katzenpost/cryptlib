@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import Cryptlib.Primitives.KEM.Schemes
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # X25519 + ML-KEM-768 combiner vector generator
 
@@ -13,7 +13,7 @@ Writes random vectors in the schema `mlkem768_x25519_combiner_test.lean` checks,
 `kemX25519Blake2b`. -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Primitives.KEM
 open MLKEM
 open Cryptlib.Primitives.KEM.MLKEM768 (keygen768 encaps768 params encoding tBytes uBytes vBytes)

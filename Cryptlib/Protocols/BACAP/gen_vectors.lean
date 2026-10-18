@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Lean.Data.Json
 import Cryptlib.Protocols.BACAP.Position
 import Cryptlib.Protocols.BACAP.Types
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # Generate the BACAP vector files from `testdata/bacap_inputs.json` (from hpqc)
 
@@ -17,7 +17,7 @@ open Lean
 open Cryptlib.Protocols.BACAP.Types
 open Cryptlib.Protocols.BACAP.Ratchet
 open Cryptlib.Primitives.Hash.HKDF
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 
 abbrev Gen := ExceptT String IO
 

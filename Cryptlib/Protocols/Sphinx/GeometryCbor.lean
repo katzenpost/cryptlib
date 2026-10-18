@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Cborg
-import Cryptlib.Protocols.Sphinx.geometry
+import Cryptlib.Protocols.Sphinx.Geometry
 import Cryptlib.Primitives.Hash.Blake2b
 
 namespace Cryptlib.Protocols.Sphinx.Geometry

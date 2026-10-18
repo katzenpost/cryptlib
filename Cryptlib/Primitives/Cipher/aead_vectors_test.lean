@@ -4,12 +4,12 @@ import Cryptlib.Primitives.Cipher.AEAD
 import Cryptlib.Primitives.Cipher.AESGCM
 import Cryptlib.Primitives.Cipher.ChaChaPoly
 import Cryptlib.Util.Bytes
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 open Lean
 open Cryptlib.Primitives.Cipher.AEAD
 open Cryptlib.Util.Bytes (toVecN)
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 
 /-! Wycheproof vectors for the `AEAD` instances, run through the generic interface. Invalid
 vectors must fail to decrypt; valid ones must encrypt to the expected ciphertext and tag. -/

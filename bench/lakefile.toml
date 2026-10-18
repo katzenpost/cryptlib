@@ -1,0 +1,28 @@
+name = "cryptlib-bench"
+reservoir = false
+version = "0.1.0"
+packagesDir = "../.lake/packages"
+defaultTargets = ["cryptlib-bench"]
+
+[leanOptions]
+pp.unicode.fun = true
+autoImplicit = false
+relaxedAutoImplicit = false
+
+[[require]]
+name = "LeanBench"
+git = "https://github.com/alok/LeanBench"
+rev = "250d2a892bf8c91ec3ae5de8517793e18379f97b"
+
+# Declared last so that cryptlib's pins, Mathlib's included, take precedence over LeanBench's.
+[[require]]
+name = "cryptlib"
+path = "../"
+
+[[lean_lib]]
+name = "CryptlibBench"
+globs = ["CryptlibBench.+"]
+
+[[lean_exe]]
+name = "cryptlib-bench"
+root = "CryptlibBench.Main"

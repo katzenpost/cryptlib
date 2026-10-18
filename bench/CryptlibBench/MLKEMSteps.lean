@@ -11,7 +11,7 @@ import LeanBench
 Each bench is one step of `FIPS203.encaps`. Inputs are computed once from a real key pair and read
 from a ref so the compiler cannot hoist the work out of the timed action. -/
 
-namespace Cryptlib.Bench.MLKEMSteps
+namespace CryptlibBench.MLKEMSteps
 
 open MLKEM
 open Cryptlib.Primitives.KEM.FIPS203
@@ -65,4 +65,4 @@ def benches : IO (Array LeanBench.Bench) := do
     ← step "compressDV" v fun v => enc.compressDV v,
     ← step "byteEncodeDV ∘ compressDV" v fun v => enc.byteEncodeDV (enc.compressDV v)]
 
-end Cryptlib.Bench.MLKEMSteps
+end CryptlibBench.MLKEMSteps

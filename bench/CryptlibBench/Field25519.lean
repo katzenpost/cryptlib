@@ -10,7 +10,7 @@ import LeanBench
 
 Inputs are read from refs so the compiler cannot hoist the work out of the timed action. -/
 
-namespace Cryptlib.Bench.Field25519
+namespace CryptlibBench.Field25519
 
 open Cryptlib.Primitives.NIKE.Field25519 (Fe)
 open Cryptlib.Primitives.NIKE.X25519_montgomery_ladder (curve25519 curve25519_fe basepointBytes)
@@ -33,4 +33,4 @@ def benches : IO (Array LeanBench.Bench) := do
     { name := "x25519 ladder (ZMod)", config := cfg,
       action := do out.set (curve25519 (← scalar.get) (← base.get)) }]
 
-end Cryptlib.Bench.Field25519
+end CryptlibBench.Field25519

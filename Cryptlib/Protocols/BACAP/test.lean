@@ -9,7 +9,7 @@ import Cryptlib.Protocols.BACAP.API
 import Cryptlib.Protocols.BACAP.Position
 import Cryptlib.Protocols.BACAP.Impl
 import Cryptlib.Protocols.BACAP.Types
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-! # BACAP test vectors (from hpqc) and randomized round-trip tests -/
 
@@ -19,7 +19,7 @@ open Cryptlib.Protocols.BACAP.Ratchet
 open Cryptlib.Primitives.Hash.HKDF
 open Cryptlib.Primitives.Sign.Ed25519Blinded
 open Cryptlib.Primitives.Cipher.AESGCMSIV
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Protocols.BACAP.Impl
 
 -- ── hex parsing ──

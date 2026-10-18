@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import Cryptlib.Primitives.KEM.Schemes
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 /-!
 # NIKE-to-KEM adapter test vectors
@@ -16,7 +16,7 @@ Vectors with an unsupported `prf` are skipped; at least one must run.
 -/
 
 open Lean
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 open Cryptlib.Primitives.KEM
 open Cryptlib.Primitives.KEM.KEM
 open Cryptlib.Primitives.KEM.Adapter

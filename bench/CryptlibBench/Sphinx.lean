@@ -3,26 +3,26 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import Cryptlib.Protocols.Sphinx.bench_registry
-import Cryptlib.Protocols.Sphinx.types
-import Cryptlib.Protocols.Sphinx.nike_sphinx_theorems
-import Cryptlib.Protocols.Sphinx.kem_sphinx_theorems
+import CryptlibBench.SphinxCases
+import Cryptlib.Protocols.Sphinx.Types
+import Cryptlib.Protocols.Sphinx.NIKESphinxTheorems
+import Cryptlib.Protocols.Sphinx.KEMSphinxTheorems
 import Cryptlib.Util.Bytes
 import LeanBench
 
 /-! # Sphinx packet creation and unwrap benchmarks
 
-For each case in `BenchRegistry.sphinxBenchCases`, times packet creation and a single hop's unwrap.
+For each case in `SphinxCases.sphinxBenchCases`, times packet creation and a single hop's unwrap.
 Node and path generation run outside the timed region. -/
 
-namespace Cryptlib.Bench.Sphinx
+namespace CryptlibBench.Sphinx
 
 open Cryptlib.Protocols.Sphinx.Geometry (Geometry ofNIKE ofKEM)
 open Cryptlib.Protocols.Sphinx.Types
 open Cryptlib.Protocols.Sphinx.Commands
 open Cryptlib.Protocols.Sphinx.NIKESphinx (newNIKEPacket unwrapNIKE)
 open Cryptlib.Protocols.Sphinx.KEMSphinx (newKEMPacket unwrapKEM)
-open Cryptlib.Protocols.Sphinx.BenchRegistry
+open CryptlibBench.SphinxCases
 open Cryptlib.Primitives.NIKE.NIKE (NIKE)
 open Cryptlib.Primitives.KEM.KEM (KEM)
 open Cryptlib.Util.Bytes (ofVector toVecN)
@@ -130,4 +130,4 @@ def benches : IO (Array LeanBench.Bench) :=
     | .nike n nike => nikeBenches nike (← IO.ofExcept (ofNIKE n c.payloadSize false c.nrHops)) c.name
     | .kem n kem => kemBenches kem (← IO.ofExcept (ofKEM n c.payloadSize false c.nrHops)) c.name
 
-end Cryptlib.Bench.Sphinx
+end CryptlibBench.Sphinx

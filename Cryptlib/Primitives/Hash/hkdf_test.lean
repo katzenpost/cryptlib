@@ -2,11 +2,11 @@ import Lean.Data.Json
 
 import Cryptlib.Primitives.Hash.HKDF
 import Cryptlib.Primitives.KDF.HKDF
-import Cryptlib.Util.newhex
+import Cryptlib.Util.HexBytes
 
 open Lean
 open Cryptlib.Primitives.Hash.HKDF (blake2b_hashScheme)
-open Cryptlib.Util.newhex
+open Cryptlib.Util.HexBytes
 
 structure HKDFVector where
   name : String
