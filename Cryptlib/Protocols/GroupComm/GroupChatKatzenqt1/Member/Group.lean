@@ -67,6 +67,10 @@ structure Group where
   joinedThrough : Option Key := none
   /-- `IntroducedAt` read before the `Introduction` it names. -/
   awaitingStart : Dict Key Index := {}
+  /-- Whether this member picks the boxes it writes, as it does driven by events. A client that
+  writes for itself takes that over with its first call to write, and from then on the member
+  writes nothing by itself: its pool would name boxes the client hands out too. -/
+  allocates : Bool := true
   /-- Content delivered, by sender and box, and the epoch it came, while the policy keeps received
   content only for a time. -/
   received : Dict (Key × Index) Nat := {}
@@ -332,8 +336,9 @@ def stage (message : Message) (pending : Pending) : GM Outgoing := do
   modify fun g => { g with tokens := g.tokens + 1, pending := g.pending.set (g.tokens + 1) pending }
   pure ⟨(← get).tokens, message⟩
 
-/-- The message `token` landed in the box `index` of our stream. -/
-def written (token : Nat) (index : Index) (plaintext : Option Payload) : GM Unit := modify fun g =>
+/-- The message `token` landed in the box `index` of our stream, which we picked or our client
+did. -/
+def landed (token : Nat) (index : Index) (plaintext : Option Payload) : GM Unit := modify fun g =>
   match g.pending.get? token with
   | none => g
   | some p =>
@@ -354,7 +359,7 @@ def write (o : Outgoing) : GM (List Effect) := do
   | [] => pure []
   | index :: rest =>
     modify fun g => { g with pool := rest }
-    written o.token index (some (.message o.message))
+    landed o.token index (some (.message o.message))
     pure [.writeBox index (.message o.message)]
 
 /-- The message to send next: control if owed, else the oldest content. -/
@@ -370,7 +375,7 @@ def flushSome : Nat → GM (List Effect)
   | 0 => pure []
   | n + 1 => do
     let g ← get
-    if g.pool.isEmpty || !(g.owesControl || !g.outbox.isEmpty) then pure []
+    if !g.allocates || g.pool.isEmpty || !(g.owesControl || !g.outbox.isEmpty) then pure []
     else
       let (m, p) ← next
       let (m, p) ← withAcks m p
@@ -380,7 +385,7 @@ def flushSome : Nat → GM (List Effect)
 def flush : GM (List Effect) := do
   let effects ← flushSome (← get).pool.length
   let g ← get
-  if g.pool.length < 2 && !g.deriving_ then
+  if g.allocates && g.pool.length < 2 && !g.deriving_ then
     set { g with deriving_ := true }
     pure (effects ++ [.deriveIndexes g.me g.tip poolSize])
   else pure effects
@@ -415,7 +420,7 @@ def reply (g : Group) (ownStart : Index) : JoinReply :=
     introducer := place.getD g.me 0
     newcomer := size }
 
-def introduceNow (name : String) (readCap : ByteArray) : GM Outgoing := do
+def stageIntroduction (name : String) (readCap : ByteArray) : GM Outgoing := do
   let (m, p) ← introduction name readCap
   stage m p
 
@@ -425,7 +430,7 @@ def commitInduction : GM (List Effect) := do
   | none => pure []
   | some (name, readCap) =>
     let r := g.reply (g.pool.headD .empty)
-    let es ← write (← introduceNow name readCap)
+    let es ← write (← stageIntroduction name readCap)
     pure (es ++ [.sendJoinReply readCap r] ++ (← flush))
 
 /-- Do whatever has become possible: write what is owed, finish catching up, commit an
@@ -436,7 +441,8 @@ def holdIfSettled : GM Unit := do
 
 def commitIfReady : GM (List Effect) := do
   let g ← get
-  if g.ledger.induction = .inducting && g.ledger.commit && !g.pool.isEmpty then commitInduction
+  if g.ledger.induction = .inducting && g.ledger.commit && g.allocates && !g.pool.isEmpty then
+    commitInduction
   else pure []
 
 def progress : GM (List Effect) := do
@@ -547,9 +553,18 @@ def stageAll : List (Message × Pending) → GM (List Outgoing)
     let o ← stage m p
     pure (o :: (← stageAll rest))
 
+/-- The client writes for this member from now on. -/
+def clientWrites : GM Unit := modify fun g => { g with allocates := false }
+
+/-- The message `token` landed in the box `index` of our stream. -/
+def written (token : Nat) (index : Index) (plaintext : Option Payload) : GM Unit := do
+  clientWrites
+  landed token index plaintext
+
 /-- The messages to send now, in order: a control message if one is owed, then `content`. Each
 takes effect when `written`. -/
 def compose (content : Option ByteArray := none) : GM (List Outgoing) := do
+  clientWrites
   let owed : List (Message × Pending) ← if (← get).owesControl then (fun x => [x]) <$> control else pure []
   stageAll (owed ++ content.toList.map fun c => ({ content := some c }, Pending.mk [] none {} false))
 
@@ -575,6 +590,11 @@ def beginInduction : GM (List Outgoing) := do
   let out ← compose
   hold
   pure out
+
+/-- Commit the induction under way: the `Introduction` of the member read by `readCap`, to send. -/
+def introduceNow (name : String) (readCap : ByteArray) : GM Outgoing := do
+  clientWrites
+  stageIntroduction name readCap
 
 def cancelInduction : GM Unit := release
 
