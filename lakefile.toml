@@ -1,5 +1,5 @@
 name = "cryptlib"
-version = "0.1.0"
+version = "0.1.1"
 description = "Lean cryptography library for prototyping/modeling protocols and proving protocol properties."
 keywords = ["cryptography", "post-quantum", "verification", "sphinx", "mixnet"]
 homepage = "https://cryptlib.io"
