@@ -53,6 +53,8 @@ Classical NIKEs, two independent implementations of the same exchange:
 |:---:|
 * AES-256-GCM-SIV (RFC 8452), the misuse-resistant mode BACAP encrypts pigeonhole boxes with,
   built on AES-256 and POLYVAL (RFC 8452 §3)
+* AES-128-GCM and AES-256-GCM (NIST SP 800-38D), one construction over an expanded key schedule
+  so its laws are proved once for both; checked against Wycheproof
 
 | HASH: Cryptographic Hash Function |
 |:---:|
@@ -126,7 +128,8 @@ lake exe Cryptlib.Primitives.Hash.test          # SHA-512 vectors from hpqc
 lake exe Cryptlib.Primitives.Hash.hkdf_test     # HKDF-BLAKE2b raw function vectors
 lake exe Cryptlib.Primitives.Hash.hkdf_structured_test  # HKDF structured instance vectors
 lake exe Cryptlib.Primitives.KDF.argon2_test    # Argon2 vectors from RFC 9106 and x/crypto/argon2
-lake exe Cryptlib.Primitives.Cipher.test        # AES-256-GCM-SIV vectors from hpqc
+lake exe Cryptlib.Primitives.Cipher.test        # AES-128/256 FIPS-197 blocks, AES-256-GCM-SIV vectors from hpqc
+lake exe Cryptlib.Primitives.Cipher.aead_vectors_test  # Wycheproof ChaCha20-Poly1305, AES-128-GCM, AES-256-GCM
 lake exe Cryptlib.Primitives.Sign.test
 lake exe Cryptlib.Primitives.Sign.blinded_test  # blinded Ed25519 vectors from hpqc
 lake exe Cryptlib.Protocols.BACAP.test         # BACAP vectors from hpqc

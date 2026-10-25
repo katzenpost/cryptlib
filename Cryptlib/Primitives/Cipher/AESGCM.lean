@@ -15,11 +15,13 @@ open Cryptlib.Primitives.Cipher.AES
 open Cryptlib.Primitives.Cipher.GHash (ghash)
 open Cryptlib.Util.Bytes
 
-/-! # AES-256-GCM (NIST SP 800-38D), 96-bit nonces and 128-bit tags
+/-! # AES-GCM (NIST SP 800-38D), 96-bit nonces and 128-bit tags
 
-Nonces must not repeat under one key. -/
+AES-128-GCM and AES-256-GCM share one construction over an expanded key schedule, so its laws are
+proved once for both. Nonces must not repeat under one key. -/
 
-abbrev Key := Vector UInt8 32
+/-- An expanded AES key schedule, from `expandKey` or `expandKey128`. -/
+abbrev Key := Array UInt8
 abbrev Nonce := Vector UInt8 12
 
 /-- The counter block `nonce ‖ BE32(i)`; `J₀` is `i = 1` and encryption starts at `i = 2`. -/
@@ -36,8 +38,8 @@ private def xorKeystream (ks d : ByteArray) : ByteArray :=
   let k := ks.data
   ⟨d.data.mapIdx fun i b => b ^^^ k.getD i 0⟩
 
-def gctr (key : Key) (n : Nonce) (d : ByteArray) : ByteArray :=
-  xorKeystream (keystream (expandKey key) n d.size) d
+def gctr (rk : Key) (n : Nonce) (d : ByteArray) : ByteArray :=
+  xorKeystream (keystream rk n d.size) d
 
 private def pad16 (b : ByteArray) : ByteArray :=
   b ++ ⟨Array.replicate ((16 - b.size % 16) % 16) 0⟩
@@ -46,8 +48,7 @@ private def be64 (x : Nat) : ByteArray :=
   ⟨Array.ofFn fun i : Fin 8 => UInt8.ofNat (x >>> (8 * (7 - i.val)))⟩
 
 /-- `E(K, J₀) ⊕ GHASH_H(pad(A) ‖ pad(C) ‖ BE64(|A| bits) ‖ BE64(|C| bits))`, `H = E(K, 0¹²⁸)`. -/
-def tagOf (key : Key) (n : Nonce) (ad ct : ByteArray) : ByteArray :=
-  let rk := expandKey key
+def tagOf (rk : Key) (n : Nonce) (ad ct : ByteArray) : ByteArray :=
   let h := encryptBlock rk (Vector.replicate 16 0)
   let s := ghash h (pad16 ad ++ pad16 ct ++ be64 (8 * ad.size) ++ be64 (8 * ct.size))
   let ej := encryptBlock rk (counterBlock n 1)
@@ -72,7 +73,7 @@ def decrypt (key : Key) (n : Nonce) (ad ct : ByteArray) : Option ByteArray :=
 
 private theorem gctr_gctr (key : Key) (n : Nonce) (d : ByteArray) :
     gctr key n (gctr key n d) = d := by
-  show xorKeystream (keystream (expandKey key) n (gctr key n d).size) (gctr key n d) = d
+  show xorKeystream (keystream key n (gctr key n d).size) (gctr key n d) = d
   rw [size_gctr]
   apply ByteArray.ext
   apply Array.ext
@@ -134,7 +135,27 @@ def Scheme : AEAD where
   maxPlaintextSize := (2 ^ 39 - 256) / 8
   maxADSize        := (2 ^ 64 - 1) / 8
 
-  keyFromBytes := id
+  keyFromBytes := expandKey
+
+  encrypt := encrypt
+  decrypt := decrypt
+
+  size_encrypt    := size_encrypt
+  decrypt_encrypt := decrypt_encrypt
+  decrypt_sound   := decrypt_sound
+
+def Scheme128 : AEAD where
+  Key := Key
+
+  name      := "AES-128-GCM"
+  keySize   := 16
+  nonceSize := 12
+  tagSize   := 16
+
+  maxPlaintextSize := (2 ^ 39 - 256) / 8
+  maxADSize        := (2 ^ 64 - 1) / 8
+
+  keyFromBytes := expandKey128
 
   encrypt := encrypt
   decrypt := decrypt
