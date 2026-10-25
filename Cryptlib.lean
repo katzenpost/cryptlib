@@ -19,6 +19,7 @@ import Cryptlib.Util.UInt32
 import Cryptlib.Util.Serial
 import Cryptlib.Util.Combine
 import Cryptlib.Util.Bytes
+import Cryptlib.Util.ConstantTime
 import Cryptlib.Util.UniformHit
 import Cryptlib.Data.MerkleHashTree
 import Cryptlib.Primitives.KEM.KEM
