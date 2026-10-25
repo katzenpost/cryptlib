@@ -61,6 +61,12 @@ def aesBlockOk : Bool :=
   let input : Vector UInt8 16 := Vector.ofFn fun i : Fin 16 => UInt8.ofNat (17 * i.val)
   hexOf (AES.encryptBlockWithKey key input) == "8ea2b7ca516745bfeafc49904b496089"
 
+/-- FIPS-197 C.1: AES-128 on one block, key `00 01 … 0f`, input `00 11 … ff`. -/
+def aes128BlockOk : Bool :=
+  let key   : Vector UInt8 16 := Vector.ofFn fun i : Fin 16 => UInt8.ofNat i.val
+  let input : Vector UInt8 16 := Vector.ofFn fun i : Fin 16 => UInt8.ofNat (17 * i.val)
+  hexOf (AES.encryptBlockWithKey128 key input) == "69c4e0d86a7b0430d8cdb78070b4c55a"
+
 /-- Decode an inline hex literal. -/
 def hex (s : String) : Except String ByteArray :=
   match hexStringToByteArray s with
@@ -79,6 +85,14 @@ def main : IO UInt32 := do
 
   IO.println "AES-256 block (FIPS-197 C.3)"
   if aesBlockOk then
+    IO.println "  ok    single block, computed S-box"
+  else
+    ok := false
+    IO.println "  FAIL  single block"
+
+  IO.println ""
+  IO.println "AES-128 block (FIPS-197 C.1)"
+  if aes128BlockOk then
     IO.println "  ok    single block, computed S-box"
   else
     ok := false

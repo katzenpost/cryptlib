@@ -49,4 +49,5 @@ def runFile (A : AEAD) (path : String) : IO Nat := do
 def main : IO UInt32 := do
   let f1 ← runFile Cryptlib.Primitives.Cipher.ChaChaPoly.Scheme "testdata/chacha20_poly1305.json"
   let f2 ← runFile Cryptlib.Primitives.Cipher.AESGCM.Scheme "testdata/aes256_gcm.json"
-  pure (if f1 + f2 == 0 then 0 else 1)
+  let f3 ← runFile Cryptlib.Primitives.Cipher.AESGCM.Scheme128 "testdata/aes128_gcm.json"
+  pure (if f1 + f2 + f3 == 0 then 0 else 1)
