@@ -19,7 +19,7 @@ rev = "v4.35.0"
 [[require]]
 name = "cborg"
 git = "https://github.com/katzenpost/cborg.git"
-rev = "93021db64d6f6d931b75a2d00bbbc59aca7c88c7"
+rev = "v0.2.0"
 
 # Declared last: VCVio pins mathlib v4.35.0, so this direct requirement (matching that pin)
 # must come after VCVio's for Lake's reverse-declaration-order precedence to keep it authoritative.
