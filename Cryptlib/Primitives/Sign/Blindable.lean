@@ -71,11 +71,11 @@ variable (B : Blindable)
 
 /-- A signature made with a blinded private key verifies under the blinded public key. -/
 theorem verify_blinded (sk : B.base.PrivateKey) (f : B.Scalar)
-    (m : ByteArray) (s : B.base.State) :
-    B.base.verify (B.blindPub (B.base.pub sk) f) m (B.base.sign (B.blindPriv sk f) m s).1
-      = true := by
+    (m : ByteArray) (s : B.base.State) {σ : B.base.Sig} {s' : B.base.State}
+    (h : B.base.sign (B.blindPriv sk f) m s = .ok σ s') :
+    B.base.verify (B.blindPub (B.base.pub sk) f) m σ = true := by
   rw [← B.blind_hom]
-  exact B.base.verify_sign _ _ _
+  exact B.base.verify_sign _ _ _ _ _ h
 
 /-- Blinding a private key twice derives the same public key as blinding once by the product. -/
 theorem blindPriv_assoc (sk : B.base.PrivateKey) (f g : B.Scalar) :
