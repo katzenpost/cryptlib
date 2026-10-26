@@ -35,6 +35,7 @@ TESTS := \
 	Cryptlib.Protocols.Sphinx.nike_vectors_test \
 	Cryptlib.Protocols.Sphinx.kem_vectors_test \
 	Cryptlib.Primitives.KEM.MLKEM.mlkem_test \
+	Cryptlib.Primitives.Sign.MLDSA.mldsa_test \
 	Cryptlib.Primitives.Hash.blake2b_256_test \
 	Cryptlib.Primitives.Hash.blake2b_xof_test \
 	Cryptlib.Primitives.KEM.mlkem768_x25519_combiner_test \
@@ -60,7 +61,7 @@ EXES := $(TESTS) Cryptlib.Protocols.BACAP.gen_vectors Cryptlib.Protocols.Sphinx.
 
 .PHONY: all build test bench bench-nike bench-kem bench-sphinx sorries clean help
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf test-argon2
-.PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
+.PHONY: test-hkdf-structured test-cipher test-sign test-mldsa test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors gen-hybrid-vectors gen-hedged-vectors gen-mrhybrid-vectors test-mrhybrid test-mlkem test-mlkem-kat test-mlkem-hedged test-hybrid-sphinx
 .PHONY: verify-vectors gen-acks-vectors gen-groupchat-wire-vectors check-bacap-vectors axioms tla veil
 .PHONY: api-docs website website-pages website-serve mathlib-cache
@@ -186,6 +187,9 @@ test-mlkem: build ## ML-KEM-768: round-trip self-test + NIST ACVP known-answer v
 
 test-mlkem-kat: build ## ML-KEM-768: NIST ACVP known-answer vectors only
 	@$(BIN)/Cryptlib-Primitives-KEM-MLKEM-mlkem_test
+
+test-mldsa: build ## ML-DSA-65: NIST ACVP known-answer vectors and sign/verify round trips
+	@$(BIN)/Cryptlib-Primitives-Sign-MLDSA-mldsa_test
 
 test-mlkem-hedged: build ## hedged ML-KEM-512/768/1024: NIST ACVP vectors + hpqc cross-check vectors
 	@$(BIN)/Cryptlib-Primitives-KEM-MLKEMHedged-mlkemhedged_test

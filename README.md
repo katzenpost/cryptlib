@@ -48,6 +48,11 @@ Classical NIKEs, two independent implementations of the same exchange:
 | SIGN: Cryptographic Signature Scheme |
 |:---:|
 * Ed25519 (RFC 8032), plain and blinded variants
+* ML-DSA-65 (FIPS 204), built from [VCVio](https://github.com/dtumad/VCV-io)'s pure-Lean ML-DSA
+  specification, concrete rounding, NTT and encodings, with its samplers over pure-Lean SHAKE.
+  Correctness (`FIPS204.correct`: what the signer returns verifies) is proved from those
+  components' laws, without VCVio's random-oracle assumption; checked against the official NIST
+  ACVP known-answer vectors (key generation, deterministic and hedged signing, verification)
 
 | AEAD: Authenticated Encryption with Associated Data |
 |:---:|
@@ -141,6 +146,7 @@ lake exe Cryptlib.Protocols.Sphinx.kem_selftest     # KEM-Sphinx round-trip self
 lake exe Cryptlib.Protocols.Sphinx.nike_vectors_test  # NIKE-Sphinx full-packet vectors from katzenpost
 lake exe Cryptlib.Protocols.Sphinx.kem_vectors_test   # KEM-Sphinx full-packet vectors from katzenpost
 lake exe Cryptlib.Primitives.KEM.MLKEM.mlkem_test      # ML-KEM-768 NIST ACVP known-answer vectors
+lake exe Cryptlib.Primitives.Sign.MLDSA.mldsa_test     # ML-DSA-65 NIST ACVP known-answer vectors
 lake exe Cryptlib.Primitives.Hash.blake2b_256_test     # BLAKE2b-256 (unkeyed and keyed) vectors from hpqc
 lake exe Cryptlib.Primitives.KEM.mlkem768_x25519_combiner_test  # X25519+ML-KEM-768 hybrid vectors from hpqc
 lake exe Cryptlib.Protocols.Sphinx.kem_hybrid_vectors_test     # KEM-Sphinx hybrid full-packet vectors from katzenpost
@@ -150,6 +156,7 @@ A few suites also have their own dedicated `make` target, for running just that 
 
 ```bash
 make test-mlkem-kat      # just the ML-KEM-768 NIST ACVP known-answer vectors
+make test-mldsa          # just the ML-DSA-65 NIST ACVP known-answer vectors
 make test-hybrid-sphinx  # just the KEM-Sphinx round-trip self-test for the hybrid KEM
 make test-mlkem          # both of the above, together
 ```
@@ -185,6 +192,7 @@ vectors — the `Source` column below is each file's canonical path in its own r
 from Go's `golang.org/x/crypto/argon2` v0.58.0 across memory sizes, lane counts and tag lengths.
 | `sphinx_kem_hybrid_vectors.json` | KEM-Sphinx full packets, X25519+ML-KEM-768 hybrid (10: every hop count × `withSURB`) | `katzenpost/core/sphinx/testdata/kemsphinx_mlkem768x25519_vectors.json` |
 | `mlkem768_keygen.json`, `mlkem768_encapdecap.json`, `mlkem768_keycheck.json` | ML-KEM-768 (FIPS 203) — NIST's own official ACVP known-answer vectors, not from hpqc or katzenpost | [NIST's `usnistgov/ACVP-Server`](https://github.com/usnistgov/ACVP-Server) |
+| `mldsa65_keygen.json`, `mldsa65_siggen.json`, `mldsa65_sigver.json` | ML-DSA-65 (FIPS 204) — NIST's official ACVP known-answer vectors, extracted by `scripts/extract_acvp_mldsa.py` | [NIST's `usnistgov/ACVP-Server`](https://github.com/usnistgov/ACVP-Server) |
 
 A few more files in that directory aren't vendored input — they're output, written by this
 repo's own `gen_nike_vectors`/`gen_kem_vectors`/`gen_mlkem768_x25519_combiner_vectors` (Lean-built
