@@ -59,10 +59,11 @@ variable (sk : ed25519Blindable.base.PrivateKey) (f : ed25519Blindable.Scalar)
          (m : ByteArray) (s : ed25519Blindable.base.State)
 
 /-- A signature made under a blinded key verifies against the blinded public key, at Ed25519. -/
-example : ed25519Blindable.base.verify
-            (ed25519Blindable.blindPub (ed25519Blindable.base.pub sk) f) m
-            (ed25519Blindable.base.sign (ed25519Blindable.blindPriv sk f) m s).1 = true :=
-  verify_blinded ed25519Blindable sk f m s
+example {σ : ed25519Blindable.base.Sig} {s' : ed25519Blindable.base.State}
+    (h : ed25519Blindable.base.sign (ed25519Blindable.blindPriv sk f) m s = .ok σ s') :
+    ed25519Blindable.base.verify (ed25519Blindable.blindPub (ed25519Blindable.base.pub sk) f) m σ =
+      true :=
+  verify_blinded ed25519Blindable sk f m s h
 
 /-- Blinding twice agrees with blinding by the product, observably. -/
 example : ed25519Blindable.base.pub
@@ -74,9 +75,10 @@ example : ed25519Blindable.base.pub
 end
 
 /-- The hybrid scheme's correctness law. -/
-example (sk : ed25519Hybrid.PrivateKey) (m : ByteArray) (s : ed25519Hybrid.State) :
-    ed25519Hybrid.verify (ed25519Hybrid.pub sk) m (ed25519Hybrid.sign sk m s).1 = true :=
-  ed25519Hybrid.verify_sign sk m s
+example (sk : ed25519Hybrid.PrivateKey) (m : ByteArray) (s : ed25519Hybrid.State)
+    {σ : ed25519Hybrid.Sig} {s' : ed25519Hybrid.State} (h : ed25519Hybrid.sign sk m s = .ok σ s') :
+    ed25519Hybrid.verify (ed25519Hybrid.pub sk) m σ = true :=
+  ed25519Hybrid.verify_sign sk m s σ s' h
 
 /-- A hybrid is itself a `Signature`, so it can be combined again. -/
 noncomputable example : Signature :=

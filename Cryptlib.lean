@@ -18,6 +18,7 @@ import Cryptlib.Util.Nat
 import Cryptlib.Util.UInt32
 import Cryptlib.Util.Serial
 import Cryptlib.Util.Combine
+import Cryptlib.Util.Triple
 import Cryptlib.Util.Bytes
 import Cryptlib.Util.ConstantTime
 import Cryptlib.Util.UniformHit

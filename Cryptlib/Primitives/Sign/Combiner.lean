@@ -75,8 +75,17 @@ def combineSign : Signature where
     simp [splitL_append, splitR_append, s₁.decode_encode_sig, s₂.decode_encode_sig]
 
   verify_sign := by
-    intro sk m s
-    simp only [bind, StateT.bind, sliftL, sliftR, pure, StateT.pure,
-               s₁.verify_sign, s₂.verify_sign, Bool.and_self]
+    intro sk m ⟨t₁, t₂⟩ σ s' h
+    simp only [bind, EStateM.bind, pure, EStateM.pure] at h
+    split at h
+    · rename_i a t hl
+      obtain ⟨t₁', h₁, rfl⟩ := sliftL_ok hl
+      split at h
+      · rename_i b t' hr
+        obtain ⟨t₂', h₂, rfl⟩ := sliftR_ok hr
+        cases h
+        simp [s₁.verify_sign _ _ _ _ _ h₁, s₂.verify_sign _ _ _ _ _ h₂]
+      · contradiction
+    · contradiction
 
 end Cryptlib.Primitives.Sign.Combiner
