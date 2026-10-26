@@ -7,19 +7,19 @@ import LatticeCrypto.MLKEM.Primitives
 import LatticeCrypto.MLKEM.Concrete.NTT
 import LatticeCrypto.MLKEM.Concrete.Encoding
 import LatticeCrypto.MLKEM.Concrete.CBD
-import HashSig.SLHDSA.Concrete.Keccak
+import VCVio.Algorithms.Keccak
 import Cryptlib.Util.Bytes
 
 /-! # ML-KEM primitives, for every FIPS 203 parameter set
 
 VCVio's pure-Lean NTT, encoding and CBD, with SHA-3/SHAKE from the pure-Lean Keccak sponge in
-`HashSig.SLHDSA.Concrete.Keccak` in place of VCVio's FFI hash bindings. -/
+`VCVio.Algorithms.Keccak` in place of VCVio's FFI hash bindings. -/
 
 namespace Cryptlib.Primitives.KEM.FIPS203
 
 open MLKEM
 open MLKEM.Concrete
-open SLHDSA.Concrete.Keccak
+open VCVio.Algorithms.Keccak
 
 abbrev vectorToByteArray {n : Nat} (v : Vector UInt8 n) : ByteArray :=
   Cryptlib.Util.Bytes.ofVector v
@@ -69,12 +69,12 @@ def prfCBD (eta : Nat) (sigma : Seed32) (n : Nat) : Rq :=
 
 /-- `G(input) = SHA3-512(input)`, split into two 32-byte halves. -/
 def hashG (input : ByteArray) : Seed32 × Seed32 :=
-  let hash := sha3_512 input
+  let hash := sha3Digest512 input
   (byteArrayToVector hash 0 32, byteArrayToVector hash 32 32)
 
 /-- `H(input) = SHA3-256(input)` as a 32-byte vector. -/
 def hashH (input : ByteArray) : Vector UInt8 32 :=
-  byteArrayToVector (sha3_256 input) 0 32
+  byteArrayToVector (sha3Digest256 input) 0 32
 
 /-! ## A faster `byteEncodeVec`
 

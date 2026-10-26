@@ -4,6 +4,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import VCVio.OracleComp.Constructions.SampleableType
+import VCVio.OracleComp.EvalDist.Sum
+import VCVio.OracleComp.Constructions.SampleableType.Measure
 
 /-! # Hitting a fixed target through a bijection
 
@@ -18,10 +20,11 @@ open OracleComp OracleSpec ENNReal
 with probability `1/|F|`. -/
 theorem uniformHit_eq_of_injective {F G : Type} [Fintype F] [SampleableType F] [DecidableEq G]
     {act : F → G} (hinj : Function.Injective act) {target : G} (htarget : target ∈ Set.range act) :
-    Pr[= true | ($ᵗ F) >>= fun b => pure (decide (act b = target))] =
+    Pr{let x ← ($ᵗ F) >>= fun b => pure (decide (act b = target))}[x = true] =
       (Fintype.card F : ℝ≥0∞)⁻¹ := by
   obtain ⟨b₀, rfl⟩ := htarget
-  simp only [probOutput_bind_eq_tsum, probOutput_uniformSample, probOutput_pure]
+  simp only [OracleComp.prEvent_bind_eq_tsum, SampleableType.prEvent_uniformSample_eq_singleton,
+    prEvent_pure]
   rw [tsum_fintype, Finset.sum_eq_single b₀]
   · simp
   · intro b _ hne
@@ -32,7 +35,7 @@ theorem uniformHit_eq_of_injective {F G : Type} [Fintype F] [SampleableType F] [
 probability `1/|F|`. -/
 theorem uniformHit_eq {F G : Type} [Fintype F] [SampleableType F] [DecidableEq G]
     {act : F → G} (hact : Function.Bijective act) (target : G) :
-    Pr[= true | ($ᵗ F) >>= fun b => pure (decide (act b = target))] =
+    Pr{let x ← ($ᵗ F) >>= fun b => pure (decide (act b = target))}[x = true] =
       (Fintype.card F : ℝ≥0∞)⁻¹ :=
   uniformHit_eq_of_injective hact.injective (hact.surjective target)
 

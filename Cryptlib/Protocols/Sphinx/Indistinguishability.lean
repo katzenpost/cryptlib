@@ -18,8 +18,8 @@ indistinguishability are not mechanized. -/
 namespace Cryptlib.Protocols.Sphinx.Indistinguishability
 
 open OracleComp OracleSpec ENNReal
-open PRGScheme (PRGAdversary prgRealExp prgIdealExp prgAdvantage)
-open DiffieHellman (DDHAdversary ddhExpReal ddhExpRand ddhDistAdvantage)
+open PRGScheme (PRGAdversary prgRealExperiment prgIdealExperiment)
+open DiffieHellman (DDHAdversary ddhRealExperiment ddhRandomExperiment)
 
 variable {F G Seed KeyMu KeyPi Beta Gamma Delta : Type}
 variable [Field F] [AddCommGroup G] [Module F G] [AddCommGroup Beta]
@@ -40,6 +40,13 @@ structure Choice (Beta Delta : Type) where
   deltaPt : Delta
 
 variable (S : Sys F G Seed KeyMu KeyPi Beta Gamma Delta)
+
+omit [Field F] [AddCommGroup G] [Module F G] [AddCommGroup Beta] in
+/-- A leading draw whose result goes unused leaves an event unchanged. -/
+theorem prEvent_bind_unused {α β : Type} (mx : ProbComp α) (my : ProbComp β) (p : β → Prop) :
+    Pr{let y ← mx >>= fun _ => my}[p y] = Pr{let y ← my}[p y] := by
+  simp only [prEvent_norm]
+  exact OracleComp.prEvent_bind_const _ _
 
 /-- Hop 0's tuple `((α0,β0,γ0),δ0)` from `α0 = x • g` and `s0`. -/
 def buildFrom (α0 s0 : G) (c : Choice Beta Delta) : G × Beta × Gamma × Delta :=
@@ -77,7 +84,7 @@ def game2 (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delt
 noncomputable def advantage
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) : ℝ :=
-  |(Pr[= true | gameReal S A c0 c1]).toReal - 1 / 2|
+  |(Pr{let x ← gameReal S A c0 c1}[x = true]).toReal - 1 / 2|
 
 end Games
 
@@ -94,24 +101,24 @@ def ddhAdversaryOf
     let guess ← A (buildFrom S α0 s0 (if b then c1 else c0))
     return (b == guess)
 
-/-- `ddhExpReal` equals `gameReal`. -/
+/-- `ddhRealExperiment` equals `gameReal`. -/
 theorem probTrue_gameReal_eq_ddhExpReal
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
-    Pr[= true | gameReal S A c0 c1] =
-      Pr[= true | ddhExpReal S.g (ddhAdversaryOf S A c0 c1)] := by
-  unfold gameReal ddhExpReal ddhAdversaryOf
+    Pr{let x ← gameReal S A c0 c1}[x = true] =
+      Pr{let x ← ddhRealExperiment S.g (ddhAdversaryOf S A c0 c1)}[x = true] := by
+  unfold gameReal ddhRealExperiment ddhAdversaryOf
   rfl
 
-/-- `ddhExpRand` equals `game2`. -/
+/-- `ddhRandomExperiment` equals `game2`. -/
 theorem probTrue_game2_eq_ddhExpRand
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
-    Pr[= true | game2 S A c0 c1] =
-      Pr[= true | ddhExpRand S.g (ddhAdversaryOf S A c0 c1)] := by
-  unfold game2 ddhExpRand ddhAdversaryOf
-  refine probOutput_bind_congr' ($ᵗ F) true fun x => ?_
-  rw [probOutput_bind_const, probFailure_uniformSample, tsub_zero, one_mul]
+    Pr{let x ← game2 S A c0 c1}[x = true] =
+      Pr{let x ← ddhRandomExperiment S.g (ddhAdversaryOf S A c0 c1)}[x = true] := by
+  unfold game2 ddhRandomExperiment ddhAdversaryOf
+  refine prEvent_bind_congr _ _ _ _ _ fun x => ?_
+  rw [prEvent_bind_unused]
 
 end DDHReduction
 
@@ -163,11 +170,11 @@ omit [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi]
 theorem probTrue_game2_eq_prgRealExp_joint
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
-    Pr[= true | game2 S A c0 c1] =
-      Pr[= true | do
+    Pr{let x ← game2 S A c0 c1}[x = true] =
+      Pr{let y ← (do
         let x ← $ᵗ F
-        prgRealExp (jointKeyPRG S) (jointAdversaryOf S A c0 c1 x)] := by
-  unfold game2 prgRealExp jointKeyPRG jointAdversaryOf
+        prgRealExperiment (jointKeyPRG S) (jointAdversaryOf S A c0 c1 x))}[y = true] := by
+  unfold game2 prgRealExperiment jointKeyPRG jointAdversaryOf
   rfl
 
 omit [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi] [Finite F] in
@@ -175,15 +182,14 @@ omit [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi] [Finite
 theorem probTrue_game2'_eq_prgIdealExp_joint
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
-    Pr[= true | game2' S A c0 c1] =
-      Pr[= true | do
+    Pr{let x ← game2' S A c0 c1}[x = true] =
+      Pr{let y ← (do
         let x ← $ᵗ F
-        prgIdealExp (jointAdversaryOf S A c0 c1 x)] := by
-  unfold game2' prgIdealExp jointAdversaryOf
-  refine probOutput_bind_congr' ($ᵗ F) true fun x => ?_
-  rw [probOutput_bind_bind_swap ($ᵗ Bool) ($ᵗ (Seed × KeyMu × KeyPi))
-    (fun b p => A (buildFromKeys S (x • S.g) p.1 p.2.1 p.2.2 (if b then c1 else c0)) >>=
-      fun guess => pure (b == guess)) true]
+        prgIdealExperiment (jointAdversaryOf S A c0 c1 x))}[y = true] := by
+  unfold game2' prgIdealExperiment jointAdversaryOf
+  refine prEvent_bind_congr _ _ _ _ _ fun x => ?_
+  simp only [prEvent_norm]
+  exact OracleComp.prEvent_bind_bind_swap _ _ _
 
 end KeyIndependence
 
@@ -214,12 +220,12 @@ omit [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi] [Sample
 theorem probTrue_game2'_eq_prgRealExp_combined
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
-    Pr[= true | game2' S A c0 c1] =
-      Pr[= true | do
+    Pr{let x ← game2' S A c0 c1}[x = true] =
+      Pr{let y ← (do
         let x ← $ᵗ F
         let b ← $ᵗ Bool
-        prgRealExp (combinedPRG S (if b then c1 else c0)) (combinedAdversaryOf S A x b)] := by
-  unfold game2' prgRealExp combinedPRG combinedAdversaryOf combinedGen
+        prgRealExperiment (combinedPRG S (if b then c1 else c0)) (combinedAdversaryOf S A x b))}[y = true] := by
+  unfold game2' prgRealExperiment combinedPRG combinedAdversaryOf combinedGen
   rfl
 
 /-- Game `G3`: `β0, γ0, δ0` replaced by an independent uniform triple. -/
@@ -237,53 +243,54 @@ omit [AddCommGroup Beta] [SampleableType Seed] [SampleableType KeyMu] [Sampleabl
 theorem probTrue_game3_eq_prgIdealExp_combined
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
-    Pr[= true | game3 S A c0 c1] =
-      Pr[= true | do
+    Pr{let x ← game3 S A c0 c1}[x = true] =
+      Pr{let y ← (do
         let x ← $ᵗ F
         let b ← $ᵗ Bool
-        prgIdealExp (combinedAdversaryOf S A x b)] := by
-  unfold game3 prgIdealExp combinedAdversaryOf
+        prgIdealExperiment (combinedAdversaryOf S A x b))}[y = true] := by
+  unfold game3 prgIdealExperiment combinedAdversaryOf
   rfl
 
 omit [AddCommGroup Beta] [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi]
   [SampleableType Beta] [SampleableType Gamma] [SampleableType Delta]
   [SampleableType (Seed × KeyMu × KeyPi)] in
-/-- In `G3` a `NeverFail` adversary guesses `b` with probability exactly `1/2`. -/
+/-- In `G3` the adversary guesses `b` with probability exactly `1/2`. -/
 theorem probTrue_game3
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
-    [∀ v, NeverFail (A v)] (c0 c1 : Choice Beta Delta) :
-    (Pr[= true | game3 S A c0 c1]).toReal = 1 / 2 := by
+    (c0 c1 : Choice Beta Delta) :
+    (Pr{let x ← game3 S A c0 c1}[x = true]).toReal = 1 / 2 := by
   have hstep : ∀ x : F,
-      Pr[= true | do
+      Pr{let y ← (do
         let b ← $ᵗ Bool
         let t ← $ᵗ (Beta × Gamma × Delta)
         let guess ← A (x • S.g, t.1, t.2.1, t.2.2)
-        return (b == guess)] = 1 / 2 := by
+        return (b == guess))}[y = true] = 1 / 2 := by
     intro x
     -- The adversary's input does not depend on `b`.
-    have h := probOutput_decide_eq_uniformBool_half
+    have h := ProbComp.evalDist_decide_eq_uniformBool_half
       (f := fun _ : Bool => do
         let t ← $ᵗ (Beta × Gamma × Delta)
         A (x • S.g, t.1, t.2.1, t.2.2))
       rfl
+    rw [prEvent_eq_evalDist_singleton]
     simpa only [show ∀ a b : Bool, decide (a = b) = (a == b) from fun _ _ => rfl,
       bind_assoc] using h
   unfold game3
-  have hconst : Pr[= true | do
+  have hconst : Pr{let y ← (do
         let x ← $ᵗ F
         let b ← $ᵗ Bool
         let t ← $ᵗ (Beta × Gamma × Delta)
         let guess ← A (x • S.g, t.1, t.2.1, t.2.2)
-        return (b == guess)] =
-      Pr[= true | do
+        return (b == guess))}[y = true] =
+      Pr{let x ← (do
         let _x ← $ᵗ F
         let b ← $ᵗ Bool
         let t ← $ᵗ (Beta × Gamma × Delta)
         let guess ← A ((0 : F) • S.g, t.1, t.2.1, t.2.2)
-        return (b == guess)] := by
-    refine probOutput_bind_congr' ($ᵗ F) true fun x => ?_
+        return (b == guess))}[x = true] := by
+    refine prEvent_bind_congr _ _ _ _ _ fun x => ?_
     rw [hstep x, hstep 0]
-  rw [hconst, probOutput_bind_const, probFailure_uniformSample, tsub_zero, one_mul, hstep 0]
+  rw [hconst, prEvent_bind_unused, hstep 0]
   norm_num
 
 end PRGHybrid
@@ -299,35 +306,36 @@ omit [Finite F] [SampleableType Seed] [SampleableType KeyMu] [SampleableType Key
 (`hjointPRG`), and the combined ρ/μ/π PRG advantage (`hprg`). -/
 theorem advantage_le
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
-    [∀ v, NeverFail (A v)] (c0 c1 : Choice Beta Delta) (εDDH εJoint εPRG : ℝ)
-    (hddh : ddhDistAdvantage S.g (ddhAdversaryOf S A c0 c1) ≤ εDDH)
-    (hjointPRG : |(Pr[= true | game2 S A c0 c1]).toReal -
-      (Pr[= true | game2' S A c0 c1]).toReal| ≤ εJoint)
-    (hprg : |(Pr[= true | game2' S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal| ≤ εPRG) :
+    (c0 c1 : Choice Beta Delta) (εDDH εJoint εPRG : ℝ)
+    (hddh : |(Pr{let x ← ddhRealExperiment S.g (ddhAdversaryOf S A c0 c1)}[x = true]).toReal -
+      (Pr{let x ← ddhRandomExperiment S.g (ddhAdversaryOf S A c0 c1)}[x = true]).toReal| ≤ εDDH)
+    (hjointPRG : |(Pr{let x ← game2 S A c0 c1}[x = true]).toReal -
+      (Pr{let x ← game2' S A c0 c1}[x = true]).toReal| ≤ εJoint)
+    (hprg : |(Pr{let x ← game2' S A c0 c1}[x = true]).toReal - (Pr{let x ← game3 S A c0 c1}[x = true]).toReal| ≤ εPRG) :
     advantage S A c0 c1 ≤ εDDH + εJoint + εPRG := by
   unfold advantage
-  have e1 : (Pr[= true | gameReal S A c0 c1]).toReal =
-      (Pr[= true | ddhExpReal S.g (ddhAdversaryOf S A c0 c1)]).toReal := by
+  have e1 : (Pr{let x ← gameReal S A c0 c1}[x = true]).toReal =
+      (Pr{let x ← ddhRealExperiment S.g (ddhAdversaryOf S A c0 c1)}[x = true]).toReal := by
     rw [probTrue_gameReal_eq_ddhExpReal]
-  have e2 : (Pr[= true | game2 S A c0 c1]).toReal =
-      (Pr[= true | ddhExpRand S.g (ddhAdversaryOf S A c0 c1)]).toReal := by
+  have e2 : (Pr{let x ← game2 S A c0 c1}[x = true]).toReal =
+      (Pr{let x ← ddhRandomExperiment S.g (ddhAdversaryOf S A c0 c1)}[x = true]).toReal := by
     rw [probTrue_game2_eq_ddhExpRand]
-  have e4 : (Pr[= true | game3 S A c0 c1]).toReal = 1 / 2 := probTrue_game3 S A c0 c1
-  calc |(Pr[= true | gameReal S A c0 c1]).toReal - 1 / 2|
-      = |(Pr[= true | gameReal S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal| := by
+  have e4 : (Pr{let x ← game3 S A c0 c1}[x = true]).toReal = 1 / 2 := probTrue_game3 S A c0 c1
+  calc |(Pr{let x ← gameReal S A c0 c1}[x = true]).toReal - 1 / 2|
+      = |(Pr{let x ← gameReal S A c0 c1}[x = true]).toReal - (Pr{let x ← game3 S A c0 c1}[x = true]).toReal| := by
         rw [e4]
-    _ ≤ |(Pr[= true | gameReal S A c0 c1]).toReal - (Pr[= true | game2 S A c0 c1]).toReal| +
-          |(Pr[= true | game2 S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal| :=
+    _ ≤ |(Pr{let x ← gameReal S A c0 c1}[x = true]).toReal - (Pr{let x ← game2 S A c0 c1}[x = true]).toReal| +
+          |(Pr{let x ← game2 S A c0 c1}[x = true]).toReal - (Pr{let x ← game3 S A c0 c1}[x = true]).toReal| :=
         abs_sub_le _ _ _
-    _ ≤ |(Pr[= true | gameReal S A c0 c1]).toReal - (Pr[= true | game2 S A c0 c1]).toReal| +
-          (|(Pr[= true | game2 S A c0 c1]).toReal - (Pr[= true | game2' S A c0 c1]).toReal| +
-           |(Pr[= true | game2' S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal|) := by
+    _ ≤ |(Pr{let x ← gameReal S A c0 c1}[x = true]).toReal - (Pr{let x ← game2 S A c0 c1}[x = true]).toReal| +
+          (|(Pr{let x ← game2 S A c0 c1}[x = true]).toReal - (Pr{let x ← game2' S A c0 c1}[x = true]).toReal| +
+           |(Pr{let x ← game2' S A c0 c1}[x = true]).toReal - (Pr{let x ← game3 S A c0 c1}[x = true]).toReal|) := by
         gcongr
         exact abs_sub_le _ _ _
-    _ = |(Pr[= true | ddhExpReal S.g (ddhAdversaryOf S A c0 c1)]).toReal -
-          (Pr[= true | ddhExpRand S.g (ddhAdversaryOf S A c0 c1)]).toReal| +
-        (|(Pr[= true | game2 S A c0 c1]).toReal - (Pr[= true | game2' S A c0 c1]).toReal| +
-         |(Pr[= true | game2' S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal|) := by
+    _ = |(Pr{let x ← ddhRealExperiment S.g (ddhAdversaryOf S A c0 c1)}[x = true]).toReal -
+          (Pr{let x ← ddhRandomExperiment S.g (ddhAdversaryOf S A c0 c1)}[x = true]).toReal| +
+        (|(Pr{let x ← game2 S A c0 c1}[x = true]).toReal - (Pr{let x ← game2' S A c0 c1}[x = true]).toReal| +
+         |(Pr{let x ← game2' S A c0 c1}[x = true]).toReal - (Pr{let x ← game3 S A c0 c1}[x = true]).toReal|) := by
         congr 1
         rw [e1, e2]
     _ ≤ εDDH + (εJoint + εPRG) := add_le_add hddh (add_le_add hjointPRG hprg)
@@ -336,10 +344,11 @@ theorem advantage_le
 /-- The statement of `advantage_le`. -/
 abbrev AdvantageLeType :=
   ∀ (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
-    [∀ v, NeverFail (A v)] (c0 c1 : Choice Beta Delta) (εDDH εJoint εPRG : ℝ),
-    ddhDistAdvantage S.g (ddhAdversaryOf S A c0 c1) ≤ εDDH →
-    |(Pr[= true | game2 S A c0 c1]).toReal - (Pr[= true | game2' S A c0 c1]).toReal| ≤ εJoint →
-    |(Pr[= true | game2' S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal| ≤ εPRG →
+    (c0 c1 : Choice Beta Delta) (εDDH εJoint εPRG : ℝ),
+    |(Pr{let x ← ddhRealExperiment S.g (ddhAdversaryOf S A c0 c1)}[x = true]).toReal -
+      (Pr{let x ← ddhRandomExperiment S.g (ddhAdversaryOf S A c0 c1)}[x = true]).toReal| ≤ εDDH →
+    |(Pr{let x ← game2 S A c0 c1}[x = true]).toReal - (Pr{let x ← game2' S A c0 c1}[x = true]).toReal| ≤ εJoint →
+    |(Pr{let x ← game2' S A c0 c1}[x = true]).toReal - (Pr{let x ← game3 S A c0 c1}[x = true]).toReal| ≤ εPRG →
     advantage S A c0 c1 ≤ εDDH + εJoint + εPRG
 
 end MainTheorem
