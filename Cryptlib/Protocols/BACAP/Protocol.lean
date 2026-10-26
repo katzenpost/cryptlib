@@ -81,8 +81,8 @@ structure BACAPSpec where
   /-- Unlinkability (Echomix §4.3): for a regular root key `pk`, a uniform blinding factor yields
   each key in the orbit of `pk` with probability `1/|Scalar|`. -/
   unlinkable : ∀ pk, blindable.Regular pk → ∀ target, target ∈ Set.range (blindable.blindPub pk) →
-      Pr[= true | ($ᵗ blindable.Scalar) >>=
-          fun f => pure (decide (blindable.blindPub pk f = target))] =
+      Pr{let x ← (($ᵗ blindable.Scalar) >>=
+          fun f => pure (decide (blindable.blindPub pk f = target)))}[x = true] =
         (Fintype.card blindable.Scalar : ℝ≥0∞)⁻¹ :=
     fun pk hpk _ ht => Cryptlib.Primitives.Sign.Blindable.blind_unlinkable blindable pk hpk ht
 

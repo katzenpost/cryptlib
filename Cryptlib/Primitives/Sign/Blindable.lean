@@ -97,7 +97,7 @@ probability `1/|Scalar|`. -/
 theorem blind_unlinkable [Fintype B.Scalar] [SampleableType B.Scalar]
     [DecidableEq B.base.PublicKey] (pk : B.base.PublicKey) (hpk : B.Regular pk)
     {target : B.base.PublicKey} (htarget : target ∈ Set.range (B.blindPub pk)) :
-    Pr[= true | ($ᵗ B.Scalar) >>= fun f => pure (decide (B.blindPub pk f = target))] =
+    Pr{let x ← ($ᵗ B.Scalar) >>= fun f => pure (decide (B.blindPub pk f = target))}[x = true] =
       (Fintype.card B.Scalar : ℝ≥0∞)⁻¹ :=
   uniformHit_eq_of_injective (B.blind_injective pk hpk) htarget
 

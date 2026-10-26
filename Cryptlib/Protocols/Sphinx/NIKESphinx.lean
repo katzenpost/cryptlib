@@ -64,7 +64,7 @@ structure NIKESphinxScheme extends Cryptlib.Protocols.Sphinx.Interface.Sphinx wh
   /-- Wrap-resistance (§4.3): if blinding `e` is a bijection, a uniform factor hits `target` with
   probability `1/|Factor|`. -/
   wrap_resistant : ∀ (e target : Envelope), Function.Bijective (blind · e) →
-      Pr[= true | ($ᵗ Factor) >>= fun b => pure (decide (blind b e = target))] =
+      Pr{let x ← ($ᵗ Factor) >>= fun b => pure (decide (blind b e = target))}[x = true] =
         (Fintype.card Factor : ℝ≥0∞)⁻¹ :=
     fun _ target hbij => uniformHit_eq hbij target
   /-- The envelope depends only on the starting `State`, not on the path or payload. -/

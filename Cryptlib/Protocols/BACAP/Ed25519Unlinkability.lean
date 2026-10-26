@@ -22,7 +22,7 @@ probability `1/ℓ` (Echomix §4.3). -/
 theorem ed25519_unlinkable [Fintype Scalar] [SampleableType Scalar] [DecidableEq PubBytes]
     (s : Scalar) (hs : s ≠ 0) {target : PubBytes}
     (ht : target ∈ Set.range (blindPub (publicKey s))) :
-    Pr[= true | ($ᵗ Scalar) >>= fun f => pure (decide (blindPub (publicKey s) f = target))] =
+    Pr{let x ← ($ᵗ Scalar) >>= fun f => pure (decide (blindPub (publicKey s) f = target))}[x = true] =
       (Fintype.card Scalar : ℝ≥0∞)⁻¹ :=
   Cryptlib.Util.UniformHit.uniformHit_eq_of_injective (blindPub_injective s hs) ht
 

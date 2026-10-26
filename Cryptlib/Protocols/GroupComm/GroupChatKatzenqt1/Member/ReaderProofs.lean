@@ -408,7 +408,7 @@ theorem not_mem_eraseP_self {α : Type} [DecidableEq α] {e : α} :
     rw [List.eraseP_cons]
     by_cases ha : a = e
     · subst ha; simpa using (List.nodup_cons.1 h).1
-    · simp only [ha, decide_false, cond_false, List.mem_cons, not_or]
+    · simp only [ha, decide_false, Bool.false_eq_true, ↓reduceIte, List.mem_cons, not_or]
       exact ⟨Ne.symm ha, not_mem_eraseP_self (List.nodup_cons.1 h).2⟩
 
 /-- Reading a box keeps `Inv`. -/

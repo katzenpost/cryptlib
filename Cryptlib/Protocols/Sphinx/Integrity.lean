@@ -4,7 +4,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import VCVio.OracleComp.Constructions.SampleableType
-import VCVio.EvalDist.Bool
+import VCVio.EvalDist.Monad.Map
+import VCVio.OracleComp.EvalDist.Sum
 
 /-! # §4.2: Integrity
 
@@ -70,7 +71,7 @@ abbrev ProblemPAdversary (Seed Idx Yy Kappa : Type) :=
 /-- The adversary's success probability against a fixed instance. -/
 noncomputable def problemPSuccessProb (P : ProblemPInstance Seed Idx Yy Kappa)
     (B : ProblemPAdversary Seed Idx Yy Kappa) : ℝ≥0∞ :=
-  Pr[fun xy => P.Solves xy | B P]
+  Pr{let xy ← B P}[P.Solves xy]
 
 /-- Hypothesis: Problem P is hard. -/
 def ProblemPHard (ε : ℝ≥0∞) : Prop :=
@@ -125,19 +126,19 @@ theorem integrity_bound [Nonempty Yy]
     (ε : ℝ≥0∞) (hhard : ProblemPHard (Seed := Seed) (Idx := Idx) (Yy := Yy) (Kappa := Kappa) ε)
     (Game : ProbComp (Forgery F G)) (Accepted : Forgery F G → Prop)
     (hDecomp : DecompositionWitness S hρ ρhat0 ρ0 f Accepted) :
-    Pr[Accepted | Game] ≤ ε := by
+    Pr{let x ← Game}[Accepted x] ≤ ε := by
   classical
   set B := reductionAdversary S hρ ρhat0 ρ0 f Game Accepted hDecomp with hB
-  have hstep : Pr[Accepted | Game] ≤
-      Pr[fun xy => (inducedInstance ρhat0 ρ0 f).Solves xy | B (inducedInstance ρhat0 ρ0 f)] := by
+  have hstep : Pr{let x ← Game}[Accepted x] ≤
+      Pr{let xy ← B (inducedInstance ρhat0 ρ0 f)}[(inducedInstance ρhat0 ρ0 f).Solves xy] := by
     have hB' : B (inducedInstance ρhat0 ρ0 f) =
         Game >>= fun fga => if h : Accepted fga then pure (fga.k0 S hρ, (hDecomp fga h).choose)
           else pure (fga.k0 S hρ, Classical.arbitrary Yy) := by
       simp only [hB, reductionAdversary]
-    rw [hB', probEvent_bind_eq_tsum, probEvent_eq_tsum_ite]
+    rw [hB', OracleComp.prEvent_bind_eq_tsum, OracleComp.prEvent_eq_tsum_ite]
     refine ENNReal.tsum_le_tsum fun fga => ?_
     by_cases hacc : Accepted fga
-    · rw [if_pos hacc, dif_pos hacc, probEvent_pure]
+    · rw [if_pos hacc, dif_pos hacc, prEvent_pure]
       have hsolve : (inducedInstance ρhat0 ρ0 f).Solves (fga.k0 S hρ, (hDecomp fga hacc).choose) :=
         (hDecomp fga hacc).choose_spec
       rw [if_pos hsolve, mul_one]
@@ -150,7 +151,7 @@ abbrev IntegrityBoundType [Nonempty Yy] (S : Sys F G) (hρ : G → Seed) (ρhat0
     (ρ0 : Seed → Idx) (f : Idx → Yy → Kappa) :=
   ∀ (ε : ℝ≥0∞), ProblemPHard (Seed := Seed) (Idx := Idx) (Yy := Yy) (Kappa := Kappa) ε →
     ∀ (Game : ProbComp (Forgery F G)) (Accepted : Forgery F G → Prop),
-    DecompositionWitness S hρ ρhat0 ρ0 f Accepted → Pr[Accepted | Game] ≤ ε
+    DecompositionWitness S hρ ρhat0 ρ0 f Accepted → Pr{let x ← Game}[Accepted x] ≤ ε
 
 end Integrity
 
