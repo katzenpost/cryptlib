@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: leanprover/lean-action@v1
         with:
-          build-args: "Cryptlib Cryptlib.Data.test Cryptlib.Primitives.NIKE.test Cryptlib.Primitives.KEM.test Cryptlib.Primitives.KEM.vectors Cryptlib.Primitives.Hash.test Cryptlib.Primitives.Hash.hkdf_test Cryptlib.Primitives.KDF.argon2_test Cryptlib.Primitives.Cipher.test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.ack_codec_test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.wire_vectors_test Cryptlib.Protocols.BACAP.primitive_vectors_test Cryptlib.Protocols.BACAP.gen_vectors Cryptlib.Protocols.BACAP.test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.replay Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.scenarios"
+          build-args: "Cryptlib Cryptlib.Data.test Cryptlib.Primitives.NIKE.test Cryptlib.Primitives.KEM.test Cryptlib.Primitives.KEM.vectors Cryptlib.Primitives.Hash.test Cryptlib.Primitives.Hash.hkdf_test Cryptlib.Primitives.KDF.argon2_test Cryptlib.Primitives.Cipher.test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.ack_codec_test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.wire_vectors_test Cryptlib.Protocols.BACAP.primitive_vectors_test Cryptlib.Protocols.BACAP.gen_vectors Cryptlib.Protocols.BACAP.test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.replay Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.scenarios Cryptlib.Primitives.Sign.MLDSA.mldsa_test"
       - name: Build the benchmarks (their own Lake project)
         working-directory: bench
         run: lake build
@@ -35,6 +35,8 @@ jobs:
           ./.lake/build/bin/Cryptlib-Protocols-GroupComm-GroupChatKatzenqt1-wire_vectors_test
           ./.lake/build/bin/Cryptlib-Protocols-GroupComm-GroupChatKatzenqt1-replay
           ./.lake/build/bin/Cryptlib-Protocols-GroupComm-GroupChatKatzenqt1-scenarios
+          ./.lake/build/bin/Cryptlib-Primitives-Sign-MLDSA-mldsa_test
+          sha256sum -c testdata/mldsa65_keygen.json.sha256 testdata/mldsa65_siggen.json.sha256 testdata/mldsa65_sigver.json.sha256
       - name: Check the group chat theorems use no axioms beyond Lean's own
         run: ./scripts/check-axioms.sh
 

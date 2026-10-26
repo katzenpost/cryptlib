@@ -113,6 +113,9 @@ name = "Cryptlib.Protocols.Sphinx.gen_kem_vectors"
 name = "Cryptlib.Primitives.KEM.MLKEM.mlkem_test"
 
 [[lean_exe]]
+name = "Cryptlib.Primitives.Sign.MLDSA.mldsa_test"
+
+[[lean_exe]]
 name = "Cryptlib.Primitives.Hash.blake2b_256_test"
 
 [[lean_exe]]
