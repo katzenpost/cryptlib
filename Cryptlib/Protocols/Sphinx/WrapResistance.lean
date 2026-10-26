@@ -27,7 +27,7 @@ open Cryptlib.Primitives.NIKE.X25519 (Point)
 bijection on `Fin N`: the probability of hitting `target` is `1/N`. -/
 theorem blind_wrapResistance {N : ℕ} [NeZero N] (pk target : Point)
     (hbij : Function.Bijective (fun b : Fin N => (b : ℕ) • pk)) :
-    Pr[= true | ($ᵗ Fin N) >>= fun b => pure (decide ((b : ℕ) • pk = target))] =
+    Pr{let x ← ($ᵗ Fin N) >>= fun b => pure (decide ((b : ℕ) • pk = target))}[x = true] =
       (N : ℝ≥0∞)⁻¹ := by
   rw [uniformHit_eq hbij target, Fintype.card_fin]
 

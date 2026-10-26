@@ -1,5 +1,5 @@
 name = "cryptlib"
-version = "0.1.1"
+version = "0.2.0"
 description = "Lean cryptography library for prototyping/modeling protocols and proving protocol properties."
 keywords = ["cryptography", "post-quantum", "verification", "sphinx", "mixnet"]
 homepage = "https://cryptlib.io"
@@ -14,19 +14,19 @@ relaxedAutoImplicit = false
 [[require]]
 name = "VCVio"
 git = "https://github.com/dtumad/VCV-io.git"
-rev = "6d5c7d502ad97f676293a84c3d364c518cbde117"
+rev = "v4.35.0"
 
 [[require]]
 name = "cborg"
 git = "https://github.com/katzenpost/cborg.git"
-rev = "v0.1.0"
+rev = "v0.2.0"
 
-# Declared last: VCVio pins mathlib v4.33.1, so this direct requirement (matching that pin)
+# Declared last: VCVio pins mathlib v4.35.0, so this direct requirement (matching that pin)
 # must come after VCVio's for Lake's reverse-declaration-order precedence to keep it authoritative.
 [[require]]
 name = "mathlib"
 scope = "leanprover-community"
-rev = "v4.33.1"
+rev = "v4.35.0"
 
 [[lean_lib]]
 name = "Cryptlib"

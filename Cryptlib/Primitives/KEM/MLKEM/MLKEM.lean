@@ -101,7 +101,7 @@ private theorem encaps_ct_wf (ek : EncapsulationKey (params ps) (encoding ps)) (
 
 /-- The `i`-th 32-byte block derived from `seed`. -/
 def seedBlock (seed : Vector UInt8 32) (i : Nat) : Vector UInt8 32 :=
-  toVecN 32 (SLHDSA.Concrete.Keccak.shake256 (ofVector seed |>.push i.toUInt8) 32)
+  toVecN 32 (VCVio.Algorithms.Keccak.shake256 (ofVector seed |>.push i.toUInt8) 32)
 
 /-- Counter plus the original seed. -/
 abbrev State := Nat × Vector UInt8 32

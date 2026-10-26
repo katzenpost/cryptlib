@@ -24,8 +24,8 @@ probability `1 / |F × F|`, provided `· • P` and `· • Q` are injective. -/
 theorem unlinkable {P Q : G}
     (hP : Function.Injective (· • P : F → G)) (hQ : Function.Injective (· • Q : F → G))
     {m n : G} (hm : m ∈ Set.range (· • P : F → G)) (hn : n ∈ Set.range (· • Q : F → G)) :
-    Pr[= true | ($ᵗ (F × F)) >>=
-        fun kk => pure (decide ((kk.1 • P, kk.2 • Q) = (m, n)))] =
+    Pr{let x ← (($ᵗ (F × F)) >>=
+        fun kk => pure (decide ((kk.1 • P, kk.2 • Q) = (m, n))))}[x = true] =
       (Fintype.card (F × F) : ℝ≥0∞)⁻¹ := by
   obtain ⟨a, rfl⟩ := hm
   obtain ⟨b, rfl⟩ := hn
@@ -39,10 +39,10 @@ theorem unlinkable_delta_zero {P Q P' Q' : G}
     (hP' : Function.Injective (· • P' : F → G)) (hQ' : Function.Injective (· • Q' : F → G))
     {m n : G} (hm : m ∈ Set.range (· • P : F → G)) (hn : n ∈ Set.range (· • Q : F → G))
     (hm' : m ∈ Set.range (· • P' : F → G)) (hn' : n ∈ Set.range (· • Q' : F → G)) :
-    Pr[= true | ($ᵗ (F × F)) >>=
-        fun kk => pure (decide ((kk.1 • P, kk.2 • Q) = (m, n)))] =
-      Pr[= true | ($ᵗ (F × F)) >>=
-        fun kk => pure (decide ((kk.1 • P', kk.2 • Q') = (m, n)))] := by
+    Pr{let x ← (($ᵗ (F × F)) >>=
+        fun kk => pure (decide ((kk.1 • P, kk.2 • Q) = (m, n))))}[x = true] =
+      Pr{let x ← (($ᵗ (F × F)) >>=
+        fun kk => pure (decide ((kk.1 • P', kk.2 • Q') = (m, n))))}[x = true] := by
   rw [unlinkable hP hQ hm hn, unlinkable hP' hQ' hm' hn']
 
 end Cryptlib.Protocols.BACAP.Unlinkability

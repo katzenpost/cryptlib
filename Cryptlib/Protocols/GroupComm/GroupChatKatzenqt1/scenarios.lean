@@ -7,7 +7,7 @@ import Cryptlib.Protocols.BACAP.API
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Group
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Walk
 import Cryptlib.Util.Bytes
-import HashSig.SLHDSA.Concrete.Keccak
+import VCVio.Algorithms.Keccak
 
 /-! # Run katzenqt's group chat scenarios
 
@@ -38,7 +38,7 @@ def step (b : ByteArray) : ByteArray :=
 
 /-- `shake_256("{name}/{n}")`, the `n`th draw of katzenqt's seeded randomness. -/
 def draw (name : String) (n size : Nat) : ByteArray :=
-  SLHDSA.Concrete.Keccak.shake256 s!"{name}/{n}".toUTF8 size
+  VCVio.Algorithms.Keccak.shake256 s!"{name}/{n}".toUTF8 size
 
 def vec (b : ByteArray) (n : Nat) : Vector UInt8 n := Vector.ofFn fun i : Fin n => b[i.val]!
 
