@@ -50,6 +50,8 @@ import Cryptlib.Primitives.Sign.Ed25519_scalar
 import Cryptlib.Primitives.Sign.Ed25519_codec
 import Cryptlib.Primitives.Sign.Ed25519_verify
 import Cryptlib.Primitives.Sign.Ed25519_blinded
+import Cryptlib.Primitives.Sign.MLDSA.Sampling
+import Cryptlib.Primitives.Sign.MLDSA.MLDSA
 import Cryptlib.Primitives.Sign.Blindable
 import Cryptlib.Primitives.Sign.Combiner
 import Cryptlib.Primitives.Sign.Convert

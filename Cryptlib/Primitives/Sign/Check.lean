@@ -4,6 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Cryptlib.Primitives.Sign.Schemes
+import Cryptlib.Primitives.Sign.MLDSA.MLDSA
 
 namespace Cryptlib.Primitives.Sign.Check
 
@@ -16,8 +17,14 @@ open Cryptlib.Primitives.Sign.Schemes
 
 The `#print axioms` checks are pinned with `#guard_msgs`, so a change to the trusted surface fails
 the build. The generic results use no axioms; the Ed25519 instances assume only
-`X25519.p_prime` and `Ed25519Blinded.ell_prime`.
+`X25519.p_prime` and `Ed25519Blinded.ell_prime`, and ML-DSA only Lean's own.
 -/
+
+/--
+info: 'Cryptlib.Primitives.Sign.FIPS204.mldsa65Signature' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms Cryptlib.Primitives.Sign.FIPS204.mldsa65Signature
 
 /-- info: 'Cryptlib.Primitives.Sign.Blindable.verify_blinded' does not depend on any axioms -/
 #guard_msgs in
