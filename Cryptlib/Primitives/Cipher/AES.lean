@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 namespace Cryptlib.Primitives.Cipher.AES
 
-/-! # AES-256
+/-! # AES-128 and AES-256
 
 Encryption direction only. The S-box is computed from its FIPS-197 definition rather than
 transcribed. Not constant time.
@@ -52,19 +52,26 @@ private def rcon (i : Nat) : UInt8 := Id.run do
     c := mul c 2
   return c
 
-/-- The AES-256 key schedule: sixty 4-byte words, fifteen round keys. -/
-def expandKey (key : Vector UInt8 32) : Array UInt8 := Id.run do
-  let mut w := key.toArray
-  for i in [8:60] do
+/-- The FIPS-197 §5.2 key schedule for an `nk`-word key: `4 * (nk + 7)` words, `nk + 7` round
+keys. -/
+private def expand (nk : Nat) (key : Array UInt8) : Array UInt8 := Id.run do
+  let mut w := key
+  for i in [nk:4 * (nk + 7)] do
     let mut t := #[w[4*i - 4]!, w[4*i - 3]!, w[4*i - 2]!, w[4*i - 1]!]
-    if i % 8 == 0 then
-      t := #[sbox[t[1]!.toNat]! ^^^ rcon (i / 8 - 1), sbox[t[2]!.toNat]!,
+    if i % nk == 0 then
+      t := #[sbox[t[1]!.toNat]! ^^^ rcon (i / nk - 1), sbox[t[2]!.toNat]!,
              sbox[t[3]!.toNat]!, sbox[t[0]!.toNat]!]
-    else if i % 8 == 4 then
+    else if nk > 6 && i % nk == 4 then
       t := t.map fun b => sbox[b.toNat]!
     for j in [0:4] do
-      w := w.push (w[4*(i - 8) + j]! ^^^ t[j]!)
+      w := w.push (w[4*(i - nk) + j]! ^^^ t[j]!)
   return w
+
+/-- The AES-256 key schedule: sixty 4-byte words, fifteen round keys. -/
+def expandKey (key : Vector UInt8 32) : Array UInt8 := expand 8 key.toArray
+
+/-- The AES-128 key schedule: forty-four 4-byte words, eleven round keys. -/
+def expandKey128 (key : Vector UInt8 16) : Array UInt8 := expand 4 key.toArray
 
 def subBytes (s : Array UInt8) : Array UInt8 := s.map fun b => sbox[b.toNat]!
 
@@ -85,16 +92,21 @@ def mixColumns (s : Array UInt8) : Array UInt8 :=
 private def addRoundKey (s : Array UInt8) (rk : Array UInt8) (round : Nat) : Array UInt8 :=
   Array.ofFn fun i : Fin 16 => s[i.val]! ^^^ rk[16 * round + i.val]!
 
-/-- AES-256 on one block, against an expanded key schedule. -/
+/-- AES on one block, against an expanded key schedule; the round count follows from its length. -/
 def encryptBlock (rk : Array UInt8) (input : Vector UInt8 16) : Vector UInt8 16 := Id.run do
+  let rounds := rk.size / 16 - 1
   let mut s := addRoundKey input.toArray rk 0
-  for round in [1:14] do
+  for round in [1:rounds] do
     s := addRoundKey (mixColumns (shiftRows (subBytes s))) rk round
-  s := addRoundKey (shiftRows (subBytes s)) rk 14
+  s := addRoundKey (shiftRows (subBytes s)) rk rounds
   return Vector.ofFn fun i : Fin 16 => s[i.val]!
 
 /-- Expand the key and encrypt one block. -/
 def encryptBlockWithKey (key : Vector UInt8 32) (input : Vector UInt8 16) : Vector UInt8 16 :=
   encryptBlock (expandKey key) input
+
+/-- Expand an AES-128 key and encrypt one block. -/
+def encryptBlockWithKey128 (key : Vector UInt8 16) (input : Vector UInt8 16) : Vector UInt8 16 :=
+  encryptBlock (expandKey128 key) input
 
 end Cryptlib.Primitives.Cipher.AES
