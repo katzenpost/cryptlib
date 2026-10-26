@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import Cryptlib.Primitives.Cipher.AESGCMSIV
+import Cryptlib.Primitives.Cipher.GHash
 import Cryptlib.Util.HexBytes
 
 /-!
@@ -67,6 +68,38 @@ def aes128BlockOk : Bool :=
   let input : Vector UInt8 16 := Vector.ofFn fun i : Fin 16 => UInt8.ofNat (17 * i.val)
   hexOf (AES.encryptBlockWithKey128 key input) == "69c4e0d86a7b0430d8cdb78070b4c55a"
 
+/-- A byte stream from a 64-bit LCG, for comparing implementations on arbitrary inputs. -/
+def lcgBytes (seed : UInt64) (n : Nat) : ByteArray := Id.run do
+  let mut x := seed
+  let mut out := ByteArray.emptyWithCapacity n
+  for _ in [0:n] do
+    x := x * 6364136223846793005 + 1442695040888963407
+    out := out.push (x >>> 56).toUInt8
+  return out
+
+def vec16 (b : ByteArray) : Vector UInt8 16 := Vector.ofFn fun i : Fin 16 => b.data.getD i.val 0
+
+/-- The circuit-S-box cipher against the table specification on `n` random keys and blocks. -/
+def aesAgreesWithSpec (n : Nat) : Bool := (List.range n).all fun i =>
+  let r := lcgBytes (UInt64.ofNat i) 64
+  let k128 := vec16 r
+  let k256 : Vector UInt8 32 := Vector.ofFn fun j : Fin 32 => r.data.getD (16 + j.val) 0
+  let x := vec16 (r.extract 48 64)
+  AES.encryptBlock (AES.expandKey128 k128) x == AES.encryptBlockSpec (AES.expandKey128Spec k128) x &&
+    AES.encryptBlock (AES.expandKey k256) x == AES.encryptBlockSpec (AES.expandKeySpec k256) x
+
+/-- Two-word GHASH against the `Nat` specification on `n` random keys and lengths. -/
+def ghashAgreesWithSpec (n : Nat) : Bool := (List.range n).all fun i =>
+  let h := vec16 (lcgBytes (UInt64.ofNat (1000 + i)) 16)
+  let msg := lcgBytes (UInt64.ofNat (2000 + i)) (i * 7 % 100)
+  GHash.ghash h msg == GHash.ghashSpec h msg
+
+/-- Two-word POLYVAL against the `Nat` specification on `n` random keys and lengths. -/
+def polyvalAgreesWithSpec (n : Nat) : Bool := (List.range n).all fun i =>
+  let h := vec16 (lcgBytes (UInt64.ofNat (3000 + i)) 16)
+  let msg := lcgBytes (UInt64.ofNat (4000 + i)) (i * 7 % 100)
+  Polyval.polyval h msg == Polyval.polyvalSpec h msg
+
 /-- Decode an inline hex literal. -/
 def hex (s : String) : Except String ByteArray :=
   match hexStringToByteArray s with
@@ -85,7 +118,7 @@ def main : IO UInt32 := do
 
   IO.println "AES-256 block (FIPS-197 C.3)"
   if aesBlockOk then
-    IO.println "  ok    single block, computed S-box"
+    IO.println "  ok    single block"
   else
     ok := false
     IO.println "  FAIL  single block"
@@ -93,10 +126,28 @@ def main : IO UInt32 := do
   IO.println ""
   IO.println "AES-128 block (FIPS-197 C.1)"
   if aes128BlockOk then
-    IO.println "  ok    single block, computed S-box"
+    IO.println "  ok    single block"
   else
     ok := false
     IO.println "  FAIL  single block"
+
+  IO.println ""
+  IO.println "Constant-time implementations against their specifications"
+  if aesAgreesWithSpec 200 then
+    IO.println "  ok    AES-128 and AES-256, 200 random keys and blocks"
+  else
+    ok := false
+    IO.println "  FAIL  AES against the table specification"
+  if ghashAgreesWithSpec 200 then
+    IO.println "  ok    GHASH, 200 random keys and lengths"
+  else
+    ok := false
+    IO.println "  FAIL  GHASH against the Nat specification"
+  if polyvalAgreesWithSpec 200 then
+    IO.println "  ok    POLYVAL, 200 random keys and lengths"
+  else
+    ok := false
+    IO.println "  FAIL  POLYVAL against the Nat specification"
 
   IO.println ""
   IO.println "POLYVAL (RFC 8452 §3 worked example)"

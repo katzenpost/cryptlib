@@ -7,6 +7,7 @@ import Cryptlib.Primitives.Cipher.AEAD
 import Cryptlib.Primitives.Cipher.AES
 import Cryptlib.Primitives.Cipher.GHash
 import Cryptlib.Util.Bytes
+import Cryptlib.Util.ConstantTime
 
 namespace Cryptlib.Primitives.Cipher.AESGCM
 
@@ -14,6 +15,7 @@ open Cryptlib.Primitives.Cipher.AEAD
 open Cryptlib.Primitives.Cipher.AES
 open Cryptlib.Primitives.Cipher.GHash (ghash)
 open Cryptlib.Util.Bytes
+open Cryptlib.Util.ConstantTime (ctEq ctEq_iff)
 
 /-! # AES-GCM (NIST SP 800-38D), 96-bit nonces and 128-bit tags
 
@@ -58,13 +60,13 @@ def encrypt (key : Key) (n : Nonce) (ad pt : ByteArray) : ByteArray :=
   let ct := gctr key n pt
   ct ++ tagOf key n ad ct
 
-/-- Structural equality on the tag; a deployed implementation must compare in constant time. -/
+/-- The tag is compared with `ctEq`, which reads every byte before deciding. -/
 def decrypt (key : Key) (n : Nonce) (ad ct : ByteArray) : Option ByteArray :=
   if ct.size < 16 then none
   else
     let body := ct.extract 0 (ct.size - 16)
     let tag := ct.extract (ct.size - 16) ct.size
-    if (tagOf key n ad body).data = tag.data then some (gctr key n body) else none
+    if ctEq (tagOf key n ad body) tag then some (gctr key n body) else none
 
 @[simp] private theorem size_gctr (key : Key) (n : Nonce) (d : ByteArray) :
     (gctr key n d).size = d.size := by
@@ -92,7 +94,7 @@ private theorem size_encrypt (key : Key) (n : Nonce) (ad pt : ByteArray) :
 private theorem decrypt_append (key : Key) (n : Nonce) (ad body tag : ByteArray)
     (h16 : tag.size = 16) :
     decrypt key n ad (body ++ tag) =
-      if (tagOf key n ad body).data = tag.data then some (gctr key n body) else none := by
+      if ctEq (tagOf key n ad body) tag then some (gctr key n body) else none := by
   have hs : (body ++ tag).size = body.size + 16 := by rw [ByteArray.size_append, h16]
   have hcut : (body ++ tag).size - 16 = body.size := by omega
   have hleft : (body ++ tag).extract 0 ((body ++ tag).size - 16) = body := by
@@ -105,7 +107,7 @@ private theorem decrypt_append (key : Key) (n : Nonce) (ad body tag : ByteArray)
 
 private theorem decrypt_encrypt (key : Key) (n : Nonce) (ad pt : ByteArray) :
     decrypt key n ad (encrypt key n ad pt) = some pt := by
-  rw [encrypt, decrypt_append _ _ _ _ _ (size_tagOf _ _ _ _), if_pos rfl, gctr_gctr]
+  rw [encrypt, decrypt_append _ _ _ _ _ (size_tagOf _ _ _ _), if_pos ((ctEq_iff _ _).mpr rfl), gctr_gctr]
 
 theorem decrypt_sound (key : Key) (n : Nonce) (ad ct pt : ByteArray)
     (h : decrypt key n ad ct = some pt) : encrypt key n ad pt = ct := by
@@ -119,7 +121,7 @@ theorem decrypt_sound (key : Key) (n : Nonce) (ad ct pt : ByteArray)
     rw [← hsplit, decrypt_append _ _ _ _ _ h16] at h
     split at h
     · rename_i htag
-      rw [← Option.some.inj h, encrypt, gctr_gctr, ByteArray.ext htag]
+      rw [← Option.some.inj h, encrypt, gctr_gctr, (ctEq_iff _ _).mp htag]
       exact hsplit
     · exact absurd h (by simp)
 
