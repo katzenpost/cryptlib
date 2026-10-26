@@ -87,6 +87,14 @@ theorem verify_signNative (sk : Vector UInt8 32) (m : ByteArray) :
   exact Nat.mod_mod _ _
 
 open Cryptlib.Primitives.Sign.Sign in
+open Cryptlib.Primitives.Sign.Ed25519Math (signNative publicKey) in
+theorem verify_sign_pure (sk : Vector UInt8 32) (m : ByteArray) (s : Unit) (σ : Vector UInt8 64) (s' : Unit)
+    (h : (pure (signNative sk m) : EStateM SignError Unit (Vector UInt8 64)) s = .ok σ s') :
+    verifyNative (publicKey sk) m σ = true := by
+  obtain ⟨rfl, -⟩ := ok_pure h
+  exact verify_signNative sk m
+
+open Cryptlib.Primitives.Sign.Sign in
 open Cryptlib.Primitives.Sign.Ed25519Math in
 /-- Ed25519 as a plain signature scheme, over the native arithmetic. -/
 def nativeSignature : Signature where
@@ -111,6 +119,11 @@ def nativeSignature : Signature where
   decode_encode_pub := fun _ => rfl
   decode_encode_priv := fun _ => rfl
   decode_encode_sig := fun _ => rfl
-  verify_sign := fun sk m _ => verify_signNative sk m
+  verify_sign := verify_sign_pure
+
+open Cryptlib.Primitives.Sign.Ed25519Math (signNative) in
+/-- Ed25519 never aborts: it signs in one pass. -/
+theorem nativeSignature_sign (sk : Vector UInt8 32) (m : ByteArray) (s : Unit) :
+    nativeSignature.sign sk m s = .ok (signNative sk m) s := rfl
 
 end Cryptlib.Primitives.Sign.Ed25519Verify

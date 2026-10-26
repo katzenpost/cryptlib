@@ -178,7 +178,13 @@ def signature : Signature where
   decode_encode_pub := fun _ => rfl
   decode_encode_priv := fun sk => congrArg some (scalarOfLE_scalarBytes sk)
   decode_encode_sig := fun _ => rfl
-  verify_sign := fun sk m _ => verify_signNative sk m
+  verify_sign := fun sk m _ _ _ h => by
+    obtain ⟨rfl, -⟩ := ok_pure h
+    exact verify_signNative sk m
+
+/-- Ed25519 never aborts: it signs in one pass. -/
+theorem signature_sign (sk : Scalar) (m : ByteArray) (s : Unit) :
+    signature.sign sk m s = .ok (signNative sk m) s := rfl
 
 def blindable : Blindable where
   base := signature

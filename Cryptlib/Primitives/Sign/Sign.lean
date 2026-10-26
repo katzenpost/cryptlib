@@ -3,14 +3,28 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
+import Std.Tactic.Do
+import Cryptlib.Util.Triple
+
+open Std.Do
+open Cryptlib.Util.Triple
+
 namespace Cryptlib.Primitives.Sign.Sign
 
 /-! # Digital signature schemes
 
-Signing randomness lives in `StateM State`; `verify_sign` quantifies over every state, so a
-randomized signer must verify for every nonce. Key generation is a pure function of a seed.
-Signatures are fixed-size and `sign` is total, which excludes stateful schemes such as XMSS.
+Signing randomness lives in the `State` of `EStateM`. Signing may fail with `aborted`: a lattice
+signer rejects candidate signatures until one passes its norm checks, and a total function can try
+only so many. The law `verify_sign` is partial correctness: whatever signature `sign` returns
+verifies, from every private key and every signing state. A perfectly correct scheme, such as
+Ed25519, proves on its own that it never aborts. Key generation is a pure function of a seed.
+Signatures are fixed-size, which excludes stateful schemes such as XMSS.
 -/
+
+inductive SignError where
+  /-- The signer gave up without finding a signature. -/
+  | aborted
+deriving DecidableEq
 
 structure Signature where
   State      : Type
@@ -36,7 +50,7 @@ structure Signature where
   pub : PrivateKey → PublicKey
 
   /-- Stateful only to carry signing randomness. -/
-  sign : PrivateKey → ByteArray → StateM State Sig
+  sign : PrivateKey → ByteArray → EStateM SignError State Sig
 
   verify : PublicKey → ByteArray → Sig → Bool
 
@@ -44,8 +58,8 @@ structure Signature where
   decode_encode_priv : ∀ sk, decodePrivateKey (encodePrivateKey sk) = some sk
   decode_encode_sig  : ∀ s,  decodeSig        (encodeSig        s)  = some s
 
-  /-- Correctness, for every private key and every signing state. -/
-  verify_sign : ∀ sk m s, verify (pub sk) m (sign sk m s).1 = true
+  /-- Correctness: a signature `sign` returns verifies, for every private key and signing state. -/
+  verify_sign : ∀ sk m s σ s', sign sk m s = .ok σ s' → verify (pub sk) m σ = true
 
 /-- The trivial scheme: one key, one signature, everything verifies. Insecure. -/
 instance : Inhabited Signature := ⟨{
@@ -74,7 +88,17 @@ instance : Inhabited Signature := ⟨{
   decode_encode_pub  := fun _ => rfl
   decode_encode_priv := fun _ => rfl
   decode_encode_sig  := fun _ => rfl
-  verify_sign        := fun _ _ _ => rfl
+  verify_sign        := fun _ _ _ _ _ _ => rfl
 }⟩
+
+/-- What a signer that cannot fail returned. -/
+theorem ok_pure {ε σ α} {a b : α} {s t : σ} (h : (pure a : EStateM ε σ α) s = .ok b t) :
+    a = b ∧ s = t := by
+  simpa [pure, EStateM.pure] using h
+
+/-- Whatever `sign` returns verifies under the signer's public key. -/
+@[spec] theorem sign_ok (S : Signature) (sk : S.PrivateKey) (m : ByteArray) :
+    ⦃⌜True⌝⦄ S.sign sk m ⦃post⟨fun σ => ⌜S.verify (S.pub sk) m σ = true⌝, fun _ => ⌜True⌝⟩⦄ :=
+  EStateM_triple_ok fun t σ t' h => S.verify_sign sk m t σ t' h
 
 end Cryptlib.Primitives.Sign.Sign

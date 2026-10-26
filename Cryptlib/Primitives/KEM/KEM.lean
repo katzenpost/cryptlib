@@ -1,6 +1,8 @@
 import Std.Tactic.Do
+import Cryptlib.Util.Triple
 
 open Std.Do
+open Cryptlib.Util.Triple
 
 namespace Cryptlib.Primitives.KEM.KEM
 
@@ -138,25 +140,6 @@ def IsEncapsulation (sk : PrivateKey kemSpec) (c : Ciphertext kemSpec) (k : Plai
 def KeyPair (pk : PublicKey kemSpec) (sk : PrivateKey kemSpec) :=
   ∀ s, kemSpec.Reliable s → ∀ c k s', encap kemSpec pk s = .ok (c, k) s' →
     IsEncapsulation kemSpec sk c k
-
-/-- Partial-correctness triple: if `x` returns, its result satisfies `p`. -/
-theorem EStateM_triple_ok {ε σ α} {p : α → Prop} {x : EStateM ε σ α}
-    (h : ∀ t a t', x t = .ok a t' → p a) :
-    ⦃⌜True⌝⦄ x ⦃post⟨fun a => ⌜p a⌝, fun _ => ⌜True⌝⟩⦄ := by
-  intro t _
-  simp only [WP.wp, PredTrans.apply, EStateM.run]
-  cases hx : x t with
-  | ok a t'    => exact h t a t' hx
-  | error e t' => trivial
-
-/-- Total-correctness triple: `x` always returns a result satisfying `p`. -/
-theorem EStateM_triple {ε σ α} {p : α → Prop} {x : EStateM ε σ α}
-    (h : ∀ t, ∃ a t', x t = .ok a t' ∧ p a) :
-    ⦃⌜True⌝⦄ x ⦃post⟨fun a => ⌜p a⌝, fun _ => ⌜False⌝⟩⦄ := by
-  intro t _
-  obtain ⟨a, t', ht, hp⟩ := h t
-  simp only [WP.wp, PredTrans.apply, EStateM.run, ht]
-  exact hp
 
 /-- Whatever `generate` returns is a valid key pair. -/
 theorem generate_keyPair {t r t'} (hr : generate kemSpec t = .ok r t') :
