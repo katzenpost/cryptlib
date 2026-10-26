@@ -94,6 +94,12 @@ def ghashAgreesWithSpec (n : Nat) : Bool := (List.range n).all fun i =>
   let msg := lcgBytes (UInt64.ofNat (2000 + i)) (i * 7 % 100)
   GHash.ghash h msg == GHash.ghashSpec h msg
 
+/-- Two-word POLYVAL against the `Nat` specification on `n` random keys and lengths. -/
+def polyvalAgreesWithSpec (n : Nat) : Bool := (List.range n).all fun i =>
+  let h := vec16 (lcgBytes (UInt64.ofNat (3000 + i)) 16)
+  let msg := lcgBytes (UInt64.ofNat (4000 + i)) (i * 7 % 100)
+  Polyval.polyval h msg == Polyval.polyvalSpec h msg
+
 /-- Decode an inline hex literal. -/
 def hex (s : String) : Except String ByteArray :=
   match hexStringToByteArray s with
@@ -137,6 +143,11 @@ def main : IO UInt32 := do
   else
     ok := false
     IO.println "  FAIL  GHASH against the Nat specification"
+  if polyvalAgreesWithSpec 200 then
+    IO.println "  ok    POLYVAL, 200 random keys and lengths"
+  else
+    ok := false
+    IO.println "  FAIL  POLYVAL against the Nat specification"
 
   IO.println ""
   IO.println "POLYVAL (RFC 8452 §3 worked example)"
