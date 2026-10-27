@@ -65,6 +65,15 @@ def benches : IO (Array LeanBench.Bench) := do
   bs := bs.push { name := "polyval 1232B, Nat spec", config := cfg,
                   action := do
                     blkOut.set (Cryptlib.Primitives.Cipher.Polyval.polyvalSpec (← h.get) (← ghashIn.get)) }
+  let small ← IO.mkRef (ByteArray.mk (Array.ofFn fun (i : Fin 64) => (i.val * 7 % 251).toUInt8))
+  bs := bs.push { name := "chacha20-poly1305 encrypt 64B", config := cfg,
+                  action := do
+                    out.set (Cryptlib.Primitives.Cipher.ChaChaPoly.encrypt (← key.get) (← nonce.get)
+                      ByteArray.empty (← small.get)) }
+  bs := bs.push { name := "chacha20-poly1305 encrypt 1200B", config := cfg,
+                  action := do
+                    out.set (Cryptlib.Primitives.Cipher.ChaChaPoly.encrypt (← key.get) (← nonce.get)
+                      ByteArray.empty (← packet.get)) }
   bs := bs.push { name := "aes-128-gcm encrypt 1200B", config := cfg,
                   action := do
                     out.set (Cryptlib.Primitives.Cipher.AESGCM.encrypt (← rk128.get) (← nonce.get)

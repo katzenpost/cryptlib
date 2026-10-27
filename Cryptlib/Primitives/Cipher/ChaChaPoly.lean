@@ -64,7 +64,9 @@ private def le64 (x : Nat) : ByteArray :=
 
 /-- RFC 8439 §2.8: Poly1305 keyed from block 0, over `pad(ad) ‖ pad(ct) ‖ LE64 |ad| ‖ LE64 |ct|`. -/
 def tagOf (key : Key) (n : Nonce) (ad ct : ByteArray) : ByteArray :=
-  let otk : Vector UInt8 32 := Vector.ofFn fun i : Fin 32 => (block key n 0)[i.val]!
+  -- computed once, not once per byte of the key
+  let b0 := block key n 0
+  let otk : Vector UInt8 32 := Vector.ofFn fun i : Fin 32 => b0[i.val]!
   ofVector (poly1305 otk (pad16 ad ++ pad16 ct ++ le64 ad.size ++ le64 ct.size))
 
 def encrypt (key : Key) (n : Nonce) (ad pt : ByteArray) : ByteArray :=
