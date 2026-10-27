@@ -46,6 +46,15 @@ def benches : IO (Array LeanBench.Bench) := do
                     action := do
                       out.set (Cryptlib.Primitives.Cipher.AESGCMSIV.encrypt (← key.get) (← nonce.get)
                         ByteArray.empty (← msg.get)) }
+  let keyArr ← IO.mkRef (Array.replicate 32 (1 : UInt8))
+  let nonceArr ← IO.mkRef (Array.replicate 8 (0 : UInt8))
+  let blockOut ← IO.mkRef (#[] : Array UInt8)
+  bs := bs.push { name := "chacha20 block", config := cfg,
+                  action := do
+                    blockOut.set (Cryptlib.Primitives.Cipher.ChaCha20.block (← keyArr.get) (← nonceArr.get) 1 0) }
+  bs := bs.push { name := "chacha20 block, spec", config := cfg,
+                  action := do
+                    blockOut.set (Cryptlib.Primitives.Cipher.ChaCha20.blockSpec (← keyArr.get) (← nonceArr.get) 1 0) }
   let blk ← IO.mkRef (Vector.replicate 16 (5 : UInt8))
   let blkOut ← IO.mkRef (Vector.replicate 16 (0 : UInt8))
   let rk128 ← IO.mkRef (expandKey128 (Vector.replicate 16 (1 : UInt8)))
