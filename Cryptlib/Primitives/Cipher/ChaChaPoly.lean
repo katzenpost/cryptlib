@@ -8,6 +8,7 @@ import Cryptlib.Primitives.Cipher.ChaCha20
 import Cryptlib.Primitives.Cipher.Poly1305
 import Cryptlib.Util.Bytes
 import Cryptlib.Util.ConstantTime
+import Batteries.Data.ByteArray
 
 namespace Cryptlib.Primitives.Cipher.ChaChaPoly
 
@@ -31,13 +32,13 @@ def block (key : Key) (n : Nonce) (counter : UInt32) : Array UInt8 :=
   ChaCha20.block key.toArray (n.toArray.extract 4 12) counter (leWord n.toArray 0)
 
 private def keystream (key : Key) (n : Nonce) (len : Nat) : ByteArray :=
-  ⟨((List.range ((len + 63) / 64)).foldl
-    (fun out i => out ++ block key n (UInt32.ofNat (i + 1))) #[]).extract 0 len⟩
+  let blocks := (len + 63) / 64
+  -- appended in place: the buffer has room for every block
+  ((List.range blocks).foldl (fun out i => out ++ ⟨block key n (UInt32.ofNat (i + 1))⟩)
+    (ByteArray.emptyWithCapacity (64 * blocks))).extract 0 len
 
 private def xorKeystream (ks d : ByteArray) : ByteArray :=
-  -- `ByteArray.data` copies, so convert once rather than per byte
-  let k := ks.data
-  ⟨d.data.mapIdx fun i b => b ^^^ k.getD i 0⟩
+  ByteArray.ofFn fun i : Fin d.size => d[i] ^^^ ks[i.val]!
 
 /-- RFC 8439 §2.4: encryption starts at counter 1, block 0 being reserved for the Poly1305 key. -/
 def chacha20 (key : Key) (n : Nonce) (d : ByteArray) : ByteArray :=
@@ -69,21 +70,25 @@ def decrypt (key : Key) (n : Nonce) (ad ct : ByteArray) : Option ByteArray :=
     let tag := ct.extract (ct.size - 16) ct.size
     if ctEq (tagOf key n ad body) tag then some (chacha20 key n body) else none
 
+@[simp] private theorem size_xorKeystream (ks d : ByteArray) : (xorKeystream ks d).size = d.size := by
+  simp [xorKeystream]
+
+private theorem getElem_xorKeystream (ks d : ByteArray) (i : Nat) (h : i < (xorKeystream ks d).size) :
+    (xorKeystream ks d)[i] = d[i]'(by simpa using h) ^^^ ks[i]! := by
+  simp [xorKeystream]
+
 @[simp] private theorem size_chacha20 (key : Key) (n : Nonce) (d : ByteArray) :
     (chacha20 key n d).size = d.size := by
-  show (d.data.mapIdx _).size = d.size
-  simp
+  simp [chacha20]
 
 private theorem chacha20_chacha20 (key : Key) (n : Nonce) (d : ByteArray) :
     chacha20 key n (chacha20 key n d) = d := by
   show xorKeystream (keystream key n (chacha20 key n d).size) (chacha20 key n d) = d
   rw [size_chacha20]
-  apply ByteArray.ext
-  apply Array.ext
-  · simp [xorKeystream, chacha20]
-  · intro i h1 h2
-    simp only [xorKeystream, chacha20, Array.getElem_mapIdx]
-    rw [UInt8.xor_assoc, UInt8.xor_self, UInt8.xor_zero]
+  apply ByteArray.ext_getElem (by simp)
+  intro i h1 h2
+  simp only [getElem_xorKeystream, chacha20]
+  rw [UInt8.xor_assoc, UInt8.xor_self, UInt8.xor_zero]
 
 @[simp] private theorem size_tagOf (key : Key) (n : Nonce) (ad ct : ByteArray) :
     (tagOf key n ad ct).size = 16 := size_ofVector _
