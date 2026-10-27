@@ -4,6 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Cryptlib.Primitives.Cipher.ChaChaPoly
+import Cryptlib.Primitives.Cipher.Poly1305
 import Cryptlib.Primitives.Cipher.Polyval
 import Cryptlib.Primitives.Cipher.AESGCMSIV
 import Cryptlib.Primitives.Cipher.AESGCM
@@ -16,7 +17,7 @@ Inputs are read from refs so the compiler cannot hoist the work out of the timed
 
 namespace CryptlibBench.Cipher
 
-open Cryptlib.Primitives.Cipher.ChaChaPoly (chacha20 poly1305)
+open Cryptlib.Primitives.Cipher.ChaChaPoly (chacha20)
 open Cryptlib.Primitives.Cipher.Polyval (polyval)
 open Cryptlib.Util.Bytes (ofVector)
 open Cryptlib.Primitives.Cipher.AES (encryptBlock encryptBlockSpec expandKey expandKey128)
@@ -37,7 +38,8 @@ def benches : IO (Array LeanBench.Bench) := do
     bs := bs.push { name := s!"chacha20 {label}", config := cfg,
                     action := do out.set (chacha20 (← key.get) (← nonce.get) (← msg.get)) }
     bs := bs.push { name := s!"poly1305 {label}", config := cfg,
-                    action := do out.set (ofVector (poly1305 (← key.get) (← msg.get))) }
+                    action := do
+                      out.set (ofVector (Cryptlib.Primitives.Cipher.Poly1305.mac (← key.get) (← msg.get))) }
     bs := bs.push { name := s!"polyval {label}", config := cfg,
                     action := do out.set (ofVector (polyval (← h.get) (← msg.get))) }
     bs := bs.push { name := s!"aes-gcm-siv encrypt {label}", config := cfg,
@@ -60,6 +62,12 @@ def benches : IO (Array LeanBench.Bench) := do
                   action := do blkOut.set (ghash (← h.get) (← ghashIn.get)) }
   bs := bs.push { name := "ghash 1232B, Nat spec", config := cfg,
                   action := do blkOut.set (ghashSpec (← h.get) (← ghashIn.get)) }
+  bs := bs.push { name := "poly1305 1232B", config := cfg,
+                  action := do
+                    out.set (ofVector (Cryptlib.Primitives.Cipher.Poly1305.mac (← key.get) (← ghashIn.get))) }
+  bs := bs.push { name := "poly1305 1232B, Nat spec", config := cfg,
+                  action := do
+                    out.set (ofVector (Cryptlib.Primitives.Cipher.Poly1305.spec (← key.get) (← ghashIn.get))) }
   bs := bs.push { name := "polyval 1232B", config := cfg,
                   action := do blkOut.set (polyval (← h.get) (← ghashIn.get)) }
   bs := bs.push { name := "polyval 1232B, Nat spec", config := cfg,
