@@ -44,7 +44,7 @@ def leNat (f : Nat → UInt8) : Nat → Nat
   | n + 1 => leNat f n + (f n).toNat * 256 ^ n
 
 /-- `leNat` in a `UInt64`, for `n ≤ 8`. -/
-def leWord (f : Nat → UInt8) : Nat → UInt64
+@[specialize] def leWord (f : Nat → UInt8) : Nat → UInt64
   | 0 => 0
   | n + 1 => leWord f n + ((f n).toUInt64 <<< (8 * n).toUInt64)
 
