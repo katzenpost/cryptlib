@@ -63,6 +63,7 @@ import Cryptlib.Primitives.Cipher.Polyval
 import Cryptlib.Primitives.Cipher.AESGCMSIV
 import Cryptlib.Primitives.Cipher.GHash
 import Cryptlib.Primitives.Cipher.AESGCM
+import Cryptlib.Primitives.Cipher.Poly1305
 import Cryptlib.Primitives.Cipher.ChaChaPoly
 import Cryptlib.Protocols.BACAP.Types
 import Cryptlib.Protocols.BACAP.Ratchet

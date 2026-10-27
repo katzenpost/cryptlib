@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Cryptlib.Primitives.Cipher.AEAD
 import Cryptlib.Primitives.Cipher.ChaCha20
+import Cryptlib.Primitives.Cipher.Poly1305
 import Cryptlib.Util.Bytes
 import Cryptlib.Util.ConstantTime
 
@@ -42,32 +43,19 @@ private def xorKeystream (ks d : ByteArray) : ByteArray :=
 def chacha20 (key : Key) (n : Nonce) (d : ByteArray) : ByteArray :=
   xorKeystream (keystream key n d.size) d
 
-/-- RFC 8439 §2.5. Field arithmetic over `Nat` modulo `2^130 - 5`. -/
-def poly1305 (otk : Vector UInt8 32) (msg : ByteArray) : Vector UInt8 16 :=
-  let le (b : Array UInt8) : Nat := b.foldr (fun x acc => (acc <<< 8) ||| x.toNat) 0
-  let r := le (otk.toArray.extract 0 16) &&& 0x0ffffffc0ffffffc0ffffffc0fffffff
-  let s := le (otk.toArray.extract 16 32)
-  let p := 2 ^ 130 - 5
-  -- `ByteArray.data` copies, so convert once rather than per chunk
-  let m := msg.data
-  let acc := (List.range ((msg.size + 15) / 16)).foldl (fun acc i =>
-    let chunk := m.extract (16 * i) (16 * i + 16)
-    (acc + le chunk + 2 ^ (8 * chunk.size)) * r % p) 0
-  let t := (acc + s) % 2 ^ 128
-  Vector.ofFn fun i : Fin 16 => UInt8.ofNat (t >>> (8 * i.val))
-
 private def pad16 (b : ByteArray) : ByteArray :=
   b ++ ⟨Array.replicate ((16 - b.size % 16) % 16) 0⟩
 
 private def le64 (x : Nat) : ByteArray :=
   ⟨Array.ofFn fun i : Fin 8 => UInt8.ofNat (x >>> (8 * i.val))⟩
 
-/-- RFC 8439 §2.8: Poly1305 keyed from block 0, over `pad(ad) ‖ pad(ct) ‖ LE64 |ad| ‖ LE64 |ct|`. -/
+/-- RFC 8439 §2.8: Poly1305 keyed from block 0, over `pad(ad) ‖ pad(ct) ‖ LE64 |ad| ‖ LE64 |ct|`.
+`Poly1305.mac` is proved equal to the RFC's algorithm, `Poly1305.spec`. -/
 def tagOf (key : Key) (n : Nonce) (ad ct : ByteArray) : ByteArray :=
   -- computed once, not once per byte of the key
   let b0 := block key n 0
   let otk : Vector UInt8 32 := Vector.ofFn fun i : Fin 32 => b0[i.val]!
-  ofVector (poly1305 otk (pad16 ad ++ pad16 ct ++ le64 ad.size ++ le64 ct.size))
+  ofVector (Poly1305.mac otk (pad16 ad ++ pad16 ct ++ le64 ad.size ++ le64 ct.size))
 
 def encrypt (key : Key) (n : Nonce) (ad pt : ByteArray) : ByteArray :=
   let ct := chacha20 key n pt
