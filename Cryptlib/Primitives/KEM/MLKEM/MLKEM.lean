@@ -150,11 +150,25 @@ theorem decodePrivateKey_totalM (v : Vector UInt8 (params ps).secretKeyBytes) :
 
 def dummySeed : Seed32 := Vector.replicate 32 0
 
-def dummyPk : (PublicKey ps) := ⟨((keygen ps) dummySeed dummySeed).1, (keygen_ek_wf ps) _ _⟩
+/-! The dummies are zero bytes of the right sizes, not real keys: they are only `Inhabited`
+witnesses, and every program importing a scheme builds them when it starts. -/
 
-def dummySk : (PrivateKey ps) := ⟨((keygen ps) dummySeed dummySeed).2, (keygen_dk_wf ps) _ _⟩
+private def zeros (n : Nat) : ByteArray := ⟨Array.replicate n 0⟩
 
-def dummyCt : (CT ps) := ⟨((encaps ps) (dummyPk ps).1 dummySeed).2, (encaps_ct_wf ps) _ _⟩
+private def dummyEk : EncapsulationKey (params ps) (encoding ps) :=
+  { tHatEncoded := (bytesT ps) (zeros (384 * (params ps).k)), rho := dummySeed }
+
+def dummyPk : (PublicKey ps) := ⟨dummyEk ps, by simp [dummyEk, tBytes_bytesT, zeros, ByteArray.size]⟩
+
+def dummySk : (PrivateKey ps) :=
+  ⟨{ dkPKE := { sHatEncoded := (bytesT ps) (zeros (384 * (params ps).k)) }, ekPKE := dummyEk ps,
+     ekHash := dummySeed, z := dummySeed },
+   by simp [dummyEk, tBytes_bytesT, zeros, ByteArray.size]⟩
+
+def dummyCt : (CT ps) :=
+  ⟨{ uEncoded := (bytesU ps) (zeros (32 * (params ps).du * (params ps).k)),
+     vEncoded := (bytesV ps) (zeros (32 * (params ps).dv)) },
+   by simp [uBytes_bytesU, vBytes_bytesV, zeros, ByteArray.size]⟩
 
 /-- ML-KEM with the expanded FIPS 203 private key. -/
 def kem : KEM where
