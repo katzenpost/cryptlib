@@ -36,7 +36,7 @@
    "rev": "93021db64d6f6d931b75a2d00bbbc59aca7c88c7",
    "name": "cborg",
    "manifestFile": "lake-manifest.json",
-   "inputRev": "93021db64d6f6d931b75a2d00bbbc59aca7c88c7",
+   "inputRev": "v0.2.0",
    "inherited": true,
    "configFile": "lakefile.toml"},
   {"url": "https://github.com/dtumad/VCV-io.git",

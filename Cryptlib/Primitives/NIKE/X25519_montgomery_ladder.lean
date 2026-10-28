@@ -11,6 +11,7 @@ import Cryptlib.Util.NatBytes
 import Cryptlib.Util.HexBytes
 import Cryptlib.Primitives.NIKE.NIKE
 import Cryptlib.Primitives.NIKE.X25519Common
+import Cryptlib.Primitives.NIKE.X25519
 import Cryptlib.Primitives.NIKE.Field25519
 
 open Cryptlib.Util.NatBytes
@@ -20,8 +21,7 @@ open Cryptlib.Primitives.NIKE.X25519Common
 namespace Cryptlib.Primitives.NIKE.X25519_montgomery_ladder
 
 /-- Little-endian byte encoding, exactly 32 bytes. -/
-def fromField (x : ZMod p) : Vector UInt8 keySize :=
-  Vector.ofFn (fun i : Fin keySize => (x.val >>> (8 * i.val)).toUInt8)
+def fromField (x : ZMod p) : Vector UInt8 keySize := X25519.encodeFieldChecked x
 
 def basepointBytes : Vector UInt8 keySize := fromField basepoint
 
@@ -96,7 +96,8 @@ def x25519 (scalarBytes uCoordBytes : Vector UInt8 keySize) : Vector UInt8 keySi
 /-! ## The same ladder on `Field25519.Fe`
 
 The ladder on fixed-width limbs, with masked swaps so it does not branch on scalar bits. Tested
-against the `ZMod` ladder and RFC 7748 vectors, not yet proved equal to it. -/
+against the `ZMod` ladder and RFC 7748 vectors, not yet proved equal to it; `X25519LadderCorrect`
+proves the `ZMod` ladder. -/
 
 open Cryptlib.Primitives.NIKE.Field25519 (Fe)
 
@@ -156,146 +157,5 @@ structure PublicKey    where data : Vector UInt8 keySize
 structure SharedSecret where data : Vector UInt8 keySize
 
 def derivePub (sk : PrivateKey) : PublicKey := ⟨curve25519 sk.data basepointBytes⟩
-
-private def bytes32 (l : List UInt8) (h : l.length = keySize := by decide) :
-    Vector UInt8 keySize := ⟨l.toArray, by simpa using h⟩
-
-/-- Curve25519 small-order points, little-endian. Compared after masking the high bit of byte 31,
-so each also covers its `+2^255` variant. See eprint.iacr.org/2017/806. -/
-def smallOrderPoints : List (Vector UInt8 keySize) := [
-  -- 0 (order 4)
-  bytes32 (List.replicate 32 0x00),
-  -- 1 (order 1)
-  bytes32 (0x01 :: List.replicate 31 0x00),
-  -- order 8
-  bytes32 [0xe0,0xeb,0x7a,0x7c,0x3b,0x41,0xb8,0xae,0x16,0x56,0xe3,0xfa,0xf1,0x9f,0xc4,0x6a,
-           0xda,0x09,0x8d,0xeb,0x9c,0x32,0xb1,0xfd,0x86,0x62,0x05,0x16,0x5f,0x49,0xb8,0x00],
-  -- order 8
-  bytes32 [0x5f,0x9c,0x95,0xbc,0xa3,0x50,0x8c,0x24,0xb1,0xd0,0xb1,0x55,0x9c,0x83,0xef,0x5b,
-           0x04,0x44,0x5c,0xc4,0x58,0x1c,0x8e,0x86,0xd8,0x22,0x4e,0xdd,0xd0,0x9f,0x11,0x57],
-  -- p-1 (order 2)
-  bytes32 (0xec :: List.replicate 30 0xff ++ [0x7f]),
-  -- p (=0, order 4)
-  bytes32 (0xed :: List.replicate 30 0xff ++ [0x7f]),
-  -- p+1 (=1, order 1)
-  bytes32 (0xee :: List.replicate 30 0xff ++ [0x7f])
-]
-
-/-- Clear the high bit of byte 31. -/
-def maskHighBit (v : Vector UInt8 keySize) : Vector UInt8 keySize :=
-  v.set 31 (v[31] &&& 0x7f)
-
-def SafePub (pk : PublicKey) : Prop := maskHighBit pk.data ∉ smallOrderPoints
-
-
-instance : DecidablePred SafePub := fun pk => by
-  unfold SafePub; infer_instance
-
-axiom derivePub_safe : ∀ sk : PrivateKey, SafePub (derivePub sk)
-
-axiom curve25519_commutes : ∀ sk₁ sk₂ : PrivateKey,
-  curve25519 sk₁.data (derivePub sk₂).data = curve25519 sk₂.data (derivePub sk₁).data
-
-/-- The ladder's output is never a small-order point: clamping makes every scalar a multiple of
-the cofactor 8. -/
-axiom curve25519_safe : ∀ (sk : PrivateKey) (pk : PublicKey),
-  SafePub (⟨curve25519 sk.data pk.data⟩ : PublicKey)
-
-/-- Group actions by two private keys commute on any public key, not only on derived ones as in
-`curve25519_commutes`. -/
-axiom curve25519_comm_gen : ∀ (sk₁ sk₂ : PrivateKey) (pk : Vector UInt8 keySize),
-  curve25519 sk₁.data (curve25519 sk₂.data pk) = curve25519 sk₂.data (curve25519 sk₁.data pk)
-
-def SchemeName := "X25519-ladder"
-
-def LadderScheme : NIKE where
-  PrivateKey   := PrivateKey
-  PublicKey    := PublicKey
-  SharedSecret := SharedSecret
-
-  name := SchemeName
-  privateKeySize   := keySize
-  publicKeySize    := keySize
-  sharedSecretSize := keySize
-
-  Safe    := SafePub
-  decSafe := inferInstance
-
-  privateKeyFromSeed := fun seed => ⟨clampScalar seed⟩
-  derivePublicKey    := derivePub
-  groupAction        := fun sk spk => ⟨curve25519 sk.data spk.1.data⟩
-
-  encodePrivateKey   := fun sk => sk.data
-  decodePrivateKey   := fun v => some ⟨v⟩
-  encodePublicKey    := fun pk => pk.data
-  decodePublicKey    := fun v => some ⟨v⟩
-  encodeSharedSecret := fun ss => ss.data
-
-  derive_safe        := derivePub_safe
-  decode_encode_priv := fun _ => rfl
-  decodePrivateKey_total := fun v => ⟨⟨v⟩, rfl⟩
-  decode_encode_pub  := fun _ => rfl
-  encode_decode_pub  := fun _ _ h => congrArg PublicKey.data (Option.some.inj h) ▸ rfl
-  commutes           := fun sk₁ sk₂ => congrArg SharedSecret.mk (curve25519_commutes sk₁ sk₂)
-  reinterpret        := fun ss => ⟨ss.data⟩
-  reinterpret_safe   := fun sk spk => curve25519_safe sk spk.1
-  groupAction_comm   := fun sk₁ sk₂ spk => congrArg SharedSecret.mk (curve25519_comm_gen sk₁ sk₂ spk.1.data)
-  publicKeySize_eq_sharedSecretSize := rfl
-  encodePublicKey_reinterpret := fun _ => rfl
-
-/-! ## The ladder on `Field25519` limbs, as a NIKE
-
-`LadderScheme` with `curve25519_fe` in place of `curve25519`. Its axioms restate the ladder's for
-`curve25519_fe`; proving `curve25519_fe = curve25519` would remove them. -/
-
-def derivePubFe (sk : PrivateKey) : PublicKey := ⟨curve25519_fe sk.data basepointBytes⟩
-
-axiom derivePubFe_safe : ∀ sk : PrivateKey, SafePub (derivePubFe sk)
-
-axiom curve25519_fe_commutes : ∀ sk₁ sk₂ : PrivateKey,
-  curve25519_fe sk₁.data (derivePubFe sk₂).data = curve25519_fe sk₂.data (derivePubFe sk₁).data
-
-axiom curve25519_fe_safe : ∀ (sk : PrivateKey) (pk : PublicKey),
-  SafePub (⟨curve25519_fe sk.data pk.data⟩ : PublicKey)
-
-axiom curve25519_fe_comm_gen : ∀ (sk₁ sk₂ : PrivateKey) (pk : Vector UInt8 keySize),
-  curve25519_fe sk₁.data (curve25519_fe sk₂.data pk) = curve25519_fe sk₂.data (curve25519_fe sk₁.data pk)
-
-def FeSchemeName := "X25519"
-
-def FeScheme : NIKE where
-  PrivateKey   := PrivateKey
-  PublicKey    := PublicKey
-  SharedSecret := SharedSecret
-
-  name := FeSchemeName
-  privateKeySize   := keySize
-  publicKeySize    := keySize
-  sharedSecretSize := keySize
-
-  Safe    := SafePub
-  decSafe := inferInstance
-
-  privateKeyFromSeed := fun seed => ⟨clampScalar seed⟩
-  derivePublicKey    := derivePubFe
-  groupAction        := fun sk spk => ⟨curve25519_fe sk.data spk.1.data⟩
-
-  encodePrivateKey   := fun sk => sk.data
-  decodePrivateKey   := fun v => some ⟨v⟩
-  encodePublicKey    := fun pk => pk.data
-  decodePublicKey    := fun v => some ⟨v⟩
-  encodeSharedSecret := fun ss => ss.data
-
-  derive_safe        := derivePubFe_safe
-  decode_encode_priv := fun _ => rfl
-  decodePrivateKey_total := fun v => ⟨⟨v⟩, rfl⟩
-  decode_encode_pub  := fun _ => rfl
-  encode_decode_pub  := fun _ _ h => congrArg PublicKey.data (Option.some.inj h) ▸ rfl
-  commutes           := fun sk₁ sk₂ => congrArg SharedSecret.mk (curve25519_fe_commutes sk₁ sk₂)
-  reinterpret        := fun ss => ⟨ss.data⟩
-  reinterpret_safe   := fun sk spk => curve25519_fe_safe sk spk.1
-  groupAction_comm   := fun sk₁ sk₂ spk => congrArg SharedSecret.mk (curve25519_fe_comm_gen sk₁ sk₂ spk.1.data)
-  publicKeySize_eq_sharedSecretSize := rfl
-  encodePublicKey_reinterpret := fun _ => rfl
 
 end Cryptlib.Primitives.NIKE.X25519_montgomery_ladder
