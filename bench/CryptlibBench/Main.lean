@@ -10,6 +10,7 @@ import CryptlibBench.MLKEMSteps
 import CryptlibBench.Field25519
 import CryptlibBench.Cipher
 import CryptlibBench.KDF
+import CryptlibBench.Sign
 
 /-! # Benchmark driver for all registered schemes and suites -/
 
@@ -23,4 +24,5 @@ def main (args : List String) : IO UInt32 := do
   (← CryptlibBench.Field25519.benches).forM LeanBench.register
   (← CryptlibBench.Cipher.benches).forM LeanBench.register
   (← CryptlibBench.KDF.benches).forM LeanBench.register
+  (← CryptlibBench.Sign.benches).forM LeanBench.register
   LeanBench.runMain args
