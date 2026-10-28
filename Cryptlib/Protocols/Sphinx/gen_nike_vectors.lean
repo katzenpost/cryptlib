@@ -8,7 +8,7 @@ import Cryptlib.Protocols.Sphinx.Geometry
 import Cryptlib.Protocols.Sphinx.Types
 import Cryptlib.Protocols.Sphinx.NIKESphinxTheorems
 import Cryptlib.Protocols.Sphinx.SURB
-import Cryptlib.Primitives.NIKE.X25519_montgomery_ladder
+import Cryptlib.Primitives.NIKE.X25519LadderCorrect
 import Cryptlib.Util.HexBytes
 import Cryptlib.Util.Bytes
 
