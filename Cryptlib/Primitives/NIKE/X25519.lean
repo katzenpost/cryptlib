@@ -8,6 +8,7 @@ import Mathlib.Algebra.Field.Defs
 import Mathlib.Algebra.Field.Basic
 import Mathlib.Data.ZMod.Basic
 import Mathlib.Data.Nat.Digits.Lemmas
+import Mathlib.FieldTheory.Finite.Basic
 import Mathlib.NumberTheory.LucasPrimality
 
 import Cryptlib.Primitives.NIKE.NIKE
@@ -137,7 +138,8 @@ lemma digits_length_le (z : ZMod p) : (Nat.digits 256 z.val).length ≤ 32 :=
   simp only [encodeField, List.length_map, List.length_append, List.length_replicate]
   omega
 
-@[simp] lemma decodeField_encodeField (z : ZMod p) : decodeField (encodeField z) = z := by
+lemma ofDigits_encodeField (z : ZMod p) :
+    Nat.ofDigits 256 ((encodeField z).map UInt8.toNat) = z.val := by
   have hdigits : ∀ d ∈ Nat.digits 256 z.val ++
       List.replicate (32 - (Nat.digits 256 z.val).length) 0, d < 256 := by
     intro d hd
@@ -150,7 +152,10 @@ lemma digits_length_le (z : ZMod p) : (Nat.digits 256 z.val).length ≤ 32 :=
     rw [List.map_map]
     refine (List.map_congr_left (g := id) fun d hd => ?_).trans (List.map_id _)
     simpa using UInt8.toNat_ofNat_of_lt' (hdigits d hd)
-  rw [decodeField, encodeField, hmap, Nat.ofDigits_append_replicate_zero, Nat.ofDigits_digits]
+  rw [encodeField, hmap, Nat.ofDigits_append_replicate_zero, Nat.ofDigits_digits]
+
+@[simp] lemma decodeField_encodeField (z : ZMod p) : decodeField (encodeField z) = z := by
+  rw [decodeField, ofDigits_encodeField]
   simp
 
 /-! ### Encoding points
@@ -238,8 +243,65 @@ private def liftXCandidateY (x : ZMod p) : ZMod p :=
 def liftX (x : ZMod p) : Option Point :=
   if h : onCurve x (liftXCandidateY x) then some (mkPoint h) else none
 
-/-- `liftX` succeeds on every x-coordinate of a curve point. Taken as an axiom. -/
-axiom liftX_isSome_of_exists {x : ZMod p} : (∃ y, onCurve x y) → (liftX x).isSome = true
+private lemma powAux_eq (base : ZMod p) (e : ℕ) : powAux base e = base ^ e := by
+  induction e using Nat.strong_induction_on generalizing base with
+  | _ e ih =>
+    unfold powAux
+    split
+    · rename_i h; subst h; rfl
+    · rename_i h
+      have hlt : e / 2 < e := Nat.div_lt_self (Nat.pos_of_ne_zero h) (by norm_num)
+      rw [ih _ hlt, ← sq, ← pow_mul]
+      split
+      · rename_i h2
+        rw [← pow_succ']
+        congr 1
+        omega
+      · rename_i h2
+        show base ^ (2 * (e / 2)) = base ^ e
+        congr 1
+        omega
+
+lemma sqrtMinusOne_sq : sqrtMinusOne ^ 2 = -1 := by decide
+
+/-- The candidate is a square root of the right-hand side whenever one exists: with `r = y²`,
+`v = r^((p+3)/8)` has `v² = y^((p-1)/2) · r = ±r`. -/
+private lemma liftXCandidateY_sq {x y : ZMod p} (h : onCurve x y) :
+    onCurve x (liftXCandidateY x) := by
+  unfold onCurve at h ⊢
+  unfold liftXCandidateY
+  simp only
+  generalize hr : x ^ 3 + 486662 * x ^ 2 + x = r at h ⊢
+  rw [powAux_eq]
+  split
+  · assumption
+  · rename_i hne
+    by_cases hy : y = 0
+    · exfalso
+      apply hne
+      subst hy
+      rw [← h]
+      simp only [zero_pow two_ne_zero, zero_pow (show (p + 3) / 8 ≠ 0 by norm_num [p])]
+    · have he : (p + 3) / 8 * 4 = (p - 1) / 2 + 2 := by norm_num [p]
+      have ht : (y ^ ((p - 1) / 2)) ^ 2 = 1 := by
+        rw [← pow_mul, show (p - 1) / 2 * 2 = p - 1 by norm_num [p]]
+        exact ZMod.pow_card_sub_one_eq_one hy
+      have hv : (r ^ ((p + 3) / 8)) ^ 2 = y ^ ((p - 1) / 2) * r := by
+        rw [← h, ← pow_mul, ← pow_mul, show 2 * ((p + 3) / 8 * 2) = (p + 3) / 8 * 4 by ring, he,
+          pow_add]
+      have h01 : (y ^ ((p - 1) / 2) - 1) * (y ^ ((p - 1) / 2) + 1) = 0 := by
+        linear_combination ht
+      rcases mul_eq_zero.mp h01 with h1 | h1
+      · exact absurd (by rw [hv, show y ^ ((p - 1) / 2) = 1 by linear_combination h1, one_mul]) hne
+      · rw [mul_pow, hv, show y ^ ((p - 1) / 2) = -1 by linear_combination h1, sqrtMinusOne_sq]
+        ring
+
+/-- `liftX` succeeds on every x-coordinate of a curve point. -/
+lemma liftX_isSome_of_exists {x : ZMod p} : (∃ y, onCurve x y) → (liftX x).isSome = true := by
+  rintro ⟨y, h⟩
+  unfold liftX
+  rw [dif_pos (liftXCandidateY_sq h)]
+  rfl
 
 /-- `liftX` preserves the x-coordinate. -/
 lemma xCoord_of_liftX_eq_some {x : ZMod p} {Q : Point} (hQ : liftX x = some Q) : xCoord Q = x := by

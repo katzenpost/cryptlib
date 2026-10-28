@@ -1,5 +1,5 @@
 
-import Cryptlib.Primitives.NIKE.X25519_montgomery_ladder
+import Cryptlib.Primitives.NIKE.X25519LadderCorrect
 import Cryptlib.Primitives.NIKE.X25519
 import Cryptlib.Primitives.NIKE.NIKE
 import Cryptlib.Primitives.KEM.KEM
@@ -72,8 +72,8 @@ def blake2bXOFPRF : Adapter.PRF where
 /-- X25519 (Montgomery ladder) as a KEM. -/
 def kemX25519Ladder : KEM := kemOfNike sha256v1PRF X25519_montgomery_ladder.LadderScheme
 
-/-- X25519 (limb ladder) as a KEM. -/
-def kemX25519 : KEM := kemOfNike sha256v1PRF X25519_montgomery_ladder.FeScheme
+/-- X25519 as a KEM. -/
+def kemX25519 : KEM := kemOfNike sha256v1PRF (X25519_montgomery_ladder.ladderScheme "X25519")
 
 /-- X25519 as a KEM with the `blake2b-xof` PRF. Not registered. -/
 def kemX25519Blake2b : KEM := kemOfNike blake2bXOFPRF Cryptlib.Primitives.NIKE.X25519.Scheme

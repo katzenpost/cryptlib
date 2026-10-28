@@ -1,4 +1,4 @@
-import Cryptlib.Primitives.NIKE.X25519_montgomery_ladder
+import Cryptlib.Primitives.NIKE.X25519LadderCorrect
 import Cryptlib.Primitives.NIKE.X25519
 import Cryptlib.Primitives.NIKE.NIKE
 
@@ -8,21 +8,22 @@ namespace Cryptlib.Primitives.NIKE
 
 /-! # The X25519 schemes
 
-`X25519Scheme` computes in the curve group, so `commutes` is proved. `X25519LadderScheme` and
-`X25519FeScheme` are RFC 7748 Montgomery ladders and take commutativity and safety as axioms. -/
+`X25519Scheme` computes in the curve group. `X25519LadderScheme` and `X25519FastScheme` are the
+RFC 7748 Montgomery ladder, proved to compute the group's scalar multiplication, and so to inherit
+its laws; they differ only in name. -/
 
 def X25519Scheme : NIKE := X25519.Scheme
 
 def X25519LadderScheme : NIKE := X25519_montgomery_ladder.LadderScheme
 
-/-- The Montgomery ladder on `Field25519` limbs. -/
-def X25519FeScheme : NIKE := X25519_montgomery_ladder.FeScheme
+/-- X25519, as fast as it is proved: the `ZMod p` ladder. -/
+def X25519FastScheme : NIKE := X25519_montgomery_ladder.ladderScheme "X25519"
 
 def implementations : List NIKE :=
   [
     X25519Scheme,
     X25519LadderScheme,
-    X25519FeScheme
+    X25519FastScheme
   ]
 
 /-! ## Registry by canonical scheme name -/
@@ -36,9 +37,9 @@ def x25519LadderEntry : RegistryEntry := { hpqcName := "x25519-ladder", scheme :
 
 def x25519GroupEntry : RegistryEntry := { hpqcName := "x25519-group", scheme := X25519Scheme }
 
-def x25519FeEntry : RegistryEntry := { hpqcName := "x25519", scheme := X25519FeScheme }
+def x25519FastEntry : RegistryEntry := { hpqcName := "x25519", scheme := X25519FastScheme }
 
-def registry : List RegistryEntry := [x25519FeEntry, x25519LadderEntry, x25519GroupEntry]
+def registry : List RegistryEntry := [x25519FastEntry, x25519LadderEntry, x25519GroupEntry]
 
 /-- Case-insensitive lookup by scheme name. -/
 def byName (name : String) : Option NIKE :=
