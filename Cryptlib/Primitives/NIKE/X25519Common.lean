@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Mathlib.Data.ZMod.Basic
 import Mathlib.Tactic.NormNum
+import Mathlib.Data.Nat.Digits.Defs
 
 /-!
 # X25519 primitives shared by both implementations
@@ -25,8 +26,7 @@ def basepoint : ZMod p := 9
 
 /-- Little-endian byte decoding, with bit 255 masked per RFC 7748. -/
 def toField (v : Vector UInt8 keySize) : ZMod p :=
-  let masked := v.set 31 (v[31] &&& 0x7f)
-  (List.range keySize).foldr (fun i acc => acc * 256 + (masked[i]!).toNat) 0
+  (Nat.ofDigits 256 ((v.set 31 (v[31] &&& 0x7f)).toList.map UInt8.toNat) : ℕ)
 
 /-- RFC 7748 clamping: clear the low three bits, clear bit 255, set bit 254. -/
 def clampScalar (v : Vector UInt8 keySize) : Vector UInt8 keySize :=

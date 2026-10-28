@@ -1,4 +1,4 @@
-import Cryptlib.Primitives.NIKE.X25519_montgomery_ladder
+import Cryptlib.Primitives.NIKE.X25519LadderCorrect
 import Cryptlib.Primitives.NIKE.NIKE
 import Cryptlib.Primitives.NIKE.Schemes
 import Cryptlib.Primitives.Hash.Sha2
