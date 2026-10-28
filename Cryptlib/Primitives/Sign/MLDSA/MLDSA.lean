@@ -209,16 +209,45 @@ instance (p : Params) (pk : PublicKey p (prims p)) (sig : FIPSSignature p (prims
   · exact decEq _ _
   · exact decEq _ _
 
-def signM (p : Params) (seed : Bytes 32) (m : ByteArray) :
-    EStateM SignError State (Vector UInt8 p.signatureBytes) := fun s =>
-  let k := keys p seed
+/-- Signing with a key pair and its matrix `Â`. -/
+def signWith (p : Params) (k : PublicKey p (prims p) × SecretKey p) (aHat : TqMatrix p.k p.l)
+    (m : ByteArray) : EStateM SignError State (Vector UInt8 p.signatureBytes) := fun s =>
   let mu := (prims p).hashMessage k.2.tr (messagePrime m)
-  match fipsSignLoop p (prims p) k.2 ((prims p).expandA k.1.rho) mu
+  match fipsSignLoop p (prims p) k.2 aHat mu
       ((prims p).hashPrivateSeed k.2.key (rnd s) mu) maxAttempts with
   | none => .error .aborted (s.1 + 1, s.2)
   | some sig =>
     if Encodes p k.1 sig then .ok (toVecN _ (sigBytes p sig)) (s.1 + 1, s.2)
     else .error .aborted (s.1 + 1, s.2)
+
+def signM (p : Params) (seed : Bytes 32) (m : ByteArray) :
+    EStateM SignError State (Vector UInt8 p.signatureBytes) :=
+  let k := keys p seed
+  signWith p k ((prims p).expandA k.1.rho) m
+
+/-- A private key expanded once: its key pair and the matrix `Â`, which `signM` derives again for
+every signature. -/
+structure Expanded (p : Params) where
+  seed : Bytes 32
+  keys : PublicKey p (prims p) × SecretKey p
+  aHat : TqMatrix p.k p.l
+  keys_eq : keys = FIPS204.keys p seed
+  aHat_eq : aHat = (prims p).expandA keys.1.rho
+
+def expand (p : Params) (seed : Bytes 32) : Expanded p :=
+  let k := keys p seed
+  { seed, keys := k, aHat := (prims p).expandA k.1.rho, keys_eq := rfl, aHat_eq := rfl }
+
+/-- `signM` with the key already expanded. -/
+def signExpanded (p : Params) (e : Expanded p) (m : ByteArray) :
+    EStateM SignError State (Vector UInt8 p.signatureBytes) :=
+  signWith p e.keys e.aHat m
+
+theorem signExpanded_eq (p : Params) (e : Expanded p) (m : ByteArray) :
+    signExpanded p e m = signM p e.seed m := by
+  obtain ⟨seed, keys, aHat, hk, ha⟩ := e
+  subst hk ha
+  rfl
 
 def verifyBytes (p : Params) (pk : Vector UInt8 p.publicKeyBytes) (m : ByteArray)
     (sig : Vector UInt8 p.signatureBytes) : Bool :=
@@ -230,7 +259,7 @@ def verifyBytes (p : Params) (pk : Vector UInt8 p.publicKeyBytes) (m : ByteArray
 theorem verify_signM (p : Params) (hp : p.isApproved) (seed : Bytes 32) (m : ByteArray) (s : State)
     (σ : Vector UInt8 p.signatureBytes) (s' : State) (h : signM p seed m s = .ok σ s') :
     verifyBytes p (toVecN _ (pkBytes p (keys p seed).1)) m σ = true := by
-  unfold signM at h
+  unfold signM signWith at h
   dsimp only at h
   split at h
   · nomatch h
