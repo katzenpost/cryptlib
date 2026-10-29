@@ -63,7 +63,7 @@ EXES := $(TESTS) Cryptlib.Protocols.BACAP.gen_vectors Cryptlib.Protocols.Sphinx.
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf test-argon2
 .PHONY: test-hkdf-structured test-cipher test-sign test-mldsa test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors gen-hybrid-vectors gen-hedged-vectors gen-mrhybrid-vectors test-mrhybrid test-mlkem test-mlkem-kat test-mlkem-hedged test-hybrid-sphinx
-.PHONY: verify-vectors gen-acks-vectors gen-groupchat-wire-vectors check-bacap-vectors axioms tla veil
+.PHONY: verify-vectors gen-acks-vectors gen-groupchat-wire-vectors check-bacap-vectors axioms tla veil veil-mesh
 .PHONY: api-docs website website-pages website-serve mathlib-cache
 
 all: build ## build everything, library and executables
@@ -180,6 +180,9 @@ tla: ## model-check every GroupChat/tla protocol and impl config against its EXP
 
 veil: ## prove and model-check the GroupChat/veil Backfill model (its own Lake project, needs npm)
 	@cd Cryptlib/Protocols/GroupComm/GroupChatKatzenqt1/veil && $(LAKE) build
+
+veil-mesh: ## prove and model-check the Pigeonhole/Mesh/veil adaptive placement model (its own Lake project, needs npm)
+	@cd Cryptlib/Protocols/Pigeonhole/Mesh/veil && $(LAKE) build
 
 test-mlkem: build ## ML-KEM-768: round-trip self-test + NIST ACVP known-answer vectors
 	@$(BIN)/Cryptlib-Protocols-Sphinx-kem_selftest

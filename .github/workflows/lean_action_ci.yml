@@ -69,3 +69,6 @@ jobs:
       - name: Prove and model-check the Veil Backfill model
         working-directory: Cryptlib/Protocols/GroupComm/GroupChatKatzenqt1/veil
         run: lake build
+      - name: Prove and model-check the Veil Pigeonhole mesh model
+        working-directory: Cryptlib/Protocols/Pigeonhole/Mesh/veil
+        run: lake build
