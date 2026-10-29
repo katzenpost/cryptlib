@@ -22,6 +22,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -46,6 +47,10 @@ jobs:
         with:
           path: docs/docbuild/.lake/apidocs/core-*
           key: core-docs-${{ hashFiles('lean-toolchain', 'docs/docbuild/lake-manifest.json') }}
+
+      # `lake exe cache get` can stall forever on a dropped download; retry it bounded.
+      - name: Fetch prebuilt Mathlib
+        run: for i in 1 2 3; do timeout 10m lake exe cache get && exit 0; done; exit 1
 
       - name: Build the site
         env:
