@@ -45,11 +45,9 @@ open Cryptlib.Util.Bytes (ofVector extract_append_le extract_append_of_le extrac
 
 Constructions and proofs are in `kem_sphinx_theorems.lean`. -/
 
+/-- KEM-Sphinx has no wrap-resistance field: it has no blinding step, so it is not
+wrap-resistant. See `unwrapKEM_routingInfoBlock_not_wrap_resistant` in `KEMSphinxTheorems.lean`. -/
 structure KEMSphinxScheme extends Cryptlib.Protocols.Sphinx.Interface.Sphinx where
   kem : KEM
-  /-- Not wrap-resistant: any target routing-info block is reachable by some ciphertext. -/
-  not_wrap_resistant : ∀ (key iv target : ByteArray),
-      ∃ raw : ByteArray, xorBytes raw (stream.keystream key iv target.size) = target :=
-    fun key iv target => xorBytes_achieves_any_target (stream.keystream key iv target.size) target
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
