@@ -2515,9 +2515,7 @@ def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS 
     unwrap_complete := fun path privKeys payload st pkt st' hpath hrel hpriv hcmds hsurb hwrap =>
       wrapKEM_unwrapKEM_complete_valid kem cipher macS kdfS streamS geom hvalid hmactag h16
         path privKeys payload st pkt st' hpath hpriv hcmds hsurb (fun j _ => hrel j) hwrap
-    kem := kem
-    not_wrap_resistant := fun key iv target =>
-      xorBytes_achieves_any_target (streamS.keystream key iv target.size) target }
+    kem := kem }
 
 /-- A `KEMSphinxScheme` for the KEM `geom.kemName` names, with AEZ, HMAC-SHA256,
 HKDF-SHA256-Expand and AES-256-CTR. Rejects a `geom` that fails the validity checks. -/
