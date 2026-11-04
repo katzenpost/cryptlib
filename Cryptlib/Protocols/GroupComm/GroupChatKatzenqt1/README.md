@@ -194,8 +194,10 @@ though it never writes them, and fields it refuses, under both `AckCodec` and `A
 `scripts/gen_acks_vectors.py` generates them, and `make verify-vectors` regenerates them and
 compares. `wire_vectors_test.lean` checks `Gcm`, `Membership` and `ReplyWho` against vectors from
 katzenqt itself: each message reads as katzenqt reads it and is written back as katzenqt writes
-it, and each reply carries the `JoinReply` katzenqt takes from it. `make
-gen-groupchat-wire-vectors` regenerates them with katzenqt's Python.
+it, and each reply carries the `JoinReply` katzenqt takes from it; `make
+gen-groupchat-wire-vectors` regenerates them with katzenqt's Python. The same cases in the version
+4 array form, `testdata/groupchat_wire_vectors_v4.json`, come from `pigeonhole_protocols`, with
+malformed arrays that are refused.
 
 ```
 lake exe Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.replay        # every trace in testdata/groupchat_traces/

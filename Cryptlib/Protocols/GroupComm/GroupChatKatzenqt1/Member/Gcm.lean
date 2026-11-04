@@ -9,21 +9,26 @@ import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Wire
 
 /-! # Group chat messages on the wire
 
-A box of a member's stream holds `F` followed by the CBOR map of one `GroupChatMessage`, as
-katzenqt's `models.py` writes it: its fields in declaration order, absent ones left out. A message
-too long for a box goes to a substream of `C` chunks ending in an `F` chunk, announced in the
-member's stream by an `I` chunk carrying the substream's read cap.
+A box of a member's stream holds `F` followed by the CBOR of one `GroupChatMessage`: in version 4
+the array `[version, membership_hash, msg_type, body, acks, numbers, introduced_at]` with trailing
+nulls left out, in version 3 a map of the fields in declaration order, absent ones left out, as
+katzenqt's `models.py` writes it. The first byte's major type tells the forms apart. A message too
+long for a box goes to a substream of `C` chunks ending in an `F` chunk, announced in the member's
+stream by an `I` chunk carrying the substream's read cap.
 
-`Gcm` holds what this client reads of a message. The fields between `introduction` and `acks`
-(`file_upload`, `who`, `reply_who`, `tally`) are kept as their CBOR, unread; keys katzenqt does not
-know are dropped, as its decoder drops them. -/
+`Gcm` holds what this client reads of a message. The bodies it does not read (`file_upload`, `who`,
+`reply_who`, `tally`) are kept in `other` as their CBOR in the map form, a `file_upload` as the map
+`payload`, `filetype`, `basename`; keys katzenqt does not know are dropped, as its decoder drops
+them. -/
 
 namespace Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.Member.Gcm
 
 open Cbor
 
-/-- The newest message version this client reads; it writes no other. -/
-def currentVersion : Nat := 3
+/-- The version written: the array form. -/
+def currentVersion : Nat := 4
+/-- The newest version of the map form, which is read as well. -/
+def mapVersion : Nat := 3
 
 def hashSize : Nat := 32
 def readCapSize : Nat := 136
@@ -41,6 +46,14 @@ end MsgType
 /-- The fields this client keeps without reading, in the order they are written. -/
 def otherKeys : List String := ["file_upload", "who", "reply_who", "tally"]
 
+/-- The field a message type's body is, in the map form and in `other`. -/
+def bodyKey (t : Nat) : Option String :=
+  if t = MsgType.fileUpload then some "file_upload"
+  else if t = MsgType.who then some "who"
+  else if t = MsgType.replyWho then some "reply_who"
+  else if 5 ≤ t ∧ t ≤ 9 then some "tally"
+  else none
+
 structure Gcm where
   version : Nat
   membershipHash : ByteArray
@@ -53,7 +66,9 @@ structure Gcm where
   introducedAt : Option ByteArray := none
   deriving DecidableEq, Inhabited
 
-/-! ## Encoding -/
+/-! ## Encoding
+
+### The map form -/
 
 inductive Field
   | version (n : Nat)
@@ -91,13 +106,73 @@ def encodeField : Field → List UInt8
   | .numbers b => Cbor.text "numbers" ++ bytes b.data.toList
   | .introducedAt b => Cbor.text "introduced_at" ++ bytes b.data.toList
 
-def encodeList (g : Gcm) : List UInt8 :=
+def encodeMapList (g : Gcm) : List UInt8 :=
   header 5 (fields g).length ++ (fields g).flatMap encodeField
 
-/-- The CBOR of `g`. -/
-def encode (g : Gcm) : ByteArray := ⟨(encodeList g).toArray⟩
+/-! ### The array form -/
 
-/-! ## Decoding -/
+/-- A `file_upload` map's `payload`, `filetype` and `basename`; a missing one is empty. -/
+def uploadEntries : Nat → List UInt8 × String × String → List UInt8 →
+    Option (List UInt8 × String × String)
+  | 0, acc, _ => some acc
+  | n + 1, (p, t, b), l => do
+    let (k, l) ← readText l
+    if k = "payload" then
+      let (v, l) ← readBytes l
+      uploadEntries n (v, t, b) l
+    else if k = "filetype" then
+      let (v, l) ← readText l
+      uploadEntries n (p, v, b) l
+    else if k = "basename" then
+      let (v, l) ← readText l
+      uploadEntries n (p, t, v) l
+    else
+      uploadEntries n (p, t, b) (← skipItems (l.length + 1) 1 l)
+
+/-- The array body `[payload, filetype, basename]` of a `file_upload` map; anything else as it
+came. -/
+def uploadArray (raw : List UInt8) : List UInt8 :=
+  match readHeader raw with
+  | some (5, n, rest) =>
+    match uploadEntries n ([], "", "") rest with
+    | some (p, t, b) => header 4 3 ++ bytes p ++ Cbor.text t ++ Cbor.text b
+    | none => raw
+  | _ => raw
+
+def encodeIntroArray (i : Introduction) : List UInt8 :=
+  header 4 2 ++ Cbor.text i.name ++ bytes i.readCap.data.toList
+
+/-- The type's payload: the text, `[display_name, read_cap]`, `[payload, filetype, basename]`,
+an app's value, or null. -/
+def encodeBody (g : Gcm) : List UInt8 :=
+  if g.msgType = MsgType.text then Cbor.text (g.text.getD "")
+  else if g.msgType = MsgType.introduction then
+    match g.introduction with
+    | some i => encodeIntroArray i
+    | none => null
+  else match (bodyKey g.msgType).bind (fun k => g.other.lookup k) with
+    | some raw => if g.msgType = MsgType.fileUpload then uploadArray raw else raw
+    | none => null
+
+/-- The fields after the body, the trailing absent ones left out. -/
+def tail (g : Gcm) : List (Option ByteArray) :=
+  ([g.acks, g.numbers, g.introducedAt].reverse.dropWhile Option.isNone).reverse
+
+def encodeOpt : Option ByteArray → List UInt8
+  | some b => bytes b.data.toList
+  | none => null
+
+def encodeArrayList (g : Gcm) : List UInt8 :=
+  header 4 (4 + (tail g).length) ++ uint g.version ++ bytes g.membershipHash.data.toList
+    ++ uint g.msgType ++ encodeBody g ++ (tail g).flatMap encodeOpt
+
+/-- The CBOR of `g`: the array form from version 4 on, the map form below. -/
+def encode (g : Gcm) : ByteArray :=
+  ⟨(if currentVersion ≤ g.version then encodeArrayList g else encodeMapList g).toArray⟩
+
+/-! ## Decoding
+
+### The map form -/
 
 /-- An `introduction` map's entries: `display_name` and `read_cap`, in either order. -/
 def introEntries : Nat → Option String × Option ByteArray → List UInt8 →
@@ -215,20 +290,80 @@ def Acc.finish (a : Acc) : Option Gcm := do
   let v ← a.version
   let h ← a.hash
   let t := a.msgType.getD (inferType a)
-  if currentVersion < v ∨ h.size ≠ hashSize ∨ MsgType.control < t then none
+  if mapVersion < v ∨ h.size ≠ hashSize ∨ MsgType.control < t then none
   some { version := v, membershipHash := h, msgType := t, text := a.text,
          introduction := a.introduction,
          other := otherKeys.filterMap fun k => (a.other.lookup k).map (k, ·),
          acks := a.acks, numbers := a.numbers, introducedAt := a.introducedAt }
 
+/-! ### The array form -/
+
+def readIntroArray (l : List UInt8) : Option (Introduction × List UInt8) := do
+  let (major, n, l) ← readHeader l
+  if major ≠ 4 ∨ n ≠ 2 then none
+  let (name, l) ← readText l
+  let (cap, l) ← readByteArray l
+  if 1 ≤ name.length ∧ name.length ≤ maxNameChars ∧ cap.size = readCapSize then
+    some (⟨name, cap⟩, l)
+  else none
+
+def uploadMap (p : List UInt8) (t b : String) : List UInt8 :=
+  header 5 3 ++ Cbor.text "payload" ++ bytes p ++ Cbor.text "filetype" ++ Cbor.text t
+    ++ Cbor.text "basename" ++ Cbor.text b
+
+/-- A `[payload, filetype, basename]` body, as the `file_upload` map. -/
+def readUpload (l : List UInt8) : Option (List UInt8 × List UInt8) := do
+  let (major, n, l) ← readHeader l
+  if major ≠ 4 ∨ n ≠ 3 then none
+  let (p, l) ← readBytes l
+  let (t, l) ← readText l
+  let (b, l) ← readText l
+  some (uploadMap p t b, l)
+
+/-- What a body says: the text, the introduction, or the field kept unread. -/
+abbrev Body := Option String × Option Introduction × List (String × List UInt8)
+
+def readBody (t : Nat) (l : List UInt8) : Option (Body × List UInt8) :=
+  if t = MsgType.text then (readText l).map fun (s, l) => ((some s, none, []), l)
+  else if t = MsgType.introduction then
+    (readIntroArray l).map fun (i, l) => ((none, some i, []), l)
+  else if t = MsgType.fileUpload then
+    (readUpload l).map fun (raw, l) => ((none, none, [("file_upload", raw)]), l)
+  else if t = MsgType.control then
+    if isNull l then some ((none, none, []), l.drop 1) else none
+  else if isNull l then some ((none, none, []), l.drop 1)
+  else (readRaw l).map fun (raw, l) => ((none, none, [((bodyKey t).getD "tally", raw)]), l)
+
+/-- `k` fields that are each a byte string or null. -/
+def readOpts : Nat → List UInt8 → Option (List (Option ByteArray) × List UInt8)
+  | 0, l => some ([], l)
+  | k + 1, l => do
+    let (b, l) ← nullable readByteArray l
+    let (bs, l) ← readOpts k l
+    some (b :: bs, l)
+
+/-- The message an array of `n` elements holds. -/
+def readArray (n : Nat) (l : List UInt8) : Option Gcm := do
+  if n < 4 ∨ 7 < n then none
+  let (v, l) ← readUInt l
+  let (h, l) ← readByteArray l
+  let (t, l) ← readUInt l
+  if v < currentVersion ∨ h.size ≠ hashSize ∨ MsgType.control < t then none
+  let ((text, introduction, other), l) ← readBody t l
+  let (opts, _) ← readOpts (n - 4) l
+  some { version := v, membershipHash := h, msgType := t, text, introduction, other,
+         acks := opts.getD 0 none, numbers := opts.getD 1 none, introducedAt := opts.getD 2 none }
+
 def decodeList (l : List UInt8) : Option Gcm := do
   let (major, n, rest) ← readHeader l
-  if major ≠ 5 then none
-  let (a, _) ← readFields n {} rest
-  a.finish
+  if major = 4 then readArray n rest
+  else if major = 5 then
+    let (a, _) ← readFields n {} rest
+    a.finish
+  else none
 
-/-- The message a CBOR map holds, or `none` when katzenqt would refuse it. What follows the map
-is ignored, as `cbor2.loads` ignores it. -/
+/-- The message a CBOR item holds, in either form, or `none` when it is refused. What follows the
+item is ignored, as `cbor2.loads` ignores it. -/
 def decode (b : ByteArray) : Option Gcm := decodeList b.data.toList
 
 /-! ## Boxes -/
@@ -290,14 +425,14 @@ def toMessage (cbor : ByteArray) : Option Message := do
 
 def nonEmpty (b : ByteArray) : Option ByteArray := if b.size = 0 then none else some b
 
-/-- The message whose CBOR a member's `m` is written as; `none` when its content is not a
-message. -/
-def ofMessage (m : Message) : Option Gcm := do
+/-- The message whose CBOR a member's `m` is written as, a control message or introduction in
+`version`; `none` when its content is not a message. -/
+def ofMessage (m : Message) (version : Nat := currentVersion) : Option Gcm := do
   let g ← match m.content, m.introduction with
     | some c, _ => decode c
-    | none, some i => some { version := currentVersion, membershipHash := m.membershipHash.getD sentinel,
+    | none, some i => some { version, membershipHash := m.membershipHash.getD sentinel,
                               msgType := MsgType.introduction, introduction := some i }
-    | none, none => some { version := currentVersion, membershipHash := m.membershipHash.getD sentinel,
+    | none, none => some { version, membershipHash := m.membershipHash.getD sentinel,
                            msgType := MsgType.control }
   some { g with
     acks := nonEmpty (AckBytes.encode m.acks)
@@ -305,7 +440,8 @@ def ofMessage (m : Message) : Option Gcm := do
     introducedAt := m.introducedAt.map fun r => ⟨(encodeIntroducedAt r).toArray⟩ }
 
 /-- The box for a member's `m`. -/
-def box (m : Message) : Option ByteArray := (ofMessage m).map fun g => frame (encode g)
+def box (m : Message) (version : Nat := currentVersion) : Option ByteArray :=
+  (ofMessage m version).map fun g => frame (encode g)
 
 /-- A text message, as a member's content. -/
 def textContent (membershipHash : ByteArray) (s : String) : ByteArray :=
