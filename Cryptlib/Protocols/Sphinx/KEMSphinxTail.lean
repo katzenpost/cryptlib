@@ -520,7 +520,8 @@ theorem newKEMPacket_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS
       show _ = tailPadBlock streamS geom (kemHopKeys kem kdfS path seeds 0) 0
       unfold tailPadBlock headerKeystream
       rw [← hkhk 0 hi]
-      congr 1 <;> omega
+      congr 1
+      omega
     | succ i ih =>
       intro hi
       have hc := hriPadcontent (i + 1) hi
@@ -541,7 +542,8 @@ theorem newKEMPacket_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS
       congr 1
       unfold tailPadBlock headerKeystream
       rw [← hkhk (i + 1) hi]
-      congr 1 <;> omega
+      congr 1
+      omega
   -- The arrays and trace of `createKEMHeader` on the rest of the path.
   let RKS' : Array ByteArray := Array.ofFn (fun i : Fin (path.size - 1) =>
     (streamS.keystream (ofVector (keys[i.val + 1]!).headerEncryption)
@@ -701,7 +703,8 @@ theorem newKEMPacket_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS
               ((riPadding[path.size - 1 - 1 - j]!).extract 0 geom.perHopRoutingInfoLength) := by
           rw [hc, pad_extract_head _ _ _ (by rw [hPq]; exact hslq)
             (by rw [hPq', ByteArray.size_extract, hkssize]; omega), ByteArray.extract_extract]
-          congr 2 <;> omega
+          congr 2
+          omega
         have hfragsize : frag.size = geom.perHopRoutingInfoLength :=
           kemRiFragment_size kem geom path kemElements (s j).2 path.size (path.size - 1 - j) hi1
             hperhop hnnh hknsize hksize frag hfrag

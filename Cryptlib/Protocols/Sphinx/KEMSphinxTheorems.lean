@@ -2243,7 +2243,7 @@ private theorem listMapM_nextSeed_succeeds {α : Type} (l : List α) (i : Nat)
         simpa [show i + (j' + 1) = i + 1 + j' from by omega] using this
 
 /-- `listMapM_nextSeed_succeeds` for `Array.mapM`. -/
-private theorem arrayMapM_nextSeed_succeeds {α : Type} (l : Array α) (i : Nat)
+theorem arrayMapM_nextSeed_succeeds {α : Type} (l : Array α) (i : Nat)
     (str : Nat → Vector UInt8 32) :
     ∃ seeds : Array (Vector UInt8 32), seeds.size = l.size ∧
       (l.mapM (fun _ => nextSeed) : EStateM String SeedStream (Array (Vector UInt8 32)))
