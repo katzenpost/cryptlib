@@ -49,7 +49,7 @@ blinding), and each non-terminal hop's routing-info block carries the next hop's
 last `kem.ciphertextSize` bytes. -/
 
 /-- Encapsulate to a byte-encoded public key, seeded from `seed`. -/
-private def kemEncap (kem : KEM) (pkBytes : ByteArray) (seed : Vector UInt8 32) :
+def kemEncap (kem : KEM) (pkBytes : ByteArray) (seed : Vector UInt8 32) :
     Except String (ByteArray × ByteArray) :=
   match kem.decodePublicKey (toVecN kem.publicKeySize pkBytes) with
   | none => throw "sphinx: invalid public key encoding"
@@ -59,7 +59,7 @@ private def kemEncap (kem : KEM) (pkBytes : ByteArray) (seed : Vector UInt8 32) 
     | .error _ _ => throw "sphinx: KEM encapsulation failed"
 
 /-- Decapsulate a byte-encoded ciphertext. Decapsulation draws no randomness, so any seed works. -/
-private def kemDecap (kem : KEM) (skBytes ctBytes : ByteArray) : Except String ByteArray :=
+def kemDecap (kem : KEM) (skBytes ctBytes : ByteArray) : Except String ByteArray :=
   match kem.decodePrivateKey (toVecN kem.privateKeySize skBytes),
       kem.decodeCiphertext (toVecN kem.ciphertextSize ctBytes) with
   | some sk, some ct =>
@@ -69,14 +69,14 @@ private def kemDecap (kem : KEM) (skBytes ctBytes : ByteArray) : Except String B
   | _, _ => throw "sphinx: invalid key/ciphertext encoding"
 
 /-- The public key for a private key's bytes. -/
-private def kemSelfPublicKeyBytes (kem : KEM) (skBytes : ByteArray) : ByteArray :=
+def kemSelfPublicKeyBytes (kem : KEM) (skBytes : ByteArray) : ByteArray :=
   match kem.decodePrivateKey (toVecN kem.privateKeySize skBytes) with
   | none => skBytes
   | some sk => ofVector (kem.encodePublicKey (kem.derivePublicKey sk))
 
 /-- One hop's routing-info fragment, `perHopRoutingInfoLength` bytes. A non-terminal hop's last
 `kem.ciphertextSize` bytes hold the next hop's ciphertext. -/
-private def kemRiFragment (kem : KEM) (geom : Geometry) (path : Array PathHop)
+def kemRiFragment (kem : KEM) (geom : Geometry) (path : Array PathHop)
     (kemElements : Array ByteArray) (macBytes : ByteArray) (nrHops i : Nat) :
     Except String ByteArray := do
   let isTerminal := i == nrHops - 1
@@ -188,7 +188,7 @@ theorem kemEncap_kemDecap_of_honest (kem : KEM) (skBytes : ByteArray) (seedV : V
     rfl
 
 /-- `kemEncap`'s ciphertext is `kem.ciphertextSize` bytes. -/
-private theorem kemEncap_size (kem : KEM) (pkBytes : ByteArray) (seed : Vector UInt8 32)
+theorem kemEncap_size (kem : KEM) (pkBytes : ByteArray) (seed : Vector UInt8 32)
     (ct ss : ByteArray) (h : kemEncap kem pkBytes seed = .ok (ct, ss)) :
     ct.size = kem.ciphertextSize := by
   unfold kemEncap at h
@@ -232,7 +232,7 @@ private theorem createKEMHeader_loop1_size (kem : KEM) (kdfS : KDF) (path : Arra
   · rw [hinit]; simp
 
 /-- `kemRiFragment` produces exactly `geom.perHopRoutingInfoLength` bytes. -/
-private theorem kemRiFragment_size (kem : KEM) (geom : Geometry) (path : Array PathHop)
+theorem kemRiFragment_size (kem : KEM) (geom : Geometry) (path : Array PathHop)
     (kemElements : Array ByteArray) (macBytes : ByteArray) (nrHops i : Nat) (hi : i < nrHops)
     (hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength)
     (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
@@ -689,7 +689,7 @@ private theorem createKEMHeader_loop3_trace (kem : KEM) (macS : MAC) (geom : Geo
 
 /-- Along the third-loop trace, `(s j).1` grows by `perHopRoutingInfoLength` per step, and
 `(s j).2` is `macS.tagSize` bytes after the first step. -/
-private theorem createKEMHeader_s_size (kem : KEM) (macS : MAC) (geom : Geometry)
+theorem createKEMHeader_s_size (kem : KEM) (macS : MAC) (geom : Geometry)
     (path : Array PathHop) (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
     (nrHops : Nat) (s : Nat → ByteArray × ByteArray)
     (hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength)
@@ -719,7 +719,7 @@ private theorem createKEMHeader_s_size (kem : KEM) (macS : MAC) (geom : Geometry
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 4000 in
 /-- A successful `createKEMHeader` call, unfolded to the contents of its three loops. -/
-private theorem createKEMHeader_unfold (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+theorem createKEMHeader_unfold (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
     (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray)
     (path : Array PathHop) (hdr : ByteArray) (sprpKeys : Array SPRPKey)
     (h : createKEMHeader kem macS kdfS streamS geom ephemeralSeeds filler path = .ok (hdr, sprpKeys)) :
@@ -1000,7 +1000,7 @@ def newKEMPacket (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF
   pure (hdr ++ b)
 
 /-- One step of `newKEMPacket`'s payload-encryption loop. -/
-private def payloadEncryptStep (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
+def payloadEncryptStep (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
     (b : ByteArray) (iRev : Nat) : ByteArray :=
   let k := sprpKeys[sprpKeys.size - 1 - iRev]!
   cipher.encrypt k.key.toArray (ofVector k.iv) b
@@ -1033,7 +1033,7 @@ private theorem newKEMPacket_payload_content (cipher : WideBlockCipher) (sprpKey
   rw [hstepk, show sprpKeys.size - (k + 1) = sprpKeys.size - k - 1 from by omega]
 
 /-- The payload trace preserves size. -/
-private theorem newKEMPacket_payload_size_trace (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
+theorem newKEMPacket_payload_size_trace (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
     (t : Nat → ByteArray)
     (hstep : ∀ j (_hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j) :
     ∀ j (_hj : j ≤ sprpKeys.size), (t j).size = (t 0).size := by
@@ -1047,7 +1047,7 @@ private theorem newKEMPacket_payload_size_trace (cipher : WideBlockCipher) (sprp
     exact ih (by omega)
 
 /-- A successful `newKEMPacket` call, unfolded to its header and payload trace. -/
-private theorem newKEMPacket_unfold (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+theorem newKEMPacket_unfold (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
     (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
     (h : newKEMPacket kem cipher macS kdfS streamS geom ephemeralSeeds filler path payload
@@ -1120,13 +1120,13 @@ theorem newKEMPacket_size (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (k
 `v0AD ++ kemElements[k]! ++ (R(k) ++ P(k-1)) ++ M(k) ++ payloadAt(k)`, where
 `R(i) := (s (nrHops - i)).1`, `M(i) := (s (nrHops - i)).2`, `P(i) := riPadding[i]!`,
 `payloadAt(i) := t (nrHops - i)` and `P(-1) := empty`. -/
-private def hopPacket (kemElements riPadding : Array ByteArray) (s : Nat → ByteArray × ByteArray)
+def hopPacket (kemElements riPadding : Array ByteArray) (s : Nat → ByteArray × ByteArray)
     (t : Nat → ByteArray) (nrHops k : Nat) : ByteArray :=
   v0AD ++ kemElements[k]! ++ ((s (nrHops - k)).1 ++ (if k > 0 then riPadding[k - 1]! else ByteArray.empty))
     ++ (s (nrHops - k)).2 ++ t (nrHops - k)
 
 /-- `hopPacket ... k` is `geom.packetLength` bytes for every `k < nrHops`. -/
-private theorem hopPacket_size (kem : KEM) (macS : MAC) (geom : Geometry) (path : Array PathHop)
+theorem hopPacket_size (kem : KEM) (macS : MAC) (geom : Geometry) (path : Array PathHop)
     (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
     (_cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
     (nrHops : Nat) (s : Nat → ByteArray × ByteArray) (t : Nat → ByteArray)
@@ -1182,7 +1182,7 @@ private theorem hopPacket_size (kem : KEM) (macS : MAC) (geom : Geometry) (path 
     omega
 
 /-- `hopPacket`'s wire-format slices at the offsets `unwrapKEM` reads. -/
-private theorem hopPacket_slices (kem : KEM) (macS : MAC) (geom : Geometry) (path : Array PathHop)
+theorem hopPacket_slices (kem : KEM) (macS : MAC) (geom : Geometry) (path : Array PathHop)
     (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
     (_cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
     (nrHops : Nat) (s : Nat → ByteArray × ByteArray) (t : Nat → ByteArray)
