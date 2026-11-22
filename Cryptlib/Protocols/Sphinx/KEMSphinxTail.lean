@@ -24,15 +24,20 @@ open Cryptlib.Util.Bytes (ofVector)
 
 Kuhn, Beck and Strufe (*Breaking and (Partially) Fixing Provably Secure Onion Routing*, S&P 2020)
 replace the 2009 properties with layer unlinkability and tail indistinguishability. Tail
-indistinguishability says that the packet an honest hop forwards cannot be told from a packet
-built afresh on the rest of the path.
+indistinguishability says that the packet an honest hop forwards cannot be told from the same
+layer of an unrelated onion that shares the rest of the path.
 
-This file proves the exact half of that property for `newKEMPacket` and `unwrapKEM` themselves:
-the packet the first hop forwards *is* the packet `newKEMPacket` builds on the rest of the path,
-from the remaining seeds and with the filler `tailFiller`, the old filler followed by one more
-block. That block is the XOR of one keystream block from every hop of the path, the first hop
-included (`tailPad`). What is left of tail indistinguishability is that this block looks random
-to someone who lacks the first hop's key. -/
+This file proves the exact fact that property rests on, for `newKEMPacket` and `unwrapKEM`
+themselves (`newKEMPacket_unwrapKEM_tail`): the packet the first hop forwards *is* the packet `newKEMPacket`
+builds on the rest of the path, from the remaining seeds and with the filler `tailFiller`, the
+old filler followed by one more block. That block is the XOR of one keystream block from every
+hop of the path, the first hop included (`tailPad`). `wrapKEM_unwrapKEM_tail` says the same of
+`wrapKEM`, and is the proof of the `unwrap_tail` field of `KEMSphinxScheme`, built here by
+`kemSphinxSchemeOf`.
+
+What is left of tail indistinguishability is that the extra block looks random to someone who
+lacks the first hop's key; `KEMSphinxTailIndist.lean` states that with probabilities. Only the
+first hop is treated: a later hop follows by applying the theorem once per hop before it. -/
 
 /-- A `forIn` over `List.range' 0 n` whose every step yields the next value of `tr` returns
 `tr n`. The converse of `List.forIn_exists_trace`. -/
@@ -791,5 +796,180 @@ theorem newKEMPacket_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS
     ++ (s (path.size - 1)).2 ++ t (path.size - 1) = _
   rw [Nat.sub_self, hY0]
   rfl
+
+open Cryptlib.Protocols.Sphinx.Interface (SeedStream nextSeed drawBytes seedBytes fillerLength)
+
+/-- `get!` inside the array is `getElem`. -/
+theorem get!_eq_getElem (x : ByteArray) (j : Nat) (h : j < x.size) : x.get! j = x[j]'h := by
+  obtain ⟨bs⟩ := x
+  show bs[j]! = _
+  rw [getElem!_pos bs j h]
+  rfl
+
+/-- A seed stream whose seeds from `base` on are the 32-byte chunks of `b` yields `b`. -/
+theorem seedBytes_chunks (b : ByteArray) (str : Nat → Vector UInt8 32) (base : Nat)
+    (hstr : ∀ k, str (base + k) = toVec32 (b.extract (32 * k) (32 * k + 32))) :
+    seedBytes str base b.size = b := by
+  apply ByteArray.ext_getElem
+  · exact Cryptlib.Protocols.Sphinx.Interface.seedBytes_size str base b.size
+  · intro i hi hi'
+    unfold seedBytes
+    show (Array.ofFn fun k : Fin b.size =>
+      (str (base + k.val / 32))[k.val % 32]'(Nat.mod_lt _ (by decide)))[i]'(by simpa using hi')
+        = b[i]'hi'
+    rw [Array.getElem_ofFn, hstr]
+    show (Vector.ofFn fun j : Fin 32 => (b.extract (32 * (i / 32)) (32 * (i / 32) + 32)).get! j.val)[i % 32]'(Nat.mod_lt _ (by decide))
+      = b[i]'hi'
+    rw [Vector.getElem_ofFn]
+    have hlt : i % 32 < (b.extract (32 * (i / 32)) (32 * (i / 32) + 32)).size := by
+      rw [ByteArray.size_extract]
+      have := Nat.div_add_mod i 32
+      have := Nat.mod_lt i (by decide : 32 > 0)
+      omega
+    rw [get!_eq_getElem _ _ hlt, ByteArray.getElem_extract]
+    congr 1
+    exact Nat.div_add_mod i 32
+
+set_option maxHeartbeats 1000000 in
+/-- **`newKEMPacket_unwrapKEM_tail` for `wrapKEM`.** What the first hop forwards from a wrapped
+packet is what `wrapKEM` itself returns on the rest of the path, from some seed stream. -/
+theorem wrapKEM_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
+    (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (hop0 : PathHop) (rest : List PathHop) (privKey : ByteArray)
+    (payload : Vector UInt8 geom.forwardPayloadLength) (st : SeedStream)
+    (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream) (hrest : rest ≠ [])
+    (hrel : ∀ j, kem.Reliable (kem.stateFromSeed (st.2 (st.1 + j))))
+    (hpp : kemSelfPublicKeyBytes kem privKey = hop0.publicKey)
+    (hcmds : ∀ c ∈ hop0.commands,
+      c ≠ RoutingCommand.null ∧ ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
+    (hwrap : wrapKEM kem cipher macS kdfS streamS geom (hop0 :: rest) payload st = .ok pkt st') :
+    ∃ (replayTag : Vector UInt8 32) (cmds : List RoutingCommand)
+      (fwd : Vector UInt8 (ofVector pkt).size) (st0 st1 : SeedStream)
+      (fresh : Vector UInt8 geom.packetLength),
+      unwrapKEM kem cipher macS kdfS streamS geom privKey (ofVector pkt)
+        = Except.ok (none, replayTag, cmds, some fwd) ∧
+      wrapKEM kem cipher macS kdfS streamS geom rest payload st0 = .ok fresh st1 ∧
+      ofVector fresh = ofVector fwd := by
+  obtain ⟨i, str⟩ := st
+  obtain ⟨seeds, hseedsize, hseedcontent, hnk⟩ := wrapKEM_unfold kem cipher macS kdfS streamS geom
+    (hop0 :: rest) payload i str pkt st' hwrap
+  have hrpos : 0 < rest.length := List.length_pos_of_ne_nil hrest
+  have hp0 : ((hop0 :: rest).toArray)[0]! = hop0 := by simp
+  have hpext : (hop0 :: rest).toArray.extract 1 (hop0 :: rest).toArray.size = rest.toArray := by
+    simp
+  obtain ⟨replayTag, cmds, fwd, hunwrap, htail⟩ := newKEMPacket_unwrapKEM_tail kem cipher macS
+    kdfS streamS geom hvalid hmactag h16 seeds _ (hop0 :: rest).toArray (ofVector payload)
+    (ofVector pkt) privKey (by simp; omega) (by rw [hp0]; exact hpp)
+    (fun j hj => by rw [hseedcontent j (by simpa using hj)]; exact hrel j)
+    (by rw [hp0]; exact fun c hc => (hcmds c hc).1)
+    (by rw [hp0]; exact fun c hc => (hcmds c hc).2) hnk
+  rw [hpext] at htail
+  obtain ⟨-, hdr, sprpKeys, t, hcreate, -, -, -⟩ :=
+    newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ _ _ hnk
+  obtain ⟨-, hple, -, -⟩ :=
+    createKEMHeader_unfold kem macS kdfS streamS geom _ _ _ hdr sprpKeys hcreate
+  obtain ⟨TF, hTF⟩ : ∃ TF, TF = tailFiller kem kdfS streamS geom (hop0 :: rest).toArray seeds
+      (seedBytes str (i + (hop0 :: rest).toArray.size)
+        (fillerLength geom (hop0 :: rest).length)) := ⟨_, rfl⟩
+  rw [← hTF] at htail
+  have hTFsize : TF.size = fillerLength geom rest.length := by
+    obtain ⟨-, hdr', sprp', t', hcreate', -, -, -⟩ :=
+      newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ _ _ htail
+    obtain ⟨-, -, -, hfs', -⟩ :=
+      createKEMHeader_unfold kem macS kdfS streamS geom _ _ _ hdr' sprp' hcreate'
+    have := hfs' (by simp at hple ⊢; omega)
+    simpa [fillerLength] using this
+  -- The seed stream of the fresh packet: the remaining seeds, then the filler in chunks.
+  let str0 : Nat → Vector UInt8 32 := fun k =>
+    if k < rest.length then str (i + 1 + k)
+    else toVec32 (TF.extract (32 * (k - rest.length)) (32 * (k - rest.length) + 32))
+  obtain ⟨seeds', hs'size, hs'eq, hs'content⟩ := arrayMapM_nextSeed_succeeds rest.toArray 0 str0
+  have hseeds' : seeds' = seeds.extract 1 seeds.size := by
+    apply Array.ext
+    · simp [hs'size, hseedsize]
+    · intro j h1 h2
+      have hj : j < rest.length := by simpa [hs'size] using h1
+      have e1 := hs'content j (by simpa using hj)
+      rw [getElem!_pos seeds' j h1] at e1
+      have e2 := hseedcontent (1 + j) (by simp; omega)
+      rw [getElem!_pos seeds (1 + j) (by rw [hseedsize]; simp; omega)] at e2
+      rw [e1, Array.getElem_extract, e2]
+      show str0 (0 + j) = _
+      simp only [str0, Nat.zero_add, if_pos hj]
+      congr 1
+      omega
+  have hfill : seedBytes str0 (0 + rest.toArray.size) (fillerLength geom rest.length) = TF := by
+    rw [← hTFsize]
+    exact seedBytes_chunks TF str0 _ (fun k => by
+      show str0 (0 + rest.toArray.size + k) = _
+      simp only [str0]
+      rw [if_neg (by simp)]
+      simp)
+  have hsz : (ofVector fwd).size = geom.packetLength := by
+    rw [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector]
+  refine ⟨replayTag, cmds, fwd, (0, str0),
+    (0 + rest.toArray.size + (fillerLength geom rest.length + 31) / 32, str0),
+    ⟨(ofVector fwd).data, hsz⟩, hunwrap, ?_, rfl⟩
+  unfold wrapKEM
+  dsimp only [Bind.bind, EStateM.bind]
+  rw [hs'eq]
+  dsimp only [drawBytes]
+  rw [hfill, hseeds', htail]
+  dsimp only
+  rw [dif_pos hsz]
+  rfl
+
+/-- A `KEMSphinxScheme` for any `KEM`, MAC, KDF, stream cipher and wide-block cipher. -/
+def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
+    (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : KEMSphinxScheme :=
+  { State := SeedStream
+    PrivateKey := ByteArray
+    Command := RoutingCommand
+    geometry := geom
+    stateI := ⟨Cryptlib.Protocols.Sphinx.Interface.initWith (fun _ => Vector.replicate 32 0)⟩
+    cipher := cipher
+    mac    := macS
+    kdf    := kdfS
+    stream := streamS
+    derivePublicKey := kemSelfPublicKeyBytes kem
+    wrap := wrapKEM kem cipher macS kdfS streamS geom
+    unwrap := unwrapKEM kem cipher macS kdfS streamS geom
+    newSURB := wrapKEMSURB kem macS kdfS streamS geom
+    newPacketFromSURB := fun surb payload =>
+      Cryptlib.Protocols.Sphinx.SURB.newPacketFromSURB cipher geom (ofVector surb) payload
+    -- Every draw keeps clear of the KEM's decapsulation-failure event.
+    unwrapReliable := fun st => ∀ j, kem.Reliable (kem.stateFromSeed (st.2 (st.1 + j)))
+    unwrap_complete := fun path privKeys payload st pkt st' hpath hrel hpriv hcmds hsurb hwrap =>
+      wrapKEM_unwrapKEM_complete_valid kem cipher macS kdfS streamS geom hvalid hmactag h16
+        path privKeys payload st pkt st' hpath hpriv hcmds hsurb (fun j _ => hrel j) hwrap
+    kem := kem
+    unwrap_tail := fun hop0 rest privKey payload st pkt st' hrest hrel hpp hcmds hwrap =>
+      wrapKEM_unwrapKEM_tail kem cipher macS kdfS streamS geom hvalid hmactag h16 hop0 rest
+        privKey payload st pkt st' hrest hrel hpp hcmds hwrap }
+
+/-- A `KEMSphinxScheme` for the KEM `geom.kemName` names, with AEZ, HMAC-SHA256,
+HKDF-SHA256-Expand and AES-256-CTR. Rejects a `geom` that fails the validity checks. -/
+def kemSphinxScheme (geom : Geometry) : Except String KEMSphinxScheme :=
+  if geom.kemName.isEmpty then
+    throw s!"sphinx: geometry scheme {geom.nikeName} is a NIKE, not a KEM"
+  else
+    let name := geom.kemName
+    match Cryptlib.Primitives.KEM.byName name with
+    | none => throw s!"sphinx: KEM scheme {name} not implemented"
+    | some kem =>
+      if hvalid : geom.ValidForKEM kem then
+        if hmactag : Cryptlib.Primitives.MAC.HMAC.hmacSha256MAC.tagSize = macLength then
+          if h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength then
+            pure (kemSphinxSchemeOf kem Cryptlib.Primitives.WideBlockCipher.AEZ.aez
+              Cryptlib.Primitives.MAC.HMAC.hmacSha256MAC
+              Cryptlib.Primitives.KDF.HKDF.hkdfSha256Expand
+              Cryptlib.Primitives.StreamCipher.AES256CTR.aes256CTR geom hvalid hmactag h16)
+          else throw s!"sphinx: geometry's payload tag/forward payload too short for scheme {name}"
+        else throw "sphinx: internal error: hmacSha256MAC.tagSize ≠ macLength"
+      else throw s!"sphinx: geometry is not valid for KEM scheme {name}"
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx

@@ -31,7 +31,19 @@ the probabilistic consequence is drawn: replace that one block by a uniform bloc
 forwarded packet has exactly the distribution of a fresh packet (`prEvent_tailIdeal_eq_fresh`).
 So an adversary's advantage in telling the forwarded packet from a fresh one equals its
 advantage in telling the first hop's keystream block from a uniform one
-(`tailAdvantage_eq`). -/
+(`tailAdvantage_eq`).
+
+This is a variant of tail indistinguishability (Kuhn, Beck and Strufe, S&P 2020, Definition 6),
+not that definition:
+
+- the honest hop is the first hop of the path;
+- the adversary is given the packet alone, with no oracle for the honest hop;
+- the packet it must tell apart is built on the rest of the path directly, where the paper's
+  is a layer of a second onion that also passes the honest hop.
+
+Not proved: that the first hop's keystream block is hard to tell from uniform, which is an
+assumption on the KEM, the KDF and the stream cipher together. `hrel` asks that the KEM never
+fail to decapsulate, and `hok` that every packet can be built. -/
 
 /-- `xorBytes` with two masks of the first argument's width, in either order. -/
 theorem xorBytes_left_comm (a b c : ByteArray) (hab : a.size = b.size) (hbc : b.size = c.size) :

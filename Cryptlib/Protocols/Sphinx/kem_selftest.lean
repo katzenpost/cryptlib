@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Cryptlib.Protocols.Sphinx.Geometry
 import Cryptlib.Protocols.Sphinx.Types
-import Cryptlib.Protocols.Sphinx.KEMSphinxTheorems
+import Cryptlib.Protocols.Sphinx.KEMSphinxTail
 import Cryptlib.Protocols.Sphinx.SURB
 import Cryptlib.Util.HexBytes
 import Cryptlib.Util.Bytes

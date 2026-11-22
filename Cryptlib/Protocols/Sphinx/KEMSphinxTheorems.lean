@@ -2490,54 +2490,6 @@ theorem wrapKEM_unwrapKEM_complete_valid (kem : KEM) (cipher : WideBlockCipher) 
   rw [hpkteq2]
   exact hind
 
-/-- A `KEMSphinxScheme` for any `KEM`, MAC, KDF, stream cipher and wide-block cipher. -/
-def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
-    (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
-    (hmactag : macS.tagSize = macLength)
-    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : KEMSphinxScheme :=
-  { State := SeedStream
-    PrivateKey := ByteArray
-    Command := RoutingCommand
-    geometry := geom
-    stateI := ⟨Cryptlib.Protocols.Sphinx.Interface.initWith (fun _ => Vector.replicate 32 0)⟩
-    cipher := cipher
-    mac    := macS
-    kdf    := kdfS
-    stream := streamS
-    derivePublicKey := kemSelfPublicKeyBytes kem
-    wrap := wrapKEM kem cipher macS kdfS streamS geom
-    unwrap := unwrapKEM kem cipher macS kdfS streamS geom
-    newSURB := wrapKEMSURB kem macS kdfS streamS geom
-    newPacketFromSURB := fun surb payload =>
-      Cryptlib.Protocols.Sphinx.SURB.newPacketFromSURB cipher geom (ofVector surb) payload
-    -- Every draw keeps clear of the KEM's decapsulation-failure event.
-    unwrapReliable := fun st => ∀ j, kem.Reliable (kem.stateFromSeed (st.2 (st.1 + j)))
-    unwrap_complete := fun path privKeys payload st pkt st' hpath hrel hpriv hcmds hsurb hwrap =>
-      wrapKEM_unwrapKEM_complete_valid kem cipher macS kdfS streamS geom hvalid hmactag h16
-        path privKeys payload st pkt st' hpath hpriv hcmds hsurb (fun j _ => hrel j) hwrap
-    kem := kem }
-
-/-- A `KEMSphinxScheme` for the KEM `geom.kemName` names, with AEZ, HMAC-SHA256,
-HKDF-SHA256-Expand and AES-256-CTR. Rejects a `geom` that fails the validity checks. -/
-def kemSphinxScheme (geom : Geometry) : Except String KEMSphinxScheme :=
-  if geom.kemName.isEmpty then
-    throw s!"sphinx: geometry scheme {geom.nikeName} is a NIKE, not a KEM"
-  else
-    let name := geom.kemName
-    match Cryptlib.Primitives.KEM.byName name with
-    | none => throw s!"sphinx: KEM scheme {name} not implemented"
-    | some kem =>
-      if hvalid : geom.ValidForKEM kem then
-        if hmactag : Cryptlib.Primitives.MAC.HMAC.hmacSha256MAC.tagSize = macLength then
-          if h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength then
-            pure (kemSphinxSchemeOf kem Cryptlib.Primitives.WideBlockCipher.AEZ.aez
-              Cryptlib.Primitives.MAC.HMAC.hmacSha256MAC
-              Cryptlib.Primitives.KDF.HKDF.hkdfSha256Expand
-              Cryptlib.Primitives.StreamCipher.AES256CTR.aes256CTR geom hvalid hmactag h16)
-          else throw s!"sphinx: geometry's payload tag/forward payload too short for scheme {name}"
-        else throw "sphinx: internal error: hmacSha256MAC.tagSize ≠ macLength"
-      else throw s!"sphinx: geometry is not valid for KEM scheme {name}"
-
 /-! ## Wrap-resistance fails
 
 KEM-Sphinx has no blinding step. A holder of `privKey` can compute the header keystream for any

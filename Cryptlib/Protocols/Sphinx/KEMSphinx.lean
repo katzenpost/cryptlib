@@ -43,11 +43,27 @@ open Cryptlib.Util.Bytes (ofVector extract_append_le extract_append_of_le extrac
 
 /-! # KEM-Sphinx scheme type
 
-Constructions and proofs are in `kem_sphinx_theorems.lean`. -/
+Constructions and proofs are in `KEMSphinxTheorems.lean` and `KEMSphinxTail.lean`. -/
 
 /-- KEM-Sphinx has no wrap-resistance field: it has no blinding step, so it is not
 wrap-resistant. See `unwrapKEM_routingInfoBlock_not_wrap_resistant` in `KEMSphinxTheorems.lean`. -/
 structure KEMSphinxScheme extends Cryptlib.Protocols.Sphinx.Interface.Sphinx where
   kem : KEM
+  /-- The exact half of tail indistinguishability (Kuhn, Beck and Strufe, S&P 2020): what the
+  first hop forwards from a wrapped packet is what `wrap` itself returns on the rest of the
+  path, from some state. See `wrapKEM_unwrapKEM_tail` in `KEMSphinxTail.lean`. -/
+  unwrap_tail : ∀ (hop0 : PathHop) (rest : List PathHop) (privKey : PrivateKey)
+      (payload : Vector UInt8 geometry.forwardPayloadLength) (st : State)
+      (pkt : Vector UInt8 geometry.packetLength) (st' : State),
+    rest ≠ [] →
+    unwrapReliable st →
+    derivePublicKey privKey = hop0.publicKey →
+    (∀ c ∈ hop0.commands, c ≠ .null ∧ (∀ id m, c ≠ .nextNodeHop id m)) →
+    wrap (hop0 :: rest) payload st = .ok pkt st' →
+    ∃ (replayTag : Vector UInt8 32) (cmds : List Command)
+      (fwd : Vector UInt8 (ofVector pkt).size) (st0 st1 : State)
+      (fresh : Vector UInt8 geometry.packetLength),
+      unwrap privKey (ofVector pkt) = .ok (none, replayTag, cmds, some fwd) ∧
+      wrap rest payload st0 = .ok fresh st1 ∧ ofVector fresh = ofVector fwd
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
