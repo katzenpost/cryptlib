@@ -1368,10 +1368,13 @@ def wrapKEMSURB (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (
     if hsize : surb.size = geom.surbLength then pure (⟨surb.data, hsize⟩, k)
     else throw "sphinx: internal error: newKEMSURB produced a wrong-sized SURB"
 
-/-- Process one hop: returns `(payload, replayTag, cmds, forwardPkt)`. The forwarded packet
-carries the next-hop ciphertext copied from the decrypted routing-info block. -/
-def unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
-    (streamS : StreamCipher) (geom : Geometry) (privKey : ByteArray) (pkt : ByteArray) :
+/-- Process one hop with decapsulation given as a function of the ciphertext bytes: returns
+`(payload, replayTag, cmds, forwardPkt)`. The forwarded packet carries the next-hop ciphertext
+copied from the decrypted routing-info block. The private key is used nowhere else, so a
+decapsulation oracle is enough to process a packet. -/
+def unwrapKEMWith (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (dec : ByteArray → Except String ByteArray)
+    (pkt : ByteArray) :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
   let geOff := 2
@@ -1385,7 +1388,7 @@ def unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
 
   let kemCiphertext := pkt.extract geOff riOff
   let replayTag := sha512_256 kemCiphertext
-  let sharedSecret ← kemDecap kem privKey kemCiphertext
+  let sharedSecret ← dec kemCiphertext
 
   let keys := deriveHopKeys kdfS sharedSecret
   let gotMac := macS.mac (ofVector keys.headerMAC) (pkt.extract 0 macOff)
@@ -1465,6 +1468,13 @@ def unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
       let tag := decPayload.extract 0 geom.payloadTagLength
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
+
+/-- Process one hop with the hop's private key. -/
+def unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (privKey : ByteArray) (pkt : ByteArray) :
+    Except String
+      (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) :=
+  unwrapKEMWith kem cipher macS kdfS streamS geom (kemDecap kem privKey) pkt
 
 set_option maxHeartbeats 1000000 in
 /-- Non-terminal hop: given the honest key pairing at hop `k` (`k+1 < nrHops`), `unwrapKEM`
@@ -1712,7 +1722,7 @@ theorem unwrapKEM_hopPacket_nonterminal (kem : KEM) (cipher : WideBlockCipher) (
   have hnottrunc : ¬ (hopPacket kemElements riPadding s t nrHops k).size
       < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by
     rw [hpktsize, hpayoff, hpacket']; omega
-  unfold unwrapKEM
+  unfold unwrapKEM unwrapKEMWith
   dsimp only
   rw [dif_neg hnottrunc]
   have hversion : ¬ (((hopPacket kemElements riPadding s t nrHops k).extract 0 2).data
@@ -2022,7 +2032,7 @@ theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (mac
   have hnottrunc : ¬ (hopPacket kemElements riPadding s t nrHops k).size
       < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by
     rw [hpktsize, hpayoff, hpacket']; omega
-  unfold unwrapKEM
+  unfold unwrapKEM unwrapKEMWith
   dsimp only
   rw [dif_neg hnottrunc]
   have hversion : ¬ (((hopPacket kemElements riPadding s t nrHops k).extract 0 2).data
