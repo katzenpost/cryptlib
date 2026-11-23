@@ -243,13 +243,6 @@ theorem procWith_payload_changed (dec : ByteArray → Except String ByteArray) (
             rw [ByteArray.size_extract]; unfold payloadOffset at h16 ⊢; omega) (by
             rw [ByteArray.size_extract, ByteArray.size_extract]; omega) hc)
 
-/-- Whether the commands carry a SURB reply. A reply packet's payload is not checked by the
-final hop, so the theorems below are about forward packets. -/
-def hasSurbReply (cmds : List RoutingCommand) : Bool :=
-  cmds.any fun
-    | .surbReply _ => true
-    | _ => false
-
 /-- The final hop's check on a decrypted payload: long enough, and the tag bytes are zero. -/
 def tagOK (d : ByteArray) : Bool :=
   !decide (d.size < geom.payloadTagLength) && (d.extract 0 geom.payloadTagLength).data.all (· == 0)

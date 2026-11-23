@@ -1476,6 +1476,22 @@ def unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) :=
   unwrapKEMWith kem cipher macS kdfS streamS geom (kemDecap kem privKey) pkt
 
+/-- Whether the commands carry a SURB reply. The final hop does not check the payload of such a
+packet: it hands it to the client, which opens it with the SURB's keys. -/
+def hasSurbReply (cmds : List RoutingCommand) : Bool :=
+  cmds.any fun
+    | .surbReply _ => true
+    | _ => false
+
+theorem hasSurbReply_eq_false {cmds : List RoutingCommand}
+    (h : ∀ c ∈ cmds, ∀ id, c ≠ RoutingCommand.surbReply id) : hasSurbReply cmds = false := by
+  unfold hasSurbReply
+  rw [List.any_eq_false]
+  intro c hc
+  cases c with
+  | surbReply id => exact absurd rfl (h _ hc id)
+  | _ => simp
+
 set_option maxHeartbeats 1000000 in
 /-- Non-terminal hop: given the honest key pairing at hop `k` (`k+1 < nrHops`), `unwrapKEM`
 maps `hopPacket ... k` to `hopPacket ... (k+1)`. -/
@@ -1883,13 +1899,14 @@ theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (mac
     (k : Nat) (hk : k + 1 = nrHops)
     (hcmdnn : ∀ c ∈ (path[k]!).commands, c ≠ RoutingCommand.null)
     (hcmdnh : ∀ c ∈ (path[k]!).commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
-    (hcmdsurb : ∀ c ∈ (path[k]!).commands, ∀ id, c ≠ RoutingCommand.surbReply id)
     (payload : ByteArray) (hpayloadsize : payload.size = geom.forwardPayloadLength)
     (ht0content : t 0 = (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)
     (privKey : ByteArray) (hpp : kemSelfPublicKeyBytes kem privKey = (path[k]!).publicKey) :
     unwrapKEM kem cipher macS kdfS streamS geom privKey
         (hopPacket kemElements riPadding s t nrHops k)
-      = Except.ok (some payload, sha512_256 kemElements[k]!, (path[k]!).commands, none) := by
+      = Except.ok (some (if hasSurbReply (path[k]!).commands
+          then (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload else payload),
+        sha512_256 kemElements[k]!, (path[k]!).commands, none) := by
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
   have hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength := by omega
   -- The honest KEM round trip at hop `k`.
@@ -2061,17 +2078,12 @@ theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (mac
     | surbReply _ => rfl
     | nodeDelay _ => rfl
     | null => rfl
-  have hnosurb : (path[k]!).commands.any (fun c => match c with
-      | RoutingCommand.surbReply _ => true | _ => false) = false := by
-    rw [List.any_eq_false]
-    intro c hc
-    cases c with
-    | nextNodeHop _ _ => simp
-    | recipient _ => simp
-    | surbReply id => exact absurd rfl (hcmdsurb _ hc id)
-    | nodeDelay _ => simp
-    | null => simp
-  simp only [hfindnone, hnosurb]
+  generalize hsr : List.any (path[k]!).commands _ = bsr
+  have hbs : hasSurbReply (path[k]!).commands = bsr := by
+    rw [← hsr]; unfold hasSurbReply
+    congr 1
+  rw [hbs]
+  simp only [hfindnone]
   -- The terminal hop removes the last payload layer, exposing `t 0`.
   have hpayloadstep := newKEMPacket_payload_content cipher sprpKeys t htstep k (by omega)
   have hsprpkeyk : sprpKeys[k]!.key = keys[k]!.payloadEncryption
@@ -2105,27 +2117,30 @@ theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (mac
       ++ payload).size < geom.payloadTagLength) := by
     rw [ByteArray.size_append, htagsize, hpayloadsize]; omega
   rw [if_neg htruncFalse]
-  have htagEq : ((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray)
-      ++ payload).extract 0 geom.payloadTagLength
-      = (⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray) := by
-    have h := extract_append_left (⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray) payload
-    rwa [htagsize] at h
-  have htagAllZero : ¬ (!(((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray)
-      ++ payload).extract 0 geom.payloadTagLength).data.all (· == 0)) = true := by
-    rw [htagEq]
-    simp only [Bool.not_eq_true, Bool.not_eq_false']
-    rw [Array.all_eq_true]
-    intro i hi
-    simp [Array.getElem_replicate]
-  rw [if_neg htagAllZero]
-  have hpayloadEq : ((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray)
-      ++ payload).extract geom.payloadTagLength
-      (((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray) ++ payload)).size
-      = payload := by
-    rw [ByteArray.size_append, htagsize]
-    have := extract_append_right (⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray) payload
-    rwa [htagsize] at this
-  simp only [pure, Except.pure, hpayloadEq, Bool.false_eq_true, if_false]
+  cases bsr with
+  | true => rfl
+  | false =>
+    have htagEq : ((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray)
+        ++ payload).extract 0 geom.payloadTagLength
+        = (⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray) := by
+      have h := extract_append_left (⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray) payload
+      rwa [htagsize] at h
+    have htagAllZero : ¬ (!(((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray)
+        ++ payload).extract 0 geom.payloadTagLength).data.all (· == 0)) = true := by
+      rw [htagEq]
+      simp only [Bool.not_eq_true, Bool.not_eq_false']
+      rw [Array.all_eq_true]
+      intro i hi
+      simp [Array.getElem_replicate]
+    rw [if_neg htagAllZero]
+    have hpayloadEq : ((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray)
+        ++ payload).extract geom.payloadTagLength
+        (((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray) ++ payload)).size
+        = payload := by
+      rw [ByteArray.size_append, htagsize]
+      have := extract_append_right (⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray) payload
+      rwa [htagsize] at this
+    simp only [pure, Except.pure, hpayloadEq, Bool.false_eq_true, if_false]
 
 set_option maxHeartbeats 1000000 in
 /-- Unwrapping `hopPacket ... k` with the remaining private keys for `path[k], path[k+1], ...`
@@ -2198,8 +2213,9 @@ theorem unwrapChain_hopPacket (kem : KEM) (cipher : WideBlockCipher) (macS : MAC
         riKeyStream riPadding sprpKeys nrHops s t hvalid hmactag hs0size hstep hknsize hksize
         hpadsize hriKScontent hriPadcontent hkeyscontent htsize ht0size htstep hsprpkey hsprp
         hgen h16 k hterm (hcmdnn k hk) (hcmdnh k hk)
-        (by rw [show k = nrHops - 1 from by omega]; exact hcmdsurb)
-        payload hpayloadsize ht0content sk hpp0]
+        payload hpayloadsize ht0content sk hpp0,
+        hasSurbReply_eq_false (by rw [show k = nrHops - 1 from by omega]; exact hcmdsurb),
+        if_neg Bool.false_ne_true]
       dsimp only [Bind.bind, Except.bind]
       rfl
     · have hklt : k + 1 < nrHops := by omega

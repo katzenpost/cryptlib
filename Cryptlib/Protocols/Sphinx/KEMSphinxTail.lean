@@ -358,7 +358,7 @@ set_option maxHeartbeats 4000000 in
 unwraps a packet `newKEMPacket` built, it gets its own commands and the next hop's name, and what
 it forwards is exactly the packet `newKEMPacket` builds on the rest of the path, from the
 remaining seeds and with the filler `tailFiller`. The only hop of a one-hop path gets its
-commands and the payload. -/
+commands and the payload, with its tag still in front if the commands carry a SURB reply. -/
 theorem newKEMPacket_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
     (hmactag : macS.tagSize = macLength)
@@ -379,9 +379,11 @@ theorem newKEMPacket_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MA
         newKEMPacket kem cipher macS kdfS streamS geom (seeds.extract 1 seeds.size)
             (tailFiller kem kdfS streamS geom path seeds filler) (path.extract 1 path.size) payload
           = Except.ok (ofVector fwd)) ∧
-    (path.size = 1 → (∀ c ∈ (path[0]!).commands, ∀ id, c ≠ RoutingCommand.surbReply id) →
+    (path.size = 1 →
       ∃ replayTag : Vector UInt8 32, unwrapKEM kem cipher macS kdfS streamS geom privKey pkt
-        = Except.ok (some payload, replayTag, (path[0]!).commands, none)) := by
+        = Except.ok (some (if hasSurbReply (path[0]!).commands
+            then (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload else payload),
+          replayTag, (path[0]!).commands, none)) := by
   obtain ⟨hpaysize, hdr, sprpKeys, t, hcreate, ht0content, htstep, hpkteq⟩ :=
     newKEMPacket_unfold kem cipher macS kdfS streamS geom seeds filler path payload pkt hnk
   obtain ⟨hpne, hple, hesize, hfsize, kemElements, keys, riKeyStream, riPadding, s, hknsize,
@@ -482,10 +484,10 @@ theorem newKEMPacket_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MA
     unfold hopPacket
     rw [Nat.sub_zero, if_neg (lt_irrefl 0), ByteArray.append_empty, hsprp]
   subst hpkteq2
-  refine ⟨fun h2 => ?_, fun h1 hsurb => ⟨_, unwrapKEM_hopPacket_terminal kem cipher
+  refine ⟨fun h2 => ?_, fun h1 => ⟨_, unwrapKEM_hopPacket_terminal kem cipher
     macS kdfS streamS geom path keys kemElements riKeyStream riPadding sprpKeys path.size s t
     hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent hkeyscontent
-    htsize ht0size htstep hsprpkey hsprp hple h16 0 (by omega) hcmdnn hcmdnh hsurb payload
+    htsize ht0size htstep hsprpkey hsprp hple h16 0 (by omega) hcmdnn hcmdnh payload
     hpaysize ht0content privKey hpp⟩⟩
   obtain ⟨replayTag, cmds, hnewsize, hunwrap, rfl⟩ := unwrapKEM_hopPacket_nonterminal kem cipher
     macS kdfS streamS geom path keys kemElements riKeyStream riPadding sprpKeys path.size s t

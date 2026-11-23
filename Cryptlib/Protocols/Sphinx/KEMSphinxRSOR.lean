@@ -223,7 +223,10 @@ theorem proc_form (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macL
       h1, hform']
     simp [show ¬ (i.val + 1 = q.fwd.hops.length) by omega]
   · obtain ⟨tag, hun⟩ := hlast (by simp; omega)
-      (by rw [h0]; intro c hc; split at hc <;> simp at hc; subst hc; simp)
+    have hc : ((path kem q.fwd [.recipient q.receiver]).extract i
+        (path kem q.fwd [.recipient q.receiver]).size)[0]!.commands = [.recipient q.receiver] := by
+      rw [h0]; exact if_pos (by omega)
+    rw [hc, hasSurbReply_eq_false (by simp), if_neg Bool.false_ne_true] at hun
     have hmsg : msgOf geom (body kem macS kdfS streamS geom q r) = q.msg := by
       unfold msgOf body
       have := Cryptlib.Util.Bytes.extract_append_right
@@ -232,7 +235,7 @@ theorem proc_form (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macL
       rw [Cryptlib.Util.Bytes.size_ofVector] at this
       rw [ByteArray.size_append, Cryptlib.Util.Bytes.size_ofVector, Nat.add_sub_cancel, this,
         toVecN_ofVector]
-    rw [show unwrapKEMWith kem cipher macS kdfS streamS geom _ pkt = _ from hun, dif_neg h, h0]
-    simp [show i.val + 1 = q.fwd.hops.length by omega, hmsg]
+    rw [show unwrapKEMWith kem cipher macS kdfS streamS geom _ pkt = _ from hun, dif_neg h]
+    simp [hmsg]
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx.RSOR
