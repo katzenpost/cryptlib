@@ -4,6 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import VCVio.OracleComp.Constructions.SampleableType
+import VCVio.CryptoFoundations.PRG
 import Cryptlib.Protocols.Sphinx.KEMSphinxTail
 
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
@@ -28,7 +29,7 @@ open Cryptlib.Util.Bytes (ofVector)
 rest of the path whose filler ends in `tailPad`. Here `tailPad` is split into the first hop's
 keystream block and a mask that depends only on the rest of the path (`tailPad_eq_mask`), and
 the probabilistic consequence is drawn: replace that one block by a uniform block and the
-forwarded packet has exactly the distribution of a fresh packet (`prEvent_tailIdeal_eq_fresh`).
+forwarded packet has exactly the distribution of a fresh packet (`prEvent_tailIdeal_eq_tailFresh`).
 So an adversary's advantage in telling the forwarded packet from a fresh one equals its
 advantage in telling the first hop's keystream block from a uniform one
 (`tailAdvantage_eq`).
@@ -41,9 +42,20 @@ not that definition:
 - the packet it must tell apart is built on the rest of the path directly, where the paper's
   is a layer of a second onion that also passes the honest hop.
 
-Not proved: that the first hop's keystream block is hard to tell from uniform, which is an
-assumption on the KEM, the KDF and the stream cipher together. `hrel` asks that the KEM never
-fail to decapsulate, and `hok` that every packet can be built. -/
+`tailAdvantage_eq` asks that every seed be `Reliable` for the KEM and that every packet can be
+built. `tailAdvantage_le` asks neither: it holds for any KEM, perfectly correct or not, and
+bounds the advantage by the same block advantage plus the probability of `tailBad`, the draws
+with an unreliable seed or an unbuildable packet. It uses reliability of every seed, though only
+the first hop decapsulates, so the bound is looser than it need be.
+
+`tailAdvantage_le_prg` then bounds the block advantage. The block is a function of the first
+hop's seed alone, a composition of two generators in the sense of VCVio's `PRGScheme`:
+`hopKeyPRG`, the KEM followed by the KDF, and `lastBlockPRG`, the stream cipher. The advantage
+is at most the sum of the advantages against the two.
+
+Not proved: any bound on those two advantages. `hopKeyPRG` is not split into a KEM assumption
+and a KDF assumption, and the adversary does not see the first hop's ciphertext, so neither is
+yet the IND-CPA or IND-CCA game of the KEM. -/
 
 /-- `xorBytes` with two masks of the first argument's width, in either order. -/
 theorem xorBytes_left_comm (a b c : ByteArray) (hab : a.size = b.size) (hbc : b.size = c.size) :
@@ -312,12 +324,13 @@ theorem forwardedView_eq (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize
     (hop0 : PathHop) (restPath : Array PathHop) (payload privKey : ByteArray)
     (hrest : 1 ≤ restPath.size)
     (hpp : kemSelfPublicKeyBytes kem privKey = hop0.publicKey)
-    (hrel : ∀ seed, kem.Reliable (kem.stateFromSeed seed))
     (hcmdnn : ∀ c ∈ hop0.commands, c ≠ RoutingCommand.null)
     (hcmdnh : ∀ c ∈ hop0.commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
     (seed0 : Vector UInt8 32) (restSeeds : Vector (Vector UInt8 32) restPath.size)
     (filler : Vector UInt8
       ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength))
+    (hrel : ∀ j, j < restPath.size + 1 →
+      kem.Reliable (kem.stateFromSeed (#[seed0] ++ restSeeds.toArray)[j]!))
     (pkt : ByteArray)
     (hnk : newKEMPacket kem cipher macS kdfS streamS geom (#[seed0] ++ restSeeds.toArray)
       (ofVector filler) (#[hop0] ++ restPath) payload = Except.ok pkt) :
@@ -334,7 +347,7 @@ theorem forwardedView_eq (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize
   obtain ⟨tag, cmds, fwd, hunwrap, htail⟩ := newKEMPacket_unwrapKEM_tail kem cipher macS kdfS
     streamS geom hvalid hmactag h16 (#[seed0] ++ restSeeds.toArray) (ofVector filler)
     (#[hop0] ++ restPath) payload pkt privKey (by omega) (by rw [hpath0]; exact hpp)
-    (fun j _ => hrel _) (by rw [hpath0]; exact hcmdnn) (by rw [hpath0]; exact hcmdnh) hnk
+    (fun j hj => hrel j (by omega)) (by rw [hpath0]; exact hcmdnn) (by rw [hpath0]; exact hcmdnh) hnk
   obtain ⟨-, hdr, sprpKeys, t, hcreate, -, -, -⟩ :=
     newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ payload pkt hnk
   obtain ⟨-, hple, hesize, -⟩ :=
@@ -399,7 +412,7 @@ theorem tailReal_eq (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = ma
     intro seed0 restSeeds filler
     obtain ⟨pkt, hnk⟩ := hok seed0 restSeeds filler
     exact forwardedView_eq kem cipher macS kdfS streamS geom hvalid hmactag h16 hop0 restPath
-      payload privKey hrest hpp hrel hcmdnn hcmdnh seed0 restSeeds filler pkt hnk
+      payload privKey hrest hpp hcmdnn hcmdnh seed0 restSeeds filler (fun _ _ => hrel _) pkt hnk
   unfold tailReal tailRealBlock
   simp only [heq]
 
@@ -434,6 +447,243 @@ theorem tailAdvantage_eq (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize
                       geom.perHopRoutingInfoLength}[p v]).toReal| := by
   rw [tailReal_eq kem cipher macS kdfS streamS geom hvalid hmactag h16 hop0 restPath payload
     privKey hrest hpp hrel hcmdnn hcmdnh hok, prEvent_tailIdeal_eq_tailFresh]
+
+/-- Two events that agree off a bad set differ in probability by at most the probability of
+the bad set. -/
+theorem prEvent_toReal_sub_le_of_bad {α β : Type} (mx : ProbComp α) (f g : α → β)
+    (bad : α → Prop) (h : ∀ x, ¬ bad x → f x = g x) (p : β → Prop) :
+    |(Pr{let x ← mx}[p (f x)]).toReal - (Pr{let x ← mx}[p (g x)]).toReal|
+      ≤ (Pr{let x ← mx}[bad x]).toReal := by
+  have key : ∀ f g : α → β, (∀ x, ¬ bad x → f x = g x) →
+      (Pr{let x ← mx}[p (f x)]).toReal
+        ≤ (Pr{let x ← mx}[p (g x)]).toReal + (Pr{let x ← mx}[bad x]).toReal := by
+    intro f g h
+    have h1 : Pr{let x ← mx}[p (f x)] ≤ Pr{let x ← mx}[p (g x)] + Pr{let x ← mx}[bad x] :=
+      (prEvent_mono mx _ _ fun x hx => by
+        by_cases hb : bad x
+        · exact Or.inr hb
+        · exact Or.inl (h x hb ▸ hx)).trans (prEvent_or_le mx _ _)
+    have h2 := ENNReal.toReal_mono
+      (ENNReal.add_ne_top.mpr ⟨prEvent_ne_top _, prEvent_ne_top _⟩) h1
+    rwa [ENNReal.toReal_add (prEvent_ne_top _) (prEvent_ne_top _)] at h2
+  rw [abs_sub_le_iff]
+  exact ⟨by linarith [key f g h], by linarith [key g f fun x hx => (h x hx).symm]⟩
+
+/-- The draws of the real game. -/
+def tailDraw (restPath : Array PathHop) (a : Nat) :
+    ProbComp (Vector UInt8 32 × Vector (Vector UInt8 32) restPath.size × Vector UInt8 a) := do
+  let seed0 ← $ᵗ (Vector UInt8 32)
+  let restSeeds ← $ᵗ (Vector (Vector UInt8 32) restPath.size)
+  let filler ← $ᵗ (Vector UInt8 a)
+  return (seed0, restSeeds, filler)
+
+/-- The draws the exact theorem does not cover: some seed is not `Reliable` for the KEM, or the
+packet cannot be built. For a perfectly correct KEM the first part never holds. -/
+def tailBad (hop0 : PathHop) (restPath : Array PathHop) (payload : ByteArray) {a : Nat}
+    (d : Vector UInt8 32 × Vector (Vector UInt8 32) restPath.size × Vector UInt8 a) : Prop :=
+  ¬ ((∀ j, j < restPath.size + 1 →
+        kem.Reliable (kem.stateFromSeed (#[d.1] ++ d.2.1.toArray)[j]!)) ∧
+    ∃ pkt, newKEMPacket kem cipher macS kdfS streamS geom (#[d.1] ++ d.2.1.toArray)
+      (ofVector d.2.2) (#[hop0] ++ restPath) payload = Except.ok pkt)
+
+theorem tailReal_eq_map (hop0 : PathHop) (restPath : Array PathHop) (payload privKey : ByteArray)
+    (a : Nat) :
+    tailReal kem cipher macS kdfS streamS geom hop0 restPath payload privKey a
+      = (fun d => forwardedView kem cipher macS kdfS streamS geom hop0 restPath payload privKey
+          d.1 d.2.1 d.2.2) <$> tailDraw restPath a := by
+  simp [tailReal, tailDraw]
+
+theorem tailRealBlock_eq_map (hop0 : PathHop) (restPath : Array PathHop) (payload : ByteArray)
+    (a : Nat) :
+    tailRealBlock kem cipher macS kdfS streamS geom hop0 restPath payload a
+      = (fun d => freshView kem cipher macS kdfS streamS geom restPath payload d.2.1
+          (restFiller kem kdfS streamS geom restPath d.2.1 d.2.2
+            (firstBlock kem kdfS streamS geom hop0 d.1))) <$> tailDraw restPath a := by
+  simp [tailRealBlock, tailDraw]
+
+/-- **Tail indistinguishability for KEM-Sphinx, up to one keystream block, for any KEM.** The
+advantage in telling what the first hop forwards from a fresh packet on the rest of the path is
+at most the advantage in telling the first hop's keystream block from a uniform block, plus the
+probability of `tailBad`. Nothing is assumed of the KEM beyond its `Reliable` predicate: a
+perfectly correct KEM has no unreliable seeds, and a KEM that can fail pays the probability of
+drawing one. `tailAdvantage_eq` is the case where `tailBad` never happens. -/
+theorem tailAdvantage_le (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (hop0 : PathHop) (restPath : Array PathHop) (payload privKey : ByteArray)
+    (hrest : 1 ≤ restPath.size)
+    (hpp : kemSelfPublicKeyBytes kem privKey = hop0.publicKey)
+    (hcmdnn : ∀ c ∈ hop0.commands, c ≠ RoutingCommand.null)
+    (hcmdnh : ∀ c ∈ hop0.commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
+    (p : Option ByteArray → Prop) :
+    |(Pr{let v ← tailReal kem cipher macS kdfS streamS geom hop0 restPath payload privKey
+                  ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength)}[p v]).toReal
+      - (Pr{let v ← tailFresh kem cipher macS kdfS streamS geom restPath payload
+                      ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength
+                        + geom.perHopRoutingInfoLength)}[p v]).toReal|
+    ≤ |(Pr{let v ← tailRealBlock kem cipher macS kdfS streamS geom hop0 restPath payload
+                    ((geom.nrHops - (restPath.size + 1))
+                      * geom.perHopRoutingInfoLength)}[p v]).toReal
+      - (Pr{let v ← tailIdeal kem cipher macS kdfS streamS geom restPath payload
+                      ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength)
+                      geom.perHopRoutingInfoLength}[p v]).toReal|
+      + (Pr{let d ← tailDraw restPath
+                    ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength)}[
+          tailBad kem cipher macS kdfS streamS geom hop0 restPath payload d]).toReal := by
+  have hb : |(Pr{let v ← tailReal kem cipher macS kdfS streamS geom hop0 restPath payload privKey
+                  ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength)}[p v]).toReal
+      - (Pr{let v ← tailRealBlock kem cipher macS kdfS streamS geom hop0 restPath payload
+                    ((geom.nrHops - (restPath.size + 1))
+                      * geom.perHopRoutingInfoLength)}[p v]).toReal|
+      ≤ (Pr{let d ← tailDraw restPath
+                    ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength)}[
+          tailBad kem cipher macS kdfS streamS geom hop0 restPath payload d]).toReal := by
+    rw [tailReal_eq_map, tailRealBlock_eq_map, prEvent_map, prEvent_map]
+    refine prEvent_toReal_sub_le_of_bad _ _ _ _ (fun d hd => ?_) p
+    obtain ⟨hrel, pkt, hnk⟩ := Classical.not_not.mp hd
+    exact forwardedView_eq kem cipher macS kdfS streamS geom hvalid hmactag h16 hop0 restPath
+      payload privKey hrest hpp hcmdnn hcmdnh d.1 d.2.1 d.2.2 hrel pkt hnk
+  rw [← prEvent_tailIdeal_eq_tailFresh]
+  exact (abs_sub_le _ _ _).trans (by linarith)
+
+/-! ## The keystream block as a pseudorandom generator
+
+The first hop's keystream block is a function of its seed alone: encapsulate to the hop's key,
+derive the header key and IV, take the last block of the keystream. That is a composition of two
+generators in the sense of VCVio's `PRGScheme`, and the advantage against the block is at most
+the sum of the advantages against the two. -/
+
+open PRGScheme
+
+/-- The first hop's header key and IV as a generator from its seed: KEM encapsulation to the
+hop's public key, then the KDF. -/
+def hopKeyPRG (hop0 : PathHop) :
+    PRGScheme (Vector UInt8 32) (Vector UInt8 32 × Vector UInt8 16) :=
+  ⟨fun seed0 => ((kemHopKeys kem kdfS #[hop0] #[seed0] 0).headerEncryption,
+    (kemHopKeys kem kdfS #[hop0] #[seed0] 0).headerEncryptionIV)⟩
+
+/-- The last block of the header keystream as a generator from the header key and IV. -/
+def lastBlockPRG :
+    PRGScheme (Vector UInt8 32 × Vector UInt8 16) (Vector UInt8 geom.perHopRoutingInfoLength) :=
+  ⟨fun k => Util.Bytes.toVecN geom.perHopRoutingInfoLength
+    ((streamS.keystream (ofVector k.1) (ofVector k.2)
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength
+        - (0 + 1) * geom.perHopRoutingInfoLength)
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength
+        - 0 * geom.perHopRoutingInfoLength))⟩
+
+theorem firstBlock_eq (hop0 : PathHop) (seed0 : Vector UInt8 32) :
+    firstBlock kem kdfS streamS geom hop0 seed0
+      = (lastBlockPRG streamS geom).gen ((hopKeyPRG kem kdfS hop0).gen seed0) := rfl
+
+/-- The adversary against the block that a test `p` on the forwarded packet gives: build the
+packet on the rest of the path around the block, and apply `p`. -/
+def tailBlockAdversary (restPath : Array PathHop) (payload : ByteArray) (a : Nat)
+    (p : Option ByteArray → Prop) [DecidablePred p] :
+    PRGAdversary (Vector UInt8 geom.perHopRoutingInfoLength) := fun block => do
+  let restSeeds ← $ᵗ (Vector (Vector UInt8 32) restPath.size)
+  let filler ← $ᵗ (Vector UInt8 a)
+  return decide (p (freshView kem cipher macS kdfS streamS geom restPath payload restSeeds
+    (restFiller kem kdfS streamS geom restPath restSeeds filler block)))
+
+/-- A generator that is a composition is at most as weak as its two parts together. -/
+theorem prg_comp_le {S M R : Type} [SampleableType S] [SampleableType M] [SampleableType R]
+    (f : PRGScheme S M) (g : PRGScheme M R) (A : PRGAdversary R) :
+    |(Pr{let x ← prgRealExperiment ⟨fun s => g.gen (f.gen s)⟩ A}[x = true]).toReal
+        - (Pr{let x ← prgIdealExperiment A}[x = true]).toReal|
+      ≤ |(Pr{let x ← prgRealExperiment f (fun m => A (g.gen m))}[x = true]).toReal
+          - (Pr{let x ← prgIdealExperiment (fun m => A (g.gen m))}[x = true]).toReal|
+        + |(Pr{let x ← prgRealExperiment g A}[x = true]).toReal
+          - (Pr{let x ← prgIdealExperiment A}[x = true]).toReal| :=
+  abs_sub_le _ _ _
+
+theorem prEvent_tailRealBlock_eq_prg (hop0 : PathHop) (restPath : Array PathHop)
+    (payload : ByteArray) (a : Nat) (p : Option ByteArray → Prop) [DecidablePred p] :
+    Pr{let v ← tailRealBlock kem cipher macS kdfS streamS geom hop0 restPath payload a}[p v]
+      = Pr{let x ← prgRealExperiment ⟨firstBlock kem kdfS streamS geom hop0⟩
+                    (tailBlockAdversary kem cipher macS kdfS streamS geom restPath payload a p)}[
+          x = true] := by
+  unfold tailRealBlock prgRealExperiment tailBlockAdversary
+  simp only [prEvent_norm, decide_eq_true_eq]
+
+theorem prEvent_tailIdeal_eq_prg (restPath : Array PathHop)
+    (payload : ByteArray) (a : Nat) (p : Option ByteArray → Prop) [DecidablePred p] :
+    Pr{let v ← tailIdeal kem cipher macS kdfS streamS geom restPath payload a
+                  geom.perHopRoutingInfoLength}[p v]
+      = Pr{let x ← prgIdealExperiment
+                    (tailBlockAdversary kem cipher macS kdfS streamS geom restPath payload a p)}[
+          x = true] := by
+  unfold tailIdeal prgIdealExperiment tailBlockAdversary
+  simp only [prEvent_norm, decide_eq_true_eq]
+  symm
+  rw [OracleComp.prEvent_bind_bind_swap_of_uniform]
+  have h := prEvent_bind_congr ($ᵗ (Vector (Vector UInt8 32) restPath.size))
+    (fun b => do
+      let blk ← $ᵗ (Vector UInt8 geom.perHopRoutingInfoLength)
+      let fl ← $ᵗ (Vector UInt8 a)
+      pure (p (freshView kem cipher macS kdfS streamS geom restPath payload b
+        (restFiller kem kdfS streamS geom restPath b fl blk))))
+    (fun b => do
+      let fl ← $ᵗ (Vector UInt8 a)
+      let blk ← $ᵗ (Vector UInt8 geom.perHopRoutingInfoLength)
+      pure (p (freshView kem cipher macS kdfS streamS geom restPath payload b
+        (restFiller kem kdfS streamS geom restPath b fl blk))))
+    (fun x => x) (fun x => x)
+    (fun b => by
+      simp only [id_map']
+      rw [OracleComp.prEvent_bind_bind_swap_of_uniform])
+  simpa only [prEvent_norm, id_map'] using h
+
+/-- `tailBlockAdversary` against the header key and IV: it expands them to the block itself. -/
+def tailKeyAdversary (restPath : Array PathHop) (payload : ByteArray) (a : Nat)
+    (p : Option ByteArray → Prop) [DecidablePred p] :
+    PRGAdversary (Vector UInt8 32 × Vector UInt8 16) := fun k =>
+  tailBlockAdversary kem cipher macS kdfS streamS geom restPath payload a p
+    ((lastBlockPRG streamS geom).gen k)
+
+/-- **Tail indistinguishability for KEM-Sphinx, reduced to two generators, for any KEM.** The
+advantage in telling what the first hop forwards from a fresh packet on the rest of the path is
+at most the sum of three terms: the advantage of `tailKeyAdversary` in telling the first hop's
+header key and IV, derived by the KEM and the KDF from a uniform seed, from a uniform key and
+IV; the advantage of `tailBlockAdversary` in telling the last keystream block under a uniform
+key and IV from a uniform block; and the probability of `tailBad`. -/
+theorem tailAdvantage_le_prg (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (hop0 : PathHop) (restPath : Array PathHop) (payload privKey : ByteArray)
+    (hrest : 1 ≤ restPath.size)
+    (hpp : kemSelfPublicKeyBytes kem privKey = hop0.publicKey)
+    (hcmdnn : ∀ c ∈ hop0.commands, c ≠ RoutingCommand.null)
+    (hcmdnh : ∀ c ∈ hop0.commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
+    (p : Option ByteArray → Prop) [DecidablePred p] :
+    |(Pr{let v ← tailReal kem cipher macS kdfS streamS geom hop0 restPath payload privKey
+                  ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength)}[p v]).toReal
+      - (Pr{let v ← tailFresh kem cipher macS kdfS streamS geom restPath payload
+                      ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength
+                        + geom.perHopRoutingInfoLength)}[p v]).toReal|
+    ≤ |(Pr{let x ← prgRealExperiment (hopKeyPRG kem kdfS hop0)
+                    (tailKeyAdversary kem cipher macS kdfS streamS geom restPath payload
+                      ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength)
+                      p)}[x = true]).toReal
+        - (Pr{let x ← prgIdealExperiment
+                      (tailKeyAdversary kem cipher macS kdfS streamS geom restPath payload
+                        ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength)
+                        p)}[x = true]).toReal|
+      + |(Pr{let x ← prgRealExperiment (lastBlockPRG streamS geom)
+                      (tailBlockAdversary kem cipher macS kdfS streamS geom restPath payload
+                        ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength)
+                        p)}[x = true]).toReal
+        - (Pr{let x ← prgIdealExperiment
+                      (tailBlockAdversary kem cipher macS kdfS streamS geom restPath payload
+                        ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength)
+                        p)}[x = true]).toReal|
+      + (Pr{let d ← tailDraw restPath
+                    ((geom.nrHops - (restPath.size + 1)) * geom.perHopRoutingInfoLength)}[
+          tailBad kem cipher macS kdfS streamS geom hop0 restPath payload d]).toReal := by
+  have h1 := tailAdvantage_le kem cipher macS kdfS streamS geom hvalid hmactag h16 hop0 restPath
+    payload privKey hrest hpp hcmdnn hcmdnh p
+  rw [prEvent_tailRealBlock_eq_prg, prEvent_tailIdeal_eq_prg] at h1
+  exact h1.trans (add_le_add (prg_comp_le (hopKeyPRG kem kdfS hop0) (lastBlockPRG streamS geom)
+    (tailBlockAdversary kem cipher macS kdfS streamS geom restPath payload _ p)) le_rfl)
 
 end Games
 
