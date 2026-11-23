@@ -327,6 +327,125 @@ theorem procWith_final_tag (dec : ByteArray → Except String ByteArray) (pkt ss
         have ht0 : geom.payloadTagLength = 0 := by omega
         simp [ht0]
 
+set_option maxHeartbeats 1000000 in
+/-- **A hop treats the header and the payload apart.** What it does with a packet that has the
+header of `pkt` and another payload follows from what it does with `pkt`: the same replay tag
+and commands, and the payload decrypted under the hop's payload key. A hop that forwards `pkt`
+forwards the same header in front of that payload. A final hop with a SURB reply command hands
+that payload over without checking it. -/
+theorem procWith_payload (dec : ByteArray → Except String ByteArray) (pkt pkt' ss : ByteArray)
+    (hsz : pkt'.size = pkt.size)
+    (hhdr : pkt'.extract 0 (payloadOffset kem geom) = pkt.extract 0 (payloadOffset kem geom))
+    (hpos : payloadOffset kem geom < pkt.size)
+    (hd : dec (pkt.extract 2 (2 + kem.ciphertextSize)) = .ok ss)
+    (p : Option ByteArray) (tag : Vector UInt8 32) (cmds : List RoutingCommand)
+    (f : Option ByteArray)
+    (h : procWith kem cipher macS kdfS streamS geom dec pkt = some (p, tag, cmds, f)) :
+    let d := cipher.decrypt (deriveHopKeys kdfS ss).payloadEncryption.toArray
+      (ofVector (deriveHopKeys kdfS ss).headerEncryptionIV)
+      (pkt'.extract (payloadOffset kem geom) pkt'.size)
+    (∀ fwd, f = some fwd → procWith kem cipher macS kdfS streamS geom dec pkt'
+        = some (none, tag, cmds, some (fwd.extract 0 (payloadOffset kem geom) ++ d))) ∧
+    (f = none → hasSurbReply cmds = true →
+        procWith kem cipher macS kdfS streamS geom dec pkt' = some (some d, tag, cmds, none)) := by
+  have hmacL : macLength = 32 := rfl
+  have e0 := extract_of_prefix_eq hhdr 0 2 (by unfold payloadOffset; omega)
+  have e1 := extract_of_prefix_eq hhdr 2 (2 + kem.ciphertextSize) (by unfold payloadOffset; omega)
+  have e2 := extract_of_prefix_eq hhdr 0 (2 + kem.ciphertextSize + geom.routingInfoLength)
+    (by unfold payloadOffset; omega)
+  have e3 := extract_of_prefix_eq hhdr (2 + kem.ciphertextSize + geom.routingInfoLength)
+    (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) (by unfold payloadOffset; omega)
+  have e4 := extract_of_prefix_eq hhdr (2 + kem.ciphertextSize)
+    (2 + kem.ciphertextSize + geom.routingInfoLength) (by unfold payloadOffset; omega)
+  have hrs : ∀ x : ByteArray, x.size = pkt.size →
+      (x.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) x.size).size
+        > 0 := by
+    intro x hx; rw [ByteArray.size_extract]; unfold payloadOffset at hpos; omega
+  have hp := hrs pkt rfl
+  have hp' := hrs pkt' hsz
+  intro d
+  generalize hR : procWith kem cipher macS kdfS streamS geom dec pkt' = R
+  unfold procWith unwrapKEMWith at h hR
+  dsimp only at h hR
+  simp only [e0, e1, e2, e3, e4] at hR
+  have h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by
+    unfold payloadOffset at hpos; omega
+  have h1' : ¬ pkt'.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by
+    rw [hsz]; exact h1
+  rw [dif_neg h1] at h
+  rw [dif_neg h1'] at hR
+  by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
+  · rw [if_pos h2] at h; cases h
+  rw [if_neg h2, hd] at h
+  rw [if_neg h2, hd] at hR
+  dsimp only [Bind.bind, Except.bind] at h hR
+  by_cases h3 : (ofVector (macS.mac (ofVector (deriveHopKeys kdfS ss).headerMAC)
+      (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength)))).data
+      ≠ (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+        (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)).data
+  · rw [if_pos h3] at h; cases h
+  rw [if_neg h3] at h hR
+  have hds : ∀ x : ByteArray, x.size = pkt.size →
+      (cipher.decrypt (deriveHopKeys kdfS ss).payloadEncryption.toArray
+        (ofVector (deriveHopKeys kdfS ss).headerEncryptionIV)
+        (x.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) x.size)).size
+        = pkt.size - payloadOffset kem geom := by
+    intro x hx; rw [cipher.decrypt_size, ByteArray.size_extract, hx]; unfold payloadOffset; omega
+  generalize parseAll _ = r at h hR
+  cases r with
+  | error e => cases h
+  | ok cmds0 =>
+    dsimp only at h hR
+    generalize List.findSome? _ cmds0 = o at h hR
+    cases o with
+    | some nm =>
+      dsimp only [pure, Except.pure] at h hR
+      simp only [Option.map_some, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl, rfl, rfl⟩ := h
+      subst hR
+      have hpd : (cipher.decrypt (deriveHopKeys kdfS ss).payloadEncryption.toArray
+          (ofVector (deriveHopKeys kdfS ss).headerEncryptionIV)
+          (pkt'.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+            pkt'.size)).size > 0 := by rw [hds pkt' hsz]; omega
+      simp only [if_pos hp', if_pos hpd, Option.map_some]
+      have key : ∀ A P P' : ByteArray, A.size = payloadOffset kem geom →
+          A ++ P' = (A ++ P).extract 0 (payloadOffset kem geom) ++ P' := by
+        intro A P P' hA; rw [← hA, Cryptlib.Util.Bytes.extract_append_left]
+      refine ⟨fun fwd hf => ?_, fun hf => by cases hf⟩
+      cases hf
+      refine congrArg (fun x : ByteArray => some (none, _, cmds0, some x)) (key _ _ _ ?_)
+      have hv0 : v0AD.size = 2 := rfl
+      have hpad : (⟨Array.replicate geom.perHopRoutingInfoLength (0 : UInt8)⟩ : ByteArray).size
+          = geom.perHopRoutingInfoLength := Array.size_replicate
+      simp only [ByteArray.size_append, size_xorBytes, Util.Bytes.size_ofVector,
+        ByteArray.size_extract, hpad, hv0, payloadOffset, hmacL, Nat.min_self] at h1 ⊢
+      omega
+    | none =>
+      have hs := hds pkt rfl
+      have hs' := hds pkt' hsz
+      simp only [if_pos hp, hs] at h
+      simp only [if_pos hp', hs'] at hR
+      by_cases hlt : pkt.size - payloadOffset kem geom < geom.payloadTagLength
+      · rw [if_pos hlt] at h; cases h
+      rw [if_neg hlt] at h hR
+      generalize hany : List.any cmds0 _ = bsr at h hR
+      have hb : hasSurbReply cmds0 = bsr := by
+        rw [← hany]; unfold hasSurbReply
+        congr 1
+      cases bsr with
+      | true =>
+        rw [if_pos rfl] at h hR
+        simp only [pure, Except.pure, Option.map_none, Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨-, rfl, rfl, rfl⟩ := h
+        subst hR
+        exact ⟨fun fwd hf => (by cases hf), fun _ _ => rfl⟩
+      | false =>
+        rw [if_neg Bool.false_ne_true] at h
+        split_ifs at h
+        simp only [pure, Except.pure, Option.map_none, Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨-, -, rfl, rfl⟩ := h
+        exact ⟨fun fwd hf => (by cases hf), fun _ hs => by rw [hs] at hb; cases hb⟩
+
 /-- The four keys of a hop that KEM Sphinx uses: payload key, IV, header MAC key, header
 encryption key. -/
 abbrev KeyTuple := Vector UInt8 48 × Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32
