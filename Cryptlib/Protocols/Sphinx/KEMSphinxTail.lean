@@ -303,7 +303,7 @@ def kemHopKeys (kem : KEM) (kdfS : KDF) (path : Array PathHop)
     (seeds : Array (Vector UInt8 32)) (i : Nat) : HopKeys :=
   match kemEncap kem (path[i]!).publicKey (seeds[i]!) with
   | .ok (_, ss) => deriveHopKeys kdfS ss
-  | .error _ => default
+  | .error _ => deriveHopKeys kdfS (ofVector (kem.encodePlaintext kem.ptI.default))
 
 /-- A hop's header keystream: one routing-info block longer than the routing info. -/
 def headerKeystream (streamS : StreamCipher) (geom : Geometry) (k : HopKeys) : ByteArray :=
