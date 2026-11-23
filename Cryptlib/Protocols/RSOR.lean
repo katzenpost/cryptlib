@@ -98,35 +98,35 @@ one `FormOnion` for both.
 
 The paper's sender opens a reply with its relay key. A Sphinx sender opens it with keys it kept
 when it made the request, so here the last relay of the backward path hands over a sealed
-payload and `recover` opens it with the request's coins. -/
+payload and `recover` opens it with the randomness the sender built the request from. -/
 structure Scheme where
   Name : Type
   Key : Type
   Secret : Type
-  Coins : Type
+  Randomness : Type
   Msg : Type
   Receiver : Type
   Header : Type
   Payload : Type
   [decHeader : DecidableEq Header]
   [decPayload : DecidableEq Payload]
-  [sampleCoins : SampleableType Coins]
+  [sampleRandomness : SampleableType Randomness]
   [sampleMsg : SampleableType Msg]
   [sampleReceiver : SampleableType Receiver]
   [samplePayload : SampleableType Payload]
   maxHops : ℕ
   keygen : Name → ProbComp (Key × Secret)
-  form : (q : Request maxHops Name Key Msg Receiver) → Coins → Fin q.fwd.hops.length →
+  form : (q : Request maxHops Name Key Msg Receiver) → Randomness → Fin q.fwd.hops.length →
     Header × Payload
-  formBack : (q : Request maxHops Name Key Msg Receiver) → Coins → Msg →
+  formBack : (q : Request maxHops Name Key Msg Receiver) → Randomness → Msg →
     Fin q.back.hops.length → Header × Payload
   proc : Secret → Name → Header × Payload →
     Option (Step Name (Header × Payload) Msg Receiver Payload)
   reply : Secret → Name → Msg → Header × Payload → Option (Name × (Header × Payload))
-  recover : Request maxHops Name Key Msg Receiver → Coins → Payload → Option Msg
-  /-- The coins for which no relay on the paths fails to process its layer. Everything, unless
+  recover : Request maxHops Name Key Msg Receiver → Randomness → Payload → Option Msg
+  /-- The randomness for which no relay on the paths fails to process its layer. Everything, unless
   the scheme rests on a primitive that can fail, as a lattice KEM can. -/
-  reliable : Request maxHops Name Key Msg Receiver → Coins → Prop := fun _ _ => True
+  reliable : Request maxHops Name Key Msg Receiver → Randomness → Prop := fun _ _ => True
   /-- A relay on the forward path gets the next layer, and the exit relay the message. -/
   proc_form : ∀ q r (i : Fin q.fwd.hops.length) sk, reliable q r →
     (q.fwd.hops[i].key, sk) ∈ support (keygen q.fwd.hops[i].name) →
@@ -152,7 +152,7 @@ structure Scheme where
 
 namespace Scheme
 
-attribute [instance] decHeader decPayload sampleCoins sampleMsg sampleReceiver samplePayload
+attribute [instance] decHeader decPayload sampleRandomness sampleMsg sampleReceiver samplePayload
 
 variable (S : Scheme)
 
@@ -182,7 +182,8 @@ abbrev Honest := Role → Hop S.Name S.Key
 
 /-- The adversary's oracles: have an honest relay process an onion, or reply to one. -/
 abbrev oracleSpec :=
-  unifSpec + (Role × S.Onion →ₒ Option S.Step) + (Role × S.Msg × S.Onion →ₒ Option (S.Name × S.Onion))
+  unifSpec + (Role × S.Onion →ₒ Option S.Step) +
+    (Role × S.Msg × S.Onion →ₒ Option (S.Name × S.Onion))
 
 /-- What the honest relays remember: the headers they have processed (Assumption 3) and the
 onions they may still reply to. -/
@@ -281,12 +282,12 @@ changed on the way, with a random payload: the tag travels on. -/
 def forwardUnlinkable : Property S where
   Challenge := ForwardChallenge
   world c b := do
-    let r ← $ᵗ S.Coins
+    let r ← $ᵗ S.Randomness
     if b then
       let q : S.Request :=
         { msg := ← $ᵗ S.Msg, receiver := ← $ᵗ S.Receiver, fwd := c.req.fwd.take (c.pos + 1),
           back := .nil, fwd_ne := c.req.fwd.take_ne c.pos.isLt }
-      let r' ← $ᵗ S.Coins
+      let r' ← $ᵗ S.Randomness
       let mine := S.form q r' ⟨c.pos, by simp [q, Route.take]⟩
       let home : Fin c.req.back.hops.length :=
         ⟨0, List.length_pos_iff.2 fun h => by simpa [h] using c.sender⟩
@@ -326,14 +327,15 @@ onion along the rest of the backward path with a random message. The sender answ
 def backwardUnlinkable : Property S where
   Challenge := BackwardChallenge
   world c b := do
-    let r ← $ᵗ S.Coins
+    let r ← $ᵗ S.Randomness
     let onion := S.form c.req r c.req.first
-    let last : Fin c.req.back.hops.length := ⟨c.req.back.hops.length - 1, by have := c.pos.isLt; omega⟩
+    let last : Fin c.req.back.hops.length :=
+      ⟨c.req.back.hops.length - 1, by have := c.pos.isLt; omega⟩
     if b then
       let q : S.Request :=
         { msg := ← $ᵗ S.Msg, receiver := ← $ᵗ S.Receiver, fwd := c.req.back.drop c.pos,
           back := .nil, fwd_ne := c.req.back.drop_ne c.pos.isLt }
-      let r' ← $ᵗ S.Coins
+      let r' ← $ᵗ S.Randomness
       let swap : S.Name × S.Onion := (c.req.back.hops[c.pos].name, S.form q r' q.first)
       let swapAt : Option S.Header := match hk : c.pos.val with
         | 0 => none
@@ -370,7 +372,7 @@ structure TailChallenge (hon : Honest S) where
 
 /-- The layer of `q` at forward position `i`, with the honest backward relay answering nothing
 to the reply layer at backward position `k`. -/
-def tailWorld (q : S.Request) (r : S.Coins) (i : Fin q.fwd.hops.length)
+def tailWorld (q : S.Request) (r : S.Randomness) (i : Fin q.fwd.hops.length)
     (k : Fin q.back.hops.length) : World S where
   onion := S.form q r i
   patch :=
@@ -383,7 +385,7 @@ backward path up to its honest relay. -/
 def tailIndistinguishable : Property S where
   Challenge := TailChallenge
   world c b := do
-    let r ← $ᵗ S.Coins
+    let r ← $ᵗ S.Randomness
     if b then
       let q : S.Request :=
         { c.req with fwd := c.req.fwd.drop c.pos, back := c.req.back.take (c.back + 1),
