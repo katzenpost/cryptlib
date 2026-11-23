@@ -111,6 +111,138 @@ theorem procWith_payload_congr (dec : ByteArray → Except String ByteArray) (pk
             ByteArray.size_extract, hpad, hv0, payloadOffset, hmacL, Nat.min_self] at h1 ⊢
           omega
 
+theorem extract_append_tail (a d : ByteArray) (n m : Nat) (hn : a.size = n)
+    (hm : m = n + d.size) : (a ++ d).extract n m = d := by
+  subst hn hm
+  rw [Cryptlib.Util.Bytes.extract_append_of_ge _ _ (le_refl _), Nat.sub_self,
+    Nat.add_sub_cancel_left]
+  exact ByteArray.extract_zero_size
+
+/-- Decryption is injective on blocks of one size, of at least 16 bytes. It inverts encryption,
+which is an injection of a finite set into itself. -/
+theorem decrypt_injective (key : Array UInt8) (iv a b : ByteArray) (ha : 16 ≤ a.size)
+    (hab : b.size = a.size) (h : cipher.decrypt key iv a = cipher.decrypt key iv b) : a = b := by
+  have hinj : Function.Injective (fun v : Vector UInt8 a.size =>
+      Util.Bytes.toVecN a.size (cipher.encrypt key iv (ofVector v))) := by
+    intro v w hvw
+    have h1 := congrArg ofVector hvw
+    simp only at h1
+    rw [Util.Bytes.ofVector_toVecN _ (by rw [cipher.encrypt_size, Util.Bytes.size_ofVector]),
+      Util.Bytes.ofVector_toVecN _ (by rw [cipher.encrypt_size, Util.Bytes.size_ofVector])] at h1
+    have h2 := congrArg (cipher.decrypt key iv) h1
+    rw [cipher.roundTrip _ _ _ (by rw [Util.Bytes.size_ofVector]; exact ha),
+      cipher.roundTrip _ _ _ (by rw [Util.Bytes.size_ofVector]; exact ha)] at h2
+    have h3 := congrArg (Util.Bytes.toVecN a.size) h2
+    simpa using h3
+  have hsurj := Finite.injective_iff_surjective.mp hinj
+  obtain ⟨v, hv⟩ := hsurj (Util.Bytes.toVecN a.size a)
+  obtain ⟨w, hw⟩ := hsurj (Util.Bytes.toVecN a.size b)
+  have hv' : cipher.encrypt key iv (ofVector v) = a := by
+    have := congrArg ofVector hv
+    simp only at this
+    rwa [Util.Bytes.ofVector_toVecN _ (by rw [cipher.encrypt_size, Util.Bytes.size_ofVector]),
+      Util.Bytes.ofVector_toVecN _ rfl] at this
+  have hw' : cipher.encrypt key iv (ofVector w) = b := by
+    have := congrArg ofVector hw
+    simp only at this
+    rwa [Util.Bytes.ofVector_toVecN _ (by rw [cipher.encrypt_size, Util.Bytes.size_ofVector]),
+      Util.Bytes.ofVector_toVecN _ hab] at this
+  rw [← hv', ← hw', cipher.roundTrip _ _ _ (by rw [Util.Bytes.size_ofVector]; exact ha),
+    cipher.roundTrip _ _ _ (by rw [Util.Bytes.size_ofVector]; exact ha)] at h
+  rw [← hv', ← hw', h]
+
+set_option maxHeartbeats 1000000 in
+/-- A payload changed before a mix is still changed after it: the two forwarded packets have the
+same header and different payloads. So the change reaches the final hop. -/
+theorem procWith_payload_changed (dec : ByteArray → Except String ByteArray) (pkt pkt' : ByteArray)
+    (hsz : pkt'.size = pkt.size)
+    (hhdr : pkt'.extract 0 (payloadOffset kem geom) = pkt.extract 0 (payloadOffset kem geom))
+    (h16 : payloadOffset kem geom + 16 ≤ pkt.size)
+    (hne : pkt'.extract (payloadOffset kem geom) pkt'.size
+      ≠ pkt.extract (payloadOffset kem geom) pkt.size)
+    (tag : Vector UInt8 32) (cmds : List RoutingCommand) (fwd fwd' : ByteArray)
+    (h : procWith kem cipher macS kdfS streamS geom dec pkt = some (none, tag, cmds, some fwd))
+    (h' : procWith kem cipher macS kdfS streamS geom dec pkt' = some (none, tag, cmds, some fwd')) :
+    fwd'.extract (payloadOffset kem geom) fwd'.size
+      ≠ fwd.extract (payloadOffset kem geom) fwd.size := by
+  have hmacL : macLength = 32 := rfl
+  have e0 := extract_of_prefix_eq hhdr 0 2 (by unfold payloadOffset; omega)
+  have e1 := extract_of_prefix_eq hhdr 2 (2 + kem.ciphertextSize) (by unfold payloadOffset; omega)
+  have e2 := extract_of_prefix_eq hhdr 0 (2 + kem.ciphertextSize + geom.routingInfoLength)
+    (by unfold payloadOffset; omega)
+  have e3 := extract_of_prefix_eq hhdr (2 + kem.ciphertextSize + geom.routingInfoLength)
+    (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) (by unfold payloadOffset; omega)
+  have e4 := extract_of_prefix_eq hhdr (2 + kem.ciphertextSize)
+    (2 + kem.ciphertextSize + geom.routingInfoLength) (by unfold payloadOffset; omega)
+  unfold procWith unwrapKEMWith at h h'
+  dsimp only at h h'
+  simp only [e0, e1, e2, e3, e4] at h'
+  by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
+  · rw [dif_pos h1] at h; cases h
+  rw [dif_neg h1] at h; rw [dif_neg (hsz ▸ h1)] at h'
+  by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
+  · rw [if_pos h2] at h; cases h
+  rw [if_neg h2] at h h'
+  cases hd : dec (pkt.extract 2 (2 + kem.ciphertextSize)) with
+  | error e => rw [hd] at h; cases h
+  | ok ss =>
+    rw [hd] at h h'
+    dsimp only [Bind.bind, Except.bind] at h h'
+    by_cases h3 : (ofVector (macS.mac (ofVector (deriveHopKeys kdfS ss).headerMAC)
+        (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength)))).data
+        ≠ (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+          (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)).data
+    · rw [if_pos h3] at h; cases h
+    rw [if_neg h3] at h h'
+    generalize parseAll _ = r at h h'
+    cases r with
+    | error e => cases h
+    | ok cmds0 =>
+      dsimp only at h h'
+      generalize List.findSome? _ cmds0 = o at h h'
+      cases o with
+      | none =>
+        dsimp only at h
+        split_ifs at h <;> cases h
+      | some nm =>
+        dsimp only [pure, Except.pure] at h h'
+        have hpos : (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+            pkt.size).size > 0 := by
+          rw [ByteArray.size_extract]; unfold payloadOffset at h16; omega
+        have hpos' : (pkt'.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+            pkt'.size).size > 0 := by
+          rw [ByteArray.size_extract]; unfold payloadOffset at h16; omega
+        simp only [hpos, hpos', cipher.decrypt_size, ↓reduceIte, Option.map_some,
+          Option.some.injEq, Prod.mk.injEq, true_and] at h h'
+        obtain ⟨-, -, rfl⟩ := h
+        obtain ⟨-, -, rfl⟩ := h'
+        intro hc
+        have hv0 : v0AD.size = 2 := rfl
+        have hpad : (⟨Array.replicate geom.perHopRoutingInfoLength (0 : UInt8)⟩ : ByteArray).size
+            = geom.perHopRoutingInfoLength := Array.size_replicate
+        change ((_ : ByteArray) ++ _).extract _ _ = ((_ : ByteArray) ++ _).extract _ _ at hc
+        rw [extract_append_tail _ _ _ _ (by
+            simp only [ByteArray.size_append, size_xorBytes, Util.Bytes.size_ofVector,
+              ByteArray.size_extract, hpad, hv0, payloadOffset, hmacL, Nat.min_self] at h1 ⊢
+            omega) (by
+            show ByteArray.size _ = _
+            simp only [ByteArray.size_append, size_xorBytes, Util.Bytes.size_ofVector,
+              ByteArray.size_extract, hpad, payloadOffset, hmacL, Nat.min_self,
+              cipher.decrypt_size] at h1 ⊢
+            omega),
+          extract_append_tail _ _ _ _ (by
+            simp only [ByteArray.size_append, size_xorBytes, Util.Bytes.size_ofVector,
+              ByteArray.size_extract, hpad, hv0, payloadOffset, hmacL, Nat.min_self] at h1 ⊢
+            omega) (by
+            show ByteArray.size _ = _
+            simp only [ByteArray.size_append, size_xorBytes, Util.Bytes.size_ofVector,
+              ByteArray.size_extract, hpad, payloadOffset, hmacL, Nat.min_self,
+              cipher.decrypt_size] at h1 ⊢
+            omega)] at hc
+        exact hne (decrypt_injective cipher _ _ _ _ (by
+            rw [ByteArray.size_extract]; unfold payloadOffset at h16 ⊢; omega) (by
+            rw [ByteArray.size_extract, ByteArray.size_extract]; omega) hc)
+
 /-- Whether the commands carry a SURB reply. A reply packet's payload is not checked by the
 final hop, so the theorems below are about forward packets. -/
 def hasSurbReply (cmds : List RoutingCommand) : Bool :=
