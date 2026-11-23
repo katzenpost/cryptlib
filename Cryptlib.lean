@@ -88,6 +88,7 @@ import Cryptlib.Protocols.Sphinx.KEMSphinxTailIndist
 import Cryptlib.Protocols.Sphinx.KEMSphinxTailGame
 import Cryptlib.Protocols.Sphinx.KEMSphinxTailOracle
 import Cryptlib.Protocols.Sphinx.KEMSphinxTailChain
+import Cryptlib.Protocols.Sphinx.KEMSphinxTailDef6
 import Cryptlib.Protocols.Sphinx.Schemes
 import Cryptlib.Protocols.GroupComm
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.AckCodec
