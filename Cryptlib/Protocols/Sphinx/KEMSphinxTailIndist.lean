@@ -25,7 +25,7 @@ open Cryptlib.Util.Bytes (ofVector)
 
 /-! # KEM-Sphinx tail indistinguishability, up to one keystream block
 
-`newKEMPacket_unwrapKEM_tail` says the packet the first hop forwards is a fresh packet on the
+`newKEMPacket_unwrapKEM` says the packet the first hop forwards is a fresh packet on the
 rest of the path whose filler ends in `tailPad`. Here `tailPad` is split into the first hop's
 keystream block and a mask that depends only on the rest of the path (`tailPad_eq_mask`), and
 the probabilistic consequence is drawn: replace that one block by a uniform block and the
@@ -319,7 +319,7 @@ theorem eq_empty_of_size_zero (b : ByteArray) (h : b.size = 0) : b = ByteArray.e
     omega
 
 /-- **What the first hop forwards is a fresh packet on the rest of the path whose filler ends in
-the first hop's keystream block, masked.** `newKEMPacket_unwrapKEM_tail` in the terms of the
+the first hop's keystream block, masked.** `newKEMPacket_unwrapKEM` in the terms of the
 games. -/
 theorem forwardedView_eq (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
@@ -346,10 +346,11 @@ theorem forwardedView_eq (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize
   have hpext : (#[hop0] ++ restPath).extract 1 (#[hop0] ++ restPath).size = restPath := by simp
   have hsext : (#[seed0] ++ restSeeds.toArray).extract 1 (#[seed0] ++ restSeeds.toArray).size
       = restSeeds.toArray := by simp
-  obtain ⟨tag, cmds, fwd, hunwrap, htail⟩ := newKEMPacket_unwrapKEM_tail kem cipher macS kdfS
+  obtain ⟨tag, mac, fwd, hunwrap, htail⟩ := (newKEMPacket_unwrapKEM kem cipher macS kdfS
     streamS geom hvalid hmactag h16 (#[seed0] ++ restSeeds.toArray) (ofVector filler)
-    (#[hop0] ++ restPath) payload pkt privKey (by omega) (by rw [hpath0]; exact hpp)
-    (fun j hj => hrel j (by omega)) (by rw [hpath0]; exact hcmdnn) (by rw [hpath0]; exact hcmdnh) hnk
+    (#[hop0] ++ restPath) payload pkt privKey (by rw [hpath0]; exact hpp)
+    (fun j hj => hrel j (by omega)) (by rw [hpath0]; exact hcmdnn) (by rw [hpath0]; exact hcmdnh)
+    hnk).1 (by omega)
   obtain ⟨-, hdr, sprpKeys, t, hcreate, -, -, -⟩ :=
     newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ payload pkt hnk
   obtain ⟨-, hple, hesize, -⟩ :=

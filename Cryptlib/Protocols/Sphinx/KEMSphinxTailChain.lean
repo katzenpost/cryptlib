@@ -23,7 +23,7 @@ open Cryptlib.Util.Bytes (ofVector)
 
 /-! # The honest relay at any position
 
-`newKEMPacket_unwrapKEM_tail` handles one hop. Applied once for each hop up to and including the
+`newKEMPacket_unwrapKEM` handles one hop. Applied once for each hop up to and including the
 honest relay, it shows that what the honest relay forwards is a fresh packet on the rest of the
 path whose filler is the original filler followed by one block for each hop that has processed
 the packet. Each of those blocks is masked by a different block of the honest relay's header
@@ -367,10 +367,11 @@ theorem chainForward_eq (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize 
     obtain ⟨-, hple, hesize, -⟩ :=
       createKEMHeader_unfold kem macS kdfS streamS geom _ _ _ hdr sprpKeys hcreate
     obtain ⟨-, -, hrouting, -, -, -⟩ := id hvalid
-    obtain ⟨tag, cmds, fwd, hunwrap, htail⟩ := newKEMPacket_unwrapKEM_tail kem cipher macS kdfS streamS geom hvalid hmactag
-      h16 seeds filler path payload pkt sk (by omega)
+    obtain ⟨tag, mac, fwd, hunwrap, htail⟩ := (newKEMPacket_unwrapKEM kem cipher macS kdfS
+      streamS geom hvalid hmactag h16 seeds filler path payload pkt sk
       (by simpa using hpp 0 (by simp)) hrel
-      (fun c hc => (hcmd 0 (by simp) c hc).1) (fun c hc => (hcmd 0 (by simp) c hc).2) hnk
+      (fun c hc => (hcmd 0 (by simp) c hc).1) (fun c hc => (hcmd 0 (by simp) c hc).2) hnk).1
+      (by omega)
     have hfill : tailFiller kem kdfS streamS geom path seeds filler
         = filler ++ padS geom (ksReal kem kdfS streamS geom path seeds) (path.size - 1) := by
       unfold tailFiller

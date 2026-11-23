@@ -28,7 +28,7 @@ indistinguishability says that the packet an honest hop forwards cannot be told 
 layer of an unrelated onion that shares the rest of the path.
 
 This file proves the exact fact that property rests on, for `newKEMPacket` and `unwrapKEM`
-themselves (`newKEMPacket_unwrapKEM_tail`): the packet the first hop forwards *is* the packet `newKEMPacket`
+themselves (`newKEMPacket_unwrapKEM`): the packet the first hop forwards *is* the packet `newKEMPacket`
 builds on the rest of the path, from the remaining seeds and with the filler `tailFiller`, the
 old filler followed by one more block. That block is the XOR of one keystream block from every
 hop of the path, the first hop included (`tailPad`). `wrapKEM_unwrapKEM_tail` says the same of
@@ -355,26 +355,33 @@ theorem kemRiFragment_tail (kem : KEM) (geom : Geometry) (path : Array PathHop)
 
 set_option maxHeartbeats 4000000 in
 /-- **The forwarded packet is a fresh packet on the rest of the path.** When the first hop
-unwraps a packet `newKEMPacket` built, what it forwards is exactly the packet `newKEMPacket`
-builds on the rest of the path, from the remaining seeds and with the filler `tailFiller`. -/
-theorem newKEMPacket_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
+unwraps a packet `newKEMPacket` built, it gets its own commands and the next hop's name, and what
+it forwards is exactly the packet `newKEMPacket` builds on the rest of the path, from the
+remaining seeds and with the filler `tailFiller`. The only hop of a one-hop path gets its
+commands and the payload. -/
+theorem newKEMPacket_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
     (hmactag : macS.tagSize = macLength)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
     (seeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop)
-    (payload pkt privKey : ByteArray) (h2 : 2 ≤ path.size)
+    (payload pkt privKey : ByteArray)
     (hpp : kemSelfPublicKeyBytes kem privKey = (path[0]!).publicKey)
     (hrel : ∀ j, j < path.size → kem.Reliable (kem.stateFromSeed seeds[j]!))
     (hcmdnn : ∀ c ∈ (path[0]!).commands, c ≠ RoutingCommand.null)
     (hcmdnh : ∀ c ∈ (path[0]!).commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
     (hnk : newKEMPacket kem cipher macS kdfS streamS geom seeds filler path payload
       = Except.ok pkt) :
-    ∃ (replayTag : Vector UInt8 32) (cmds : List RoutingCommand) (fwd : Vector UInt8 pkt.size),
-      unwrapKEM kem cipher macS kdfS streamS geom privKey pkt
-        = Except.ok (none, replayTag, cmds, some fwd) ∧
-      newKEMPacket kem cipher macS kdfS streamS geom (seeds.extract 1 seeds.size)
-          (tailFiller kem kdfS streamS geom path seeds filler) (path.extract 1 path.size) payload
-        = Except.ok (ofVector fwd) := by
+    (2 ≤ path.size →
+      ∃ (replayTag mac : Vector UInt8 32) (fwd : Vector UInt8 pkt.size),
+        unwrapKEM kem cipher macS kdfS streamS geom privKey pkt
+          = Except.ok (none, replayTag,
+              (path[0]!).commands ++ [RoutingCommand.nextNodeHop (path[1]!).id mac], some fwd) ∧
+        newKEMPacket kem cipher macS kdfS streamS geom (seeds.extract 1 seeds.size)
+            (tailFiller kem kdfS streamS geom path seeds filler) (path.extract 1 path.size) payload
+          = Except.ok (ofVector fwd)) ∧
+    (path.size = 1 → (∀ c ∈ (path[0]!).commands, ∀ id, c ≠ RoutingCommand.surbReply id) →
+      ∃ replayTag : Vector UInt8 32, unwrapKEM kem cipher macS kdfS streamS geom privKey pkt
+        = Except.ok (some payload, replayTag, (path[0]!).commands, none)) := by
   obtain ⟨hpaysize, hdr, sprpKeys, t, hcreate, ht0content, htstep, hpkteq⟩ :=
     newKEMPacket_unfold kem cipher macS kdfS streamS geom seeds filler path payload pkt hnk
   obtain ⟨hpne, hple, hesize, hfsize, kemElements, keys, riKeyStream, riPadding, s, hknsize,
@@ -470,16 +477,21 @@ theorem newKEMPacket_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS
     simp only [hsprpeq, Array.getElem_ofFn]
     trivial
   have htsize := newKEMPacket_payload_size_trace cipher sprpKeys t htstep
-  obtain ⟨replayTag, cmds, hnewsize, hunwrap, -⟩ := unwrapKEM_hopPacket_nonterminal kem cipher
-    macS kdfS streamS geom path keys kemElements riKeyStream riPadding sprpKeys path.size s t
-    hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent hkeyscontent
-    htsize ht0size htstep hsprpkey hsprp hple h16 0 (by omega) hcmdnn hcmdnh privKey hpp
   have hpkteq2 : pkt = hopPacket kemElements riPadding s t path.size 0 := by
     rw [hpkteq, hhdreq]
     unfold hopPacket
     rw [Nat.sub_zero, if_neg (lt_irrefl 0), ByteArray.append_empty, hsprp]
   subst hpkteq2
-  refine ⟨replayTag, cmds,
+  refine ⟨fun h2 => ?_, fun h1 hsurb => ⟨_, unwrapKEM_hopPacket_terminal kem cipher
+    macS kdfS streamS geom path keys kemElements riKeyStream riPadding sprpKeys path.size s t
+    hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent hkeyscontent
+    htsize ht0size htstep hsprpkey hsprp hple h16 0 (by omega) hcmdnn hcmdnh hsurb payload
+    hpaysize ht0content privKey hpp⟩⟩
+  obtain ⟨replayTag, cmds, hnewsize, hunwrap, rfl⟩ := unwrapKEM_hopPacket_nonterminal kem cipher
+    macS kdfS streamS geom path keys kemElements riKeyStream riPadding sprpKeys path.size s t
+    hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent hkeyscontent
+    htsize ht0size htstep hsprpkey hsprp hple h16 0 (by omega) hcmdnn hcmdnh privKey hpp
+  refine ⟨replayTag, _,
     ⟨(hopPacket kemElements riPadding s t path.size (0 + 1)).data, hnewsize⟩, hunwrap, ?_⟩
   show newKEMPacket kem cipher macS kdfS streamS geom (seeds.extract 1 seeds.size)
       (tailFiller kem kdfS streamS geom path seeds filler) (path.extract 1 path.size) payload
@@ -831,7 +843,7 @@ theorem seedBytes_chunks (b : ByteArray) (str : Nat → Vector UInt8 32) (base :
     exact Nat.div_add_mod i 32
 
 set_option maxHeartbeats 1000000 in
-/-- **`newKEMPacket_unwrapKEM_tail` for `wrapKEM`.** What the first hop forwards from a wrapped
+/-- **`newKEMPacket_unwrapKEM` for `wrapKEM`.** What the first hop forwards from a wrapped
 packet is what `wrapKEM` itself returns on the rest of the path, from some seed stream. -/
 theorem wrapKEM_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
@@ -859,12 +871,12 @@ theorem wrapKEM_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS : MA
   have hp0 : ((hop0 :: rest).toArray)[0]! = hop0 := by simp
   have hpext : (hop0 :: rest).toArray.extract 1 (hop0 :: rest).toArray.size = rest.toArray := by
     simp
-  obtain ⟨replayTag, cmds, fwd, hunwrap, htail⟩ := newKEMPacket_unwrapKEM_tail kem cipher macS
+  obtain ⟨replayTag, mac, fwd, hunwrap, htail⟩ := (newKEMPacket_unwrapKEM kem cipher macS
     kdfS streamS geom hvalid hmactag h16 seeds _ (hop0 :: rest).toArray (ofVector payload)
-    (ofVector pkt) privKey (by simp; omega) (by rw [hp0]; exact hpp)
+    (ofVector pkt) privKey (by rw [hp0]; exact hpp)
     (fun j hj => by rw [hseedcontent j (by simpa using hj)]; exact hrel j)
     (by rw [hp0]; exact fun c hc => (hcmds c hc).1)
-    (by rw [hp0]; exact fun c hc => (hcmds c hc).2) hnk
+    (by rw [hp0]; exact fun c hc => (hcmds c hc).2) hnk).1 (by simp; omega)
   rw [hpext] at htail
   obtain ⟨-, hdr, sprpKeys, t, hcreate, -, -, -⟩ :=
     newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ _ _ hnk
@@ -909,7 +921,7 @@ theorem wrapKEM_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS : MA
       simp)
   have hsz : (ofVector fwd).size = geom.packetLength := by
     rw [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector]
-  refine ⟨replayTag, cmds, fwd, (0, str0),
+  refine ⟨replayTag, _, fwd, (0, str0),
     (0 + rest.toArray.size + (fillerLength geom rest.length + 31) / 32, str0),
     ⟨(ofVector fwd).data, hsz⟩, hunwrap, ?_, rfl⟩
   unfold wrapKEM
