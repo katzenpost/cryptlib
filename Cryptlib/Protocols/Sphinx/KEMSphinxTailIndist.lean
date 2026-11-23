@@ -53,9 +53,11 @@ hop's seed alone, a composition of two generators in the sense of VCVio's `PRGSc
 `hopKeyPRG`, the KEM followed by the KDF, and `lastBlockPRG`, the stream cipher. The advantage
 is at most the sum of the advantages against the two.
 
-Not proved: any bound on those two advantages. `hopKeyPRG` is not split into a KEM assumption
-and a KDF assumption, and the adversary does not see the first hop's ciphertext, so neither is
-yet the IND-CPA or IND-CCA game of the KEM. -/
+This file fixes the honest hop's key and gives the adversary no oracle. `KEMSphinxTailGame`
+generates the key in the game and splits `hopKeyPRG` into VCVio's IND-CPA experiment for the KEM
+and a generator for the KDF. `KEMSphinxTailOracle`, `KEMSphinxTailChain` and `KEMSphinxTailDef6`
+add the honest relay's oracle and put the honest relay at any position, which gives the game of
+Definition 6. -/
 
 /-- `xorBytes` with two masks of the first argument's width, in either order. -/
 theorem xorBytes_left_comm (a b c : ByteArray) (hab : a.size = b.size) (hbc : b.size = c.size) :
