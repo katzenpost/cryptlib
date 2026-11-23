@@ -84,17 +84,21 @@ def last : Fin q.fwd.hops.length :=
 end Request
 
 /-- What a relay learns from an onion: where to send the next layer, the message for a receiver
-outside the network, or the reply to a message it sent. -/
-inductive Step (Name Onion Msg Receiver : Type)
+outside the network, or a reply, still sealed, for the sender it serves. -/
+inductive Step (Name Onion Msg Receiver Payload : Type)
   | forward (next : Name) (onion : Onion)
   | deliver (msg : Msg) (receiver : Receiver)
-  | reply (msg : Msg)
+  | reply (payload : Payload)
 
 /-- A repliable service onion routing scheme (Definition 1), with its correctness (§A.1).
 
 `form q r i` is the layer the relay at forward position `i` receives, and `formBack q r m i` the
 layer of the reply carrying `m` that the relay at backward position `i` receives. The paper has
-one `FormOnion` for both. -/
+one `FormOnion` for both.
+
+The paper's sender opens a reply with its relay key. A Sphinx sender opens it with keys it kept
+when it made the request, so here the last relay of the backward path hands over a sealed
+payload and `recover` opens it with the request's coins. -/
 structure Scheme where
   Name : Type
   Key : Type
@@ -117,8 +121,9 @@ structure Scheme where
   formBack : (q : Request maxHops Name Key Msg Receiver) → Coins → Msg →
     Fin q.back.hops.length → Header × Payload
   proc : Secret → Name → Header × Payload →
-    Option (Step Name (Header × Payload) Msg Receiver)
+    Option (Step Name (Header × Payload) Msg Receiver Payload)
   reply : Secret → Name → Msg → Header × Payload → Option (Name × (Header × Payload))
+  recover : Request maxHops Name Key Msg Receiver → Coins → Payload → Option Msg
   /-- The coins for which no relay on the paths fails to process its layer. Everything, unless
   the scheme rests on a primitive that can fail, as a lattice KEM can. -/
   reliable : Request maxHops Name Key Msg Receiver → Coins → Prop := fun _ _ => True
@@ -134,13 +139,16 @@ structure Scheme where
     reliable q r → i + 1 = q.fwd.hops.length → j.val = 0 →
     (q.fwd.hops[i].key, sk) ∈ support (keygen q.fwd.hops[i].name) →
     reply sk q.fwd.hops[i].name m (form q r i) = some (q.back.hops[j].name, formBack q r m j)
-  /-- A relay on the backward path gets the next layer, and its last relay the reply. -/
-  proc_formBack : ∀ q r m (i : Fin q.back.hops.length) sk, reliable q r →
+  /-- A relay on the backward path gets the next layer. -/
+  proc_formBack : ∀ q r m (i : Fin q.back.hops.length) (h : i.val + 1 < q.back.hops.length) sk,
+    reliable q r → (q.back.hops[i].key, sk) ∈ support (keygen q.back.hops[i].name) →
+    proc sk q.back.hops[i].name (formBack q r m i)
+      = some (.forward q.back.hops[i.val + 1].name (formBack q r m ⟨i.val + 1, h⟩))
+  /-- The last relay of the backward path gets a payload that the sender opens to the reply. -/
+  recover_formBack : ∀ q r m (i : Fin q.back.hops.length) sk, reliable q r →
+    i.val + 1 = q.back.hops.length →
     (q.back.hops[i].key, sk) ∈ support (keygen q.back.hops[i].name) →
-    proc sk q.back.hops[i].name (formBack q r m i) = some
-      (if h : i + 1 < q.back.hops.length
-        then .forward q.back.hops[i.val + 1].name (formBack q r m ⟨i + 1, h⟩)
-        else .reply m)
+    ∃ p, proc sk q.back.hops[i].name (formBack q r m i) = some (.reply p) ∧ recover q r p = some m
 
 namespace Scheme
 
@@ -153,14 +161,14 @@ abbrev Onion := S.Header × S.Payload
 
 abbrev Request := RSOR.Request S.maxHops S.Name S.Key S.Msg S.Receiver
 
-abbrev Step := RSOR.Step S.Name S.Onion S.Msg S.Receiver
+abbrev Step := RSOR.Step S.Name S.Onion S.Msg S.Receiver S.Payload
 
 end Scheme
 
 /-! ## The games -/
 
 /-- The honest relays of the games: a relay on the forward path, a relay on the backward path,
-and the sender, who is the last relay of the backward path. -/
+and the last relay of the backward path, which serves the sender. -/
 inductive Role
   | relay
   | back
