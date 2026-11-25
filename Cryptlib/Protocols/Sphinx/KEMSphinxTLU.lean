@@ -1211,6 +1211,68 @@ theorem layerPK_self_last_parts (hvalid : geom.ValidForKEM kem)
       rw [hrouting, hn1, Nat.mul_one]
       rfl
 
+/-- The bytes of the keyed hop's layer in front of its tag, at either place on the path. -/
+def relayFrontAt (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (c U : ByteArray) : ByteArray :=
+  if j + 1 < hops.size then relayFront kem cipher macS kdfS streamS geom hops d payload j c U
+  else relayFrontLast kem kdfS streamS geom hops d j c U
+
+/-- The bytes of the keyed hop's layer behind its tag, at either place on the path. -/
+def relayBackAt (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (U : ByteArray) (encf : ByteArray → ByteArray) : ByteArray :=
+  if j + 1 < hops.size then relayBack kem cipher macS kdfS streamS geom hops d payload j U encf
+  else relayBackLast geom payload encf
+
+/-- **The first keyed layer in closed form.** It is the keyed hop's layer, wrapped once for each
+hop in front of it, and the keyed hop's layer is the bytes in front of its tag, their tag under
+its MAC key, and the bytes behind. The keys given are used through their keystream, one tag and
+one payload encryption. It holds for any keys once the layer can be built with some. -/
+theorem layerPK_zero_parts (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (payload privKey : ByteArray) (j : ℕ)
+    (c : ByteArray) (t : KeyTuple) (s : Vector UInt8 32) (ss : ByteArray)
+    (hj : j < hops.size) (hlen : hops.size ≤ geom.nrHops)
+    (hencj : kemEncap kem (hops[j]!).publicKey s = .ok (c, ss))
+    (hrelj : kem.Reliable (kem.stateFromSeed s))
+    (henc : ∀ m, m < hops.size → m ≠ j →
+      ∃ ct ss, kemEncap kem (hops[m]!).publicKey (d.1.toArray[m]!) = .ok (ct, ss))
+    (hrel : ∀ m, m < j → kem.Reliable (kem.stateFromSeed d.1.toArray[m]!))
+    (hsk : ∀ m, m < j → ∃ sk, kemSelfPublicKeyBytes kem sk = (hops[m]!).publicKey)
+    (hpp : kemSelfPublicKeyBytes kem privKey = (hops[j]!).publicKey)
+    (hcmdnn : ∀ m, m ≤ j → ∀ x ∈ (hops[m]!).commands, x ≠ RoutingCommand.null)
+    (hcmdnh : ∀ m, m ≤ j → ∀ x ∈ (hops[m]!).commands, ∀ id b,
+      x ≠ RoutingCommand.nextNodeHop id b)
+    (c₀ : ByteArray) (t₀ : KeyTuple) (pkt₀ : ByteArray)
+    (h0 : layerPK kem cipher macS kdfS streamS geom hops d payload j c₀ t₀ 0 = .ok pkt₀) :
+    layerPK kem cipher macS kdfS streamS geom hops d payload j c t 0
+        = .ok (wrapUp kem cipher macS kdfS streamS geom hops d 0 j
+          (relayFrontAt kem cipher macS kdfS streamS geom hops d payload j c (ksOf streamS geom t)
+            ++ ofVector (macS.mac (ofVector t.2.2.1)
+              (relayFrontAt kem cipher macS kdfS streamS geom hops d payload j c (ksOf streamS
+                  geom t)))
+            ++ relayBackAt kem cipher macS kdfS streamS geom hops d payload j (ksOf streamS
+                geom t) (encOf cipher t))) ∧
+      (relayFrontAt kem cipher macS kdfS streamS geom hops d payload j c (ksOf streamS geom t)).size
+        = 2 + kem.ciphertextSize + geom.routingInfoLength := by
+  have hc : c.size = kem.ciphertextSize := kemEncap_size kem _ _ c ss hencj
+  obtain ⟨pkt, hpk⟩ := layerPK_ok_congr kem cipher macS kdfS streamS geom hops d payload pkt₀ j
+      c₀ c t₀ t 0 h0
+  obtain ⟨L, hL, hwrap⟩ := layerPK_chain kem cipher macS kdfS streamS geom hvalid hmactag h16
+      hops d payload j c t hj hlen
+    hc henc hrel hsk (fun m hm => hcmdnn m (by omega)) (fun m hm => hcmdnh m (by omega)) j 0
+    (by omega) pkt hpk
+  by_cases hlast : j + 1 < hops.size
+  · obtain ⟨hparts, hsize⟩ := layerPK_self_parts kem cipher macS kdfS streamS geom hvalid
+      hmactag h16 hops d payload L
+      privKey j c t s ss hlast hlen hencj hrelj henc hpp (hcmdnn j le_rfl) (hcmdnh j le_rfl) hL
+    simp only [relayFrontAt, relayBackAt, hlast, ↓reduceIte]
+    exact ⟨by rw [hpk, hwrap, hparts], hsize⟩
+  · obtain ⟨hparts, hsize⟩ := layerPK_self_last_parts kem cipher macS kdfS streamS geom hvalid
+      hmactag h16 hops d payload L
+      privKey j c t s ss (by omega) hlen hencj hrelj hpp (hcmdnn j le_rfl) (hcmdnh j le_rfl) hL
+    simp only [relayFrontAt, relayBackAt, hlast, ↓reduceIte]
+    exact ⟨by rw [hpk, hwrap, hparts], hsize⟩
+
 /-- `RSOR.layer` with hop `j`'s ciphertext `c`, header keystream `U`, tagging function `tagf`
 and payload encryption `encf` given: the layer for position `i`. -/
 def layerF (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
