@@ -58,6 +58,7 @@ import Cryptlib.Primitives.Sign.Convert
 import Cryptlib.Primitives.Sign.Schemes
 import Cryptlib.Primitives.Sign.Check
 import Cryptlib.Primitives.Cipher.AEAD
+import Cryptlib.Primitives.WideBlockCipher.Lioness
 import Cryptlib.Primitives.Cipher.AES
 import Cryptlib.Primitives.Cipher.Polyval
 import Cryptlib.Primitives.Cipher.AESGCMSIV
