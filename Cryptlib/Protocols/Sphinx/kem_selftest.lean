@@ -320,9 +320,9 @@ def runSURBRound (kem : KEM) (geom : Geometry) : IO Bool := do
 
 /-- A relay of the RSOR scheme and its private key, made as the scheme's `keygen` makes them. -/
 private def newRelay (kem : KEM) :
-    IO (Cryptlib.Protocols.RSOR.Hop (Vector UInt8 32) kem.PublicKey × kem.PrivateKey) := do
+    IO (Cryptlib.Protocols.RSOR.Hop (Vector UInt8 32) (RSOR.Key kem) × kem.PrivateKey) := do
   let sk := (keygenOf kem (← randomVector 32)).2
-  pure (⟨← randomVector 32, kem.derivePublicKey sk⟩, sk)
+  pure (⟨← randomVector 32, kem.derivePublicKey sk, sk, rfl⟩, sk)
 
 private def randomDraw (geom : Geometry) : IO (RSOR.Draw geom) := do
   let bs ← randomBytes (32 * geom.nrHops)
@@ -515,7 +515,7 @@ def runForwardGame (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
   let receiver : RSOR.Name ← randomVector 32
   if h : 3 ≤ geom.nrHops ∧ ([first, relay].map Hop.name).Nodup ∧
       ([first, relay, third].map Hop.name).Nodup ∧ ([back, sender].map Hop.name).Nodup then
-    let backRoute : Cryptlib.Protocols.RSOR.Route geom.nrHops RSOR.Name kem.PublicKey :=
+    let backRoute : Cryptlib.Protocols.RSOR.Route geom.nrHops RSOR.Name (RSOR.Key kem) :=
       ⟨[back, sender], Nat.le_of_succ_le h.1, h.2.2.2⟩
     let c : ForwardChallenge (S := sch kem geom hvalid h16) hon :=
       if atExit then
@@ -561,6 +561,101 @@ def runForwardGame (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
           return [seen s1, seen s2, seen s3, seenReply re, seen s4, seen s5]
   else
     IO.eprintln "  runForwardGame: the paths are not routes"
+    pure false
+
+/-- SLU←. The honest relay is the exit relay, or the first relay of the backward path. -/
+def runBackwardGame (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) (atExit : Bool) : IO Bool := do
+  let (first, firstKey) ← newRelay kem
+  let (relay, relayKey) ← newRelay kem
+  let (other, otherKey) ← newRelay kem
+  let (sender, senderKey) ← newRelay kem
+  let hon : Honest (sch kem geom hvalid h16) := fun | .relay => relay | .back => other | .sender => sender
+  let sk : Role → kem.PrivateKey := fun | .relay => relayKey | .back => otherKey | .sender => senderKey
+  let answer : RSOR.Msg geom ← randomVector _
+  let msg : RSOR.Msg geom ← randomVector _
+  let receiver : RSOR.Name ← randomVector 32
+  if h : 2 ≤ geom.nrHops ∧ ([first, relay].map Hop.name).Nodup ∧
+      ([other, sender].map Hop.name).Nodup ∧ ([first, other].map Hop.name).Nodup ∧
+      ([relay, sender].map Hop.name).Nodup then
+    let c : BackwardChallenge (S := sch kem geom hvalid h16) hon :=
+      if atExit then
+        { req := { msg, receiver, fwd := ⟨[first, relay], h.1, h.2.1⟩,
+                   back := ⟨[other, sender], h.1, h.2.2.1⟩, fwd_ne := by simp }
+          pos := ⟨0, Nat.zero_lt_two⟩, relay := rfl, sender := rfl }
+      else
+        { req := { msg, receiver, fwd := ⟨[first, other], h.1, h.2.2.2.1⟩,
+                   back := ⟨[relay, sender], h.1, h.2.2.2.2⟩, fwd_ne := by simp }
+          pos := ⟨1, Nat.one_lt_two⟩, relay := rfl, sender := rfl }
+    let exit := if atExit then relay else other
+    let home := if atExit then other else relay
+    bothWorlds s!"SLU← game ({if atExit then "exit relay" else "backward relay"})"
+      [s!"forward to {hex exit.name}", s!"deliver {hex msg} to {hex receiver}",
+        s!"reply to {hex home.name}", s!"forward to {hex sender.name}", "nothing"]
+      (fun b => OracleComp.runIO (Cryptlib.Protocols.RSOR.backwardUnlinkable.world c b))
+      fun w => do
+        let s1 := advProc (hvalid := hvalid) (h16 := h16) firstKey w.onion
+        let o1 := passedOn w.onion s1
+        if atExit then
+          let (s2, log) ← askProc hon sk w {} .relay o1
+          let (re, log) ← askReply hon sk w log .relay answer o1
+          let ob := (re.map (·.2)).getD o1
+          let s3 := advProc (hvalid := hvalid) (h16 := h16) otherKey ob
+          let (s4, _) ← askProc hon sk w log .sender (passedOn ob s3)
+          return [seen s1, seen s2, seenReply re, seen s3, seen s4]
+        else
+          let s2 := advProc (hvalid := hvalid) (h16 := h16) otherKey o1
+          let re : Option (RSOR.Name × RSOR.Onion geom) :=
+            (sch kem geom hvalid h16).reply otherKey (default : Vector UInt8 32) answer o1
+          let ob := (re.map (·.2)).getD o1
+          let (s3, log) ← askProc hon sk w {} .relay ob
+          let (s4, _) ← askProc hon sk w log .sender (passedOn ob s3)
+          return [seen s1, seen s2, seenReply re, seen s3, seen s4]
+  else
+    IO.eprintln "  runBackwardGame: the paths are not routes"
+    pure false
+
+/-- STI↔. The adversary is shown the layer that leaves the honest first relay, and the honest
+backward relay is the second of three. -/
+def runTailGame (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
+  let (relay, relayKey) ← newRelay kem
+  let (second, secondKey) ← newRelay kem
+  let (exit, exitKey) ← newRelay kem
+  let (b0, b0Key) ← newRelay kem
+  let (back, backKey) ← newRelay kem
+  let (b2, b2Key) ← newRelay kem
+  let hon : Honest (sch kem geom hvalid h16) := fun | .relay => relay | .back => back | .sender => b2
+  let sk : Role → kem.PrivateKey := fun | .relay => relayKey | .back => backKey | .sender => b2Key
+  let answer : RSOR.Msg geom ← randomVector _
+  let msg : RSOR.Msg geom ← randomVector _
+  let receiver : RSOR.Name ← randomVector 32
+  if h : 3 ≤ geom.nrHops ∧ ([relay, second, exit].map Hop.name).Nodup ∧
+      ([b0, back, b2].map Hop.name).Nodup then
+    let c : TailChallenge (S := sch kem geom hvalid h16) hon :=
+      { req := { msg, receiver, fwd := ⟨[relay, second, exit], h.1, h.2.1⟩,
+                 back := ⟨[b0, back, b2], h.1, h.2.2⟩, fwd_ne := by simp }
+        pos := ⟨1, by show 1 < 3; omega⟩, back := ⟨1, by show 1 < 3; omega⟩
+        relay := fun k hk => by
+          obtain rfl : k = 0 := by simpa using hk
+          exact Or.inl rfl
+        backRelay := rfl }
+    bothWorlds "STI↔ game"
+      [s!"forward to {hex exit.name}", s!"deliver {hex msg} to {hex receiver}",
+        s!"reply to {hex b0.name}", s!"forward to {hex back.name}", "nothing"]
+      (fun b => OracleComp.runIO (Cryptlib.Protocols.RSOR.tailIndistinguishable.world c b))
+      fun w => do
+        let s1 := advProc (hvalid := hvalid) (h16 := h16) secondKey w.onion
+        let o1 := passedOn w.onion s1
+        let s2 := advProc (hvalid := hvalid) (h16 := h16) exitKey o1
+        let re : Option (RSOR.Name × RSOR.Onion geom) :=
+          (sch kem geom hvalid h16).reply exitKey (default : Vector UInt8 32) answer o1
+        let ob := (re.map (·.2)).getD o1
+        let s3 := advProc (hvalid := hvalid) (h16 := h16) b0Key ob
+        let (s4, _) ← askProc hon sk w {} .back (passedOn ob s3)
+        return [seen s1, seen s2, seenReply re, seen s3, seen s4]
+  else
+    IO.eprintln "  runTailGame: the paths are not routes"
     pure false
 
 /-- Every round, against one KEM-Sphinx scheme. -/
@@ -627,6 +722,9 @@ def runSuite (schemeName : String) (kem : KEM) : IO Bool := do
 
   for (atExit, tag) in [(true, false), (false, false), (true, true), (false, true)] do
     ok := (← runForwardGame kem geom5surb hvalid5s h165s atExit tag) && ok
+  for atExit in [true, false] do
+    ok := (← runBackwardGame kem geom5surb hvalid5s h165s atExit) && ok
+  ok := (← runTailGame kem geom5surb hvalid5s h165s) && ok
 
   pure ok
 

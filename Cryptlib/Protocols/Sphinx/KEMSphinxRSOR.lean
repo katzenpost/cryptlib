@@ -48,20 +48,31 @@ abbrev Draw := Vector (Vector UInt8 32) geom.nrHops × Vector UInt8 geom.routing
 ID. -/
 abbrev Randomness := Draw geom × Draw geom × Vector UInt8 64 × Vector UInt8 16
 
-abbrev Request := Protocols.RSOR.Request geom.nrHops Name kem.PublicKey (Msg geom) Name
+/-- A relay's public key: one that some private key gives. The paper's challenger checks that
+the adversary's keys are valid; here a key that is not valid is not a `Key`. -/
+abbrev Key := {k : kem.PublicKey // ∃ sk, k = kem.derivePublicKey sk}
+
+abbrev Request := Protocols.RSOR.Request geom.nrHops Name (Key kem) (Msg geom) Name
 
 variable {geom} in
 /-- A route as `newKEMPacket` takes it. Only its last hop has commands. -/
-def path (R : Protocols.RSOR.Route geom.nrHops Name kem.PublicKey) (last : List RoutingCommand) :
+def path (R : Protocols.RSOR.Route geom.nrHops Name (Key kem)) (last : List RoutingCommand) :
     Array PathHop :=
   (R.hops.mapIdx fun i h =>
-    ⟨h.name, ofVector (kem.encodePublicKey h.key),
+    ⟨h.name, ofVector (kem.encodePublicKey h.key.1),
       if i + 1 = R.hops.length then last else []⟩).toArray
 
 /-- The key pair of a relay. The public key is the one derived from the private key. -/
-def keygen : ProbComp (kem.PublicKey × kem.PrivateKey) := do
+def keygen : ProbComp (Key kem × kem.PrivateKey) := do
   let s ← $ᵗ Vector UInt8 32
-  return (kem.derivePublicKey (keygenOf kem s).2, (keygenOf kem s).2)
+  return (⟨kem.derivePublicKey (keygenOf kem s).2, _, rfl⟩, (keygenOf kem s).2)
+
+theorem key_of_keygen (k : Key kem) (sk : kem.PrivateKey) (h : (k, sk) ∈ support (keygen kem)) :
+    k.1 = kem.derivePublicKey sk := by
+  simp only [keygen, support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff,
+    Prod.mk.injEq] at h
+  obtain ⟨s, -, h1, h2⟩ := h
+  rw [h1, h2]
 
 /-- The filler of the layer for position `i`. -/
 def fillerAt (hops : Array PathHop) (seeds : Array (Vector UInt8 32)) (filler : ByteArray) :
@@ -126,11 +137,13 @@ def proc (sk : kem.PrivateKey) (o : Onion geom) :
     | _ => none
   | _ => none
 
-/-- The draws from which every layer on a path can be built and no KEM round trip fails. -/
-def Builds (R : Protocols.RSOR.Route geom.nrHops Name kem.PublicKey) (last : List RoutingCommand)
+/-- The draws from which the first layer on a path can be built and no KEM round trip fails.
+Every later layer can then be built too (`Builds.layer`). -/
+def Builds (R : Protocols.RSOR.Route geom.nrHops Name (Key kem)) (last : List RoutingCommand)
     (d : Draw geom) (payload : ByteArray) : Prop :=
-  ∀ i < R.hops.length, kem.Reliable (kem.stateFromSeed d.1.toArray[i]!) ∧
-    ∃ pkt, layer kem cipher macS kdfS streamS geom (path kem R last) d payload i = .ok pkt
+  (∀ i < R.hops.length, kem.Reliable (kem.stateFromSeed d.1.toArray[i]!)) ∧
+    (0 < R.hops.length →
+      ∃ pkt, layer kem cipher macS kdfS streamS geom (path kem R last) d payload 0 = .ok pkt)
 
 /-- A reply's plaintext: the message, then zeros up to the forward payload length. -/
 def pad (m : Msg geom) : ByteArray :=
@@ -190,14 +203,14 @@ def Reliable (q : Request kem geom) (r : Randomness geom) : Prop :=
     ⟨Array.replicate geom.forwardPayloadLength 0⟩
 
 variable {geom} in
-theorem path_size (R : Protocols.RSOR.Route geom.nrHops Name kem.PublicKey)
+theorem path_size (R : Protocols.RSOR.Route geom.nrHops Name (Key kem))
     (last : List RoutingCommand) : (path kem R last).size = R.hops.length := by
   simp [path]
 
 variable {geom} in
-theorem path_getElem! (R : Protocols.RSOR.Route geom.nrHops Name kem.PublicKey)
+theorem path_getElem! (R : Protocols.RSOR.Route geom.nrHops Name (Key kem))
     (last : List RoutingCommand) (j : ℕ) (h : j < R.hops.length) :
-    (path kem R last)[j]! = ⟨R.hops[j].name, ofVector (kem.encodePublicKey R.hops[j].key),
+    (path kem R last)[j]! = ⟨R.hops[j].name, ofVector (kem.encodePublicKey R.hops[j].key.1),
       if j + 1 = R.hops.length then last else []⟩ := by
   simp [path, h]
 
@@ -235,10 +248,10 @@ the end it gets the last hop's commands and the payload, with its tag still in f
 commands carry a SURB reply. -/
 theorem procWith_layer (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
-    (R : Protocols.RSOR.Route geom.nrHops Name kem.PublicKey) (last : List RoutingCommand)
+    (R : Protocols.RSOR.Route geom.nrHops Name (Key kem)) (last : List RoutingCommand)
     (hnn : ∀ c ∈ last, c ≠ .null) (hnh : ∀ c ∈ last, ∀ id m, c ≠ .nextNodeHop id m)
     (d : Draw geom) (payload : ByteArray) (i : ℕ) (hi : i < R.hops.length) (sk : kem.PrivateKey)
-    (hk : (R.hops[i].key, sk) ∈ support (keygen kem))
+    (hkey : R.hops[i].key.1 = kem.derivePublicKey sk)
     (hrel : ∀ j < R.hops.length, kem.Reliable (kem.stateFromSeed d.1.toArray[j]!))
     (pkt : ByteArray)
     (hpkt : layer kem cipher macS kdfS streamS geom (path kem R last) d payload i = .ok pkt) :
@@ -255,17 +268,12 @@ theorem procWith_layer (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize =
           then (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload else payload),
         tag, last, none)) := by
   intro dec
-  have hkey : R.hops[i].key = kem.derivePublicKey sk := by
-    simp only [keygen, support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff,
-      Prod.mk.injEq] at hk
-    obtain ⟨s, -, h1, h2⟩ := hk
-    rw [h1, h2]
   have hn := path_size kem R last
   have hle := R.length_le
   unfold layer at hpkt
   dsimp only at hpkt
   have h0 : ((path kem R last).extract i (path kem R last).size)[0]!
-      = ⟨R.hops[i].name, ofVector (kem.encodePublicKey R.hops[i].key),
+      = ⟨R.hops[i].name, ofVector (kem.encodePublicKey R.hops[i].key.1),
         if i + 1 = R.hops.length then last else []⟩ := by
     rw [getElem!_extract_from _ _ _ (by omega), Nat.add_zero, path_getElem! kem _ _ _ hi]
   have hself : kemSelfPublicKeyBytes kem (ofVector (kem.encodePrivateKey sk))
@@ -338,6 +346,26 @@ theorem procWith_layer (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize =
       rw [show unwrapKEMWith kem cipher macS kdfS streamS geom _ pkt = _ from hun]
       rfl⟩
 
+/-- Every layer on a path can be built when the first can: each relay's key has a private key,
+and what that relay would forward is the next layer. -/
+theorem Builds.layer (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (R : Protocols.RSOR.Route geom.nrHops Name (Key kem)) (last : List RoutingCommand)
+    (hnn : ∀ c ∈ last, c ≠ .null) (hnh : ∀ c ∈ last, ∀ id m, c ≠ .nextNodeHop id m)
+    (d : Draw geom) (payload : ByteArray)
+    (hb : Builds kem cipher macS kdfS streamS geom R last d payload) (i : ℕ)
+    (hi : i < R.hops.length) :
+    ∃ pkt, layer kem cipher macS kdfS streamS geom (path kem R last) d payload i = .ok pkt := by
+  induction i with
+  | zero => exact hb.2 hi
+  | succ i ih =>
+    obtain ⟨pkt, hpkt⟩ := ih (by omega)
+    obtain ⟨sk, hsk⟩ := (R.hops[i]'(by omega)).key.2
+    obtain ⟨-, hmid, -⟩ := procWith_layer kem cipher macS kdfS streamS geom hvalid hmactag h16
+      R last hnn hnh d payload i (by omega) sk hsk hb.1 pkt hpkt
+    obtain ⟨-, -, fwd, -, h⟩ := hmid hi
+    exact ⟨fwd, h⟩
+
 /-- A relay on the forward path gets the next layer, and the exit relay the message. -/
 theorem proc_form (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
@@ -351,10 +379,11 @@ theorem proc_form (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macL
         then .forward q.fwd.hops[i.val + 1].name
           (form kem cipher macS kdfS streamS geom q r ⟨i + 1, h⟩)
         else .deliver q.msg q.receiver) := by
-  obtain ⟨-, pkt, hpkt⟩ := hr i i.isLt
+  obtain ⟨pkt, hpkt⟩ := Builds.layer kem cipher macS kdfS streamS geom hvalid hmactag h16 _ _
+    (by simp) (by simp) _ _ hr i i.isLt
   obtain ⟨-, hmid, hlast⟩ := procWith_layer kem cipher macS kdfS streamS geom hvalid hmactag h16
-    q.fwd [.recipient q.receiver] (by simp) (by simp) r.1 _ i i.isLt sk hk
-    (fun j hj => (hr j hj).1) pkt hpkt
+    q.fwd [.recipient q.receiver] (by simp) (by simp) r.1 _ i i.isLt sk
+    (key_of_keygen kem _ _ hk) hr.1 pkt hpkt
   unfold proc form
   rw [hpkt]
   dsimp only
@@ -581,10 +610,10 @@ set_option maxHeartbeats 1000000 in
 except that the payload it passes on is the new one, decrypted under its hop key. -/
 theorem procWith_layer_payload (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
-    (R : Protocols.RSOR.Route geom.nrHops Name kem.PublicKey) (last : List RoutingCommand)
+    (R : Protocols.RSOR.Route geom.nrHops Name (Key kem)) (last : List RoutingCommand)
     (hnn : ∀ c ∈ last, c ≠ .null) (hnh : ∀ c ∈ last, ∀ id m, c ≠ .nextNodeHop id m)
     (d : Draw geom) (payload : ByteArray) (i : ℕ) (hi : i < R.hops.length) (sk : kem.PrivateKey)
-    (hk : (R.hops[i].key, sk) ∈ support (keygen kem))
+    (hkey : R.hops[i].key.1 = kem.derivePublicKey sk)
     (hrel : ∀ j < R.hops.length, kem.Reliable (kem.stateFromSeed d.1.toArray[j]!))
     (pkt : ByteArray)
     (hpkt : layer kem cipher macS kdfS streamS geom (path kem R last) d payload i = .ok pkt)
@@ -603,7 +632,7 @@ theorem procWith_layer_payload (hvalid : geom.ValidForKEM kem) (hmactag : macS.t
         = some (some D, tag, last, none)) := by
   intro dec k D
   obtain ⟨⟨ss, hd, hkeys⟩, hmid, hlast⟩ := procWith_layer kem cipher macS kdfS streamS geom hvalid
-    hmactag h16 R last hnn hnh d payload i hi sk hk hrel pkt hpkt
+    hmactag h16 R last hnn hnh d payload i hi sk hkey hrel pkt hpkt
   obtain ⟨hsz, -⟩ :=
     join_split_layer kem cipher macS kdfS streamS geom hvalid hmactag _ _ _ _ _ hpkt
   obtain ⟨-, -, -, hheader, -, -⟩ := id hvalid
@@ -708,14 +737,14 @@ theorem replyPacket_eq (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize =
         = cipher.encrypt ((ofVector r.2.2.1).extract 0 48).data ((ofVector r.2.2.1).extract 48 64)
             ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ pad geom m) := by
   have hpad : (pad geom m).size = geom.forwardPayloadLength := by
-    obtain ⟨-, pk, hpk⟩ := hr.1 0 (List.length_pos_iff.2 q.fwd_ne)
+    obtain ⟨pk, hpk⟩ := hr.1.2 (List.length_pos_iff.2 q.fwd_ne)
     have h := (newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ _ _ hpk).1
     rw [body, ByteArray.size_append, Cryptlib.Util.Bytes.size_ofVector] at h
     rw [pad, ByteArray.size_append, Cryptlib.Util.Bytes.size_ofVector]
     show _ + (Array.replicate _ (0 : UInt8)).size = _
     rw [Array.size_replicate]
     omega
-  obtain ⟨-, x0, hx0⟩ := hr.2 0 hb
+  obtain ⟨x0, hx0⟩ := hr.2.2 hb
   obtain ⟨keys, hks, hkk, hsk, hnp⟩ :=
     surb_spec kem cipher macS kdfS streamS geom hvalid hmactag q r _ x0 hb hx0
   obtain ⟨hsz, -⟩ :=
@@ -738,10 +767,11 @@ theorem reply_form (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = mac
       = some (q.back.hops[j].name, formBack kem cipher macS kdfS streamS geom q r m j) := by
   have hjlt : 0 < q.back.hops.length := j.pos
   obtain rfl : j = ⟨0, hjlt⟩ := Fin.ext hj
-  obtain ⟨-, pkt, hpkt⟩ := hr.1 i i.isLt
+  obtain ⟨pkt, hpkt⟩ := Builds.layer kem cipher macS kdfS streamS geom hvalid hmactag h16 _ _
+    (by simp) (by simp) _ _ hr.1 i i.isLt
   obtain ⟨-, -, hlast⟩ := procWith_layer kem cipher macS kdfS streamS geom hvalid hmactag h16
-    q.fwd [.recipient q.receiver] (by simp) (by simp) r.1 _ i i.isLt sk hk
-    (fun j hj => (hr.1 j hj).1) pkt hpkt
+    q.fwd [.recipient q.receiver] (by simp) (by simp) r.1 _ i i.isLt sk
+    (key_of_keygen kem _ _ hk) hr.1.1 pkt hpkt
   obtain ⟨tag, hp⟩ := hlast hi
   rw [hasSurbReply_eq_false (by simp), if_neg Bool.false_ne_true] at hp
   obtain ⟨-, x0, keys, hx0, -, -, -, hnp, hP0⟩ :=
@@ -789,7 +819,8 @@ theorem proc_formBack (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = 
     proc kem cipher macS kdfS streamS geom sk (formBack kem cipher macS kdfS streamS geom q r m i)
       = some (.forward q.back.hops[i.val + 1].name
           (formBack kem cipher macS kdfS streamS geom q r m ⟨i.val + 1, h⟩)) := by
-  obtain ⟨-, pkt, hpkt⟩ := hr.2 i i.isLt
+  obtain ⟨pkt, hpkt⟩ := Builds.layer kem cipher macS kdfS streamS geom hvalid hmactag h16 _ _
+    (by simp) (by simp) _ _ hr.2 i i.isLt
   obtain ⟨hpad, x0, keys, hx0, -, -, -, -, hP0⟩ :=
     replyPacket_eq kem cipher macS kdfS streamS geom hvalid hmactag q r m hr (by omega)
   have hE : (cipher.encrypt ((ofVector r.2.2.1).extract 0 48).data
@@ -800,8 +831,8 @@ theorem proc_formBack (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = 
   obtain ⟨hsz, -⟩ :=
     join_split_layer kem cipher macS kdfS streamS geom hvalid hmactag _ _ _ _ _ hpkt
   obtain ⟨hmid, -⟩ := procWith_layer_payload kem cipher macS kdfS streamS geom hvalid hmactag h16
-    q.back [.surbReply r.2.2.2] (by simp) (by simp) r.2.1 _ i i.isLt sk hk
-    (fun j hj => (hr.2 j hj).1) pkt hpkt
+    q.back [.surbReply r.2.2.2] (by simp) (by simp) r.2.1 _ i i.isLt sk
+    (key_of_keygen kem _ _ hk) hr.2.1 pkt hpkt
     (peeled kem cipher kdfS (path kem q.back [.surbReply r.2.2.2])
       (r.2.1.1.toArray.extract 0 (path kem q.back [.surbReply r.2.2.2]).size) _ i)
     (by rw [peeled_size, hE])
@@ -824,7 +855,8 @@ theorem recover_formBack (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize
     ∃ p, proc kem cipher macS kdfS streamS geom sk
         (formBack kem cipher macS kdfS streamS geom q r m i) = some (.reply p) ∧
       recover kem cipher macS kdfS streamS geom q r p = some m := by
-  obtain ⟨-, pkt, hpkt⟩ := hr.2 i i.isLt
+  obtain ⟨pkt, hpkt⟩ := Builds.layer kem cipher macS kdfS streamS geom hvalid hmactag h16 _ _
+    (by simp) (by simp) _ _ hr.2 i i.isLt
   obtain ⟨hpad, x0, keys, hx0, hks, hkk, hsk, -, hP0⟩ :=
     replyPacket_eq kem cipher macS kdfS streamS geom hvalid hmactag q r m hr (by omega)
   have hE : (cipher.encrypt ((ofVector r.2.2.1).extract 0 48).data
@@ -835,8 +867,8 @@ theorem recover_formBack (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize
   obtain ⟨hsz, -⟩ :=
     join_split_layer kem cipher macS kdfS streamS geom hvalid hmactag _ _ _ _ _ hpkt
   obtain ⟨-, hlast⟩ := procWith_layer_payload kem cipher macS kdfS streamS geom hvalid hmactag h16
-    q.back [.surbReply r.2.2.2] (by simp) (by simp) r.2.1 _ i i.isLt sk hk
-    (fun j hj => (hr.2 j hj).1) pkt hpkt
+    q.back [.surbReply r.2.2.2] (by simp) (by simp) r.2.1 _ i i.isLt sk
+    (key_of_keygen kem _ _ hk) hr.2.1 pkt hpkt
     (peeled kem cipher kdfS (path kem q.back [.surbReply r.2.2.2])
       (r.2.1.1.toArray.extract 0 (path kem q.back [.surbReply r.2.2.2]).size) _ i)
     (by rw [peeled_size, hE])
@@ -872,7 +904,7 @@ theorem recover_formBack (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize
 def scheme (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : Protocols.RSOR.Scheme where
   Name := Name
-  Key := kem.PublicKey
+  Key := Key kem
   Secret := kem.PrivateKey
   Randomness := Randomness geom
   Msg := Msg geom
