@@ -222,33 +222,6 @@ The filler of the layer for a position past the first is the sender's filler fol
 of every remaining hop's header keystream (`tailFiller`). So the layer with one hop's keystream
 given needs its filler computed from that keystream. -/
 
-/-- `tailPad`, from each hop's header keystream. -/
-def tailPadOf (ks : ℕ → ByteArray) : ℕ → ByteArray
-  | 0 => (ks 0).extract
-      (geom.routingInfoLength + geom.perHopRoutingInfoLength
-        - (0 + 1) * geom.perHopRoutingInfoLength)
-      (geom.routingInfoLength + geom.perHopRoutingInfoLength - 0 * geom.perHopRoutingInfoLength)
-  | i + 1 => xorBytes ((ks (i + 1)).extract
-      (geom.routingInfoLength + geom.perHopRoutingInfoLength
-        - (i + 1 + 1) * geom.perHopRoutingInfoLength)
-      (geom.routingInfoLength + geom.perHopRoutingInfoLength
-        - (i + 1) * geom.perHopRoutingInfoLength)) (tailPadOf ks i)
-
-theorem tailPadOf_kemHopKeys (path : Array PathHop) (seeds : Array (Vector UInt8 32)) (i : ℕ) :
-    tailPadOf geom (fun m => headerKeystream streamS geom (kemHopKeys kem kdfS path seeds m)) i
-      = tailPad kem kdfS streamS geom path seeds i := by
-  induction i with
-  | zero => rfl
-  | succ i ih => simp only [tailPadOf, tailPad, ih, tailPadBlock]
-
-/-- `tailPadOf` reads the keystreams of the hops up to `i` only. -/
-theorem tailPadOf_congr (ks ks' : ℕ → ByteArray) (i : ℕ) (h : ∀ m ≤ i, ks m = ks' m) :
-    tailPadOf geom ks i = tailPadOf geom ks' i := by
-  induction i with
-  | zero => simp only [tailPadOf, h 0 le_rfl]
-  | succ i ih =>
-    simp only [tailPadOf, h (i + 1) le_rfl, ih fun m hm => h m (Nat.le_succ_of_le hm)]
-
 /-- `tailFiller` for a path of `size` hops, from each hop's header keystream. -/
 def tailFillerOf (ks : ℕ → ByteArray) (size : ℕ) (filler : ByteArray) : ByteArray :=
   (if geom.nrHops > size then filler else ByteArray.empty) ++ tailPadOf geom ks (size - 1)
@@ -281,7 +254,7 @@ theorem fillerAtF_real (hops : Array PathHop) (seeds seeds' : Array (Vector UInt
     unfold tailFillerOf tailFiller
     rw [show (hops.extract i hops.size).size = hops.size - i by simp]
     congr 1
-    rw [← tailPadOf_kemHopKeys]
+    rw [← tailPadOf_kemHopKeys kem kdfS streamS geom]
     apply tailPadOf_congr
     intro m hm
     have hlt : i + m < hops.size := by omega

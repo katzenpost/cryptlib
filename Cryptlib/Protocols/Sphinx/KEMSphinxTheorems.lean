@@ -1215,6 +1215,41 @@ theorem newKEMPacket_unfold (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) 
     rw [hfeq] at hfx
     rw [← hfx, htl]
 
+/-- What `newKEMPacketFrom` computes, for any ciphertexts and keys. -/
+theorem newKEMPacketFrom_unfold (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
+    (streamS : StreamCipher) (geom : Geometry) (kemElements : Array ByteArray)
+    (keys : Array HopKeys) (filler : ByteArray) (path : Array PathHop) (payload pkt : ByteArray)
+    (h : newKEMPacketFrom kem cipher macS streamS geom kemElements keys filler path payload
+      = Except.ok pkt) :
+    payload.size = geom.forwardPayloadLength ∧
+    ∃ (hdr : ByteArray) (sprpKeys : Array SPRPKey) (t : Nat → ByteArray),
+      createKEMHeaderFrom kem macS streamS geom kemElements keys filler path
+        = Except.ok (hdr, sprpKeys) ∧
+      t 0 = (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload ∧
+      (∀ j (_hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j) ∧
+      pkt = hdr ++ t sprpKeys.size := by
+  unfold newKEMPacketFrom at h
+  dsimp only at h
+  split at h
+  case isTrue =>
+    have h' : (Except.error
+        s!"sphinx: invalid payload length: {payload.size}, expected {geom.forwardPayloadLength}" :
+        Except String ByteArray) = Except.ok pkt := h
+    injection h'
+  case isFalse =>
+    rename_i hpay
+    simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+      Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind] at h
+    obtain ⟨x, hx, hfx⟩ := Cryptlib.Protocols.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+    obtain ⟨t, ht0, htl, hstep⟩ := newKEMPacket_payload_trace cipher x.2
+      ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)
+    refine ⟨by omega, x.1, x.2, t, hx, ht0, hstep, ?_⟩
+    injection hfx with hfx
+    have hfeq : (fun b a => cipher.encrypt x.2[x.2.size - 1 - a]!.key.toArray
+        (ofVector x.2[x.2.size - 1 - a]!.iv) b) = payloadEncryptStep cipher x.2 := rfl
+    rw [hfeq] at hfx
+    rw [← hfx, htl]
+
 /-- `newKEMPacket`'s packet is `geom.packetLength` bytes. -/
 theorem newKEMPacket_size (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
