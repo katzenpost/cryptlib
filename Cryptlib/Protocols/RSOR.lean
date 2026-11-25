@@ -260,17 +260,26 @@ structure Adversary where
 
 variable {P}
 
+/-- The adversary's guess when it is shown world `b`, for given honest relays and their secret
+keys. -/
+def playFrom (hon : Honest S) (sk : Role → S.Secret) (A : P.Adversary) (b : Bool) :
+    ProbComp Bool := do
+  let ((c, st), log) ← (simulateQ (honest hon sk {}) (A.choose hon)).run {}
+  let w ← P.world c b
+  (simulateQ (honest hon sk w.patch) (A.guess st w.onion)).run' log
+
+/-- The honest relays of a game, from their names and key pairs. -/
+def honestOf (names : Role → S.Name) (kr kb ks : S.Key × S.Secret) : Honest S := fun
+  | .relay => ⟨names .relay, kr.1⟩
+  | .back => ⟨names .back, kb.1⟩
+  | .sender => ⟨names .sender, ks.1⟩
+
 /-- The adversary's guess when it is shown world `b`. -/
 def play (names : Role → S.Name) (A : P.Adversary) (b : Bool) : ProbComp Bool := do
   let kr ← S.keygen (names .relay)
   let kb ← S.keygen (names .back)
   let ks ← S.keygen (names .sender)
-  let key : Role → S.Key × S.Secret := fun | .relay => kr | .back => kb | .sender => ks
-  let hon : Honest S := fun h => ⟨names h, (key h).1⟩
-  let sk := fun h => (key h).2
-  let ((c, st), log) ← (simulateQ (honest hon sk {}) (A.choose hon)).run {}
-  let w ← P.world c b
-  (simulateQ (honest hon sk w.patch) (A.guess st w.onion)).run' log
+  playFrom (honestOf names kr kb ks) (fun | .relay => kr.2 | .back => kb.2 | .sender => ks.2) A b
 
 /-- The game: the challenger picks a world, and the adversary wins if it says which. -/
 def game (names : Role → S.Name) (A : P.Adversary) : ProbComp Bool := do

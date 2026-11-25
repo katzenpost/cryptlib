@@ -139,10 +139,9 @@ variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (strea
 local notation "𝒮" => sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16
 
 /-- The honest relays of a game, from their names and keys. -/
-def honOf (names : Role → RSOR.Name) (pk kb ks : Key kem) : Protocols.RSOR.Honest 𝒮 := fun
-  | .relay => ⟨names .relay, pk⟩
-  | .back => ⟨names .back, kb⟩
-  | .sender => ⟨names .sender, ks⟩
+def honOf (names : Role → RSOR.Name) (pk kb ks : Key kem) : Protocols.RSOR.Honest 𝒮 :=
+  Protocols.RSOR.Property.honestOf (S := 𝒮) names (pk, kem.privI.default)
+    (kb, kem.privI.default) (ks, kem.privI.default)
 
 /-- What the adversary's first phase leaves the challenger: the key pairs of the two honest
 relays that are not behind the oracle, and the challenge. -/
@@ -246,6 +245,35 @@ theorem forwardOnionK_real (names : Role → RSOR.Name) {pk : Key kem}
       (RSOR.body kem macS kdfS streamS geom ch.c.req r) ch.c.pos
       (ofVector (kem.encodeCiphertext c)) (keyTuple (deriveHopKeys kdfS ss)) = .ok pkt := h1
   rw [h1']
+
+/-- World 0 of TLU→ around the honest relay's ciphertext and keys: the challenger draws its
+randomness and shows the first layer of the adversary's own onion. -/
+def forwardSetup (names : Role → RSOR.Name) :
+    KeyedSetup kem (Protocols.RSOR.World 𝒮) Bool where
+  Ch := ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+  Oth := RSOR.Randomness geom
+  drawOth _ := $ᵗ RSOR.Randomness geom
+  view ch r c t :=
+    { onion := forwardOnionK kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch r c t }
+  final _ _ _ _ out := out
+
+/-- The adversary of the keyed game that an adversary of TLU→ gives. It draws the keys of the
+two honest relays that are not behind the oracle, and answers for all three. -/
+def forwardAdv (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    KeyedAdversary (forwardSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names) where
+  St := A.State × Protocols.RSOR.Log 𝒮 × (Role → kem.PrivateKey)
+  pre pk := do
+    let kb ← (liftM (keygen kem) : OracleComp procSpec _)
+    let ks ← (liftM (keygen kem) : OracleComp procSpec _)
+    let sk : Role → kem.PrivateKey := fun | .relay => kb.2 | .back => kb.2 | .sender => ks.2
+    let out ← (simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 sk {})
+      (A.choose (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk kb.1
+        ks.1))).run {}
+    return (⟨kb, ks, out.1.1⟩, (out.1.2, out.2, sk))
+  post st w :=
+    (simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 st.2.2 w.patch)
+      (A.guess st.1 w.onion)).run' st.2.1
 
 end Forward
 
