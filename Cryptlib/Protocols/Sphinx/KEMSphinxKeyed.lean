@@ -94,11 +94,11 @@ theorem procImplK_real (sk : kem.PrivateKey) (c : kem.Ciphertext) (K : kem.Plain
           have := congrArg kem.decodeCiphertext he
           rwa [kem.decode_encode_ct, kem.decode_encode_ct, Option.some.injEq] at this
         rw [h] at hk
-        rw [if_pos he, simulateQ_pure]
+        rw [ite_cond_eq_true _ _ (eq_true he), simulateQ_pure]
         rw [procWith_eq_procKeys kem cipher macS kdfS streamS geom _ pkt
           (ofVector (kem.encodePlaintext K)) (hk.trans rfl)]
         rfl
-      · simp only [if_neg he, simulateQ_bind, simulateQ_pure]
+      · simp only [ite_cond_eq_false _ _ (eq_false he), simulateQ_bind, simulateQ_pure]
         rw [QueryImpl.simulateQ_add_liftM_query_right]
         unfold procWith
         rw [unwrapKEMWith_const kem cipher macS kdfS streamS geom (kemDecap kem _), hk]
@@ -222,14 +222,14 @@ theorem keyedKS_true_evalDistEq :
     keyedKS cipher macS kdfS streamS geom A true
       =ᵈ keyedReal cipher macS kdfS streamS geom A := by
   unfold keyedKS keyedReal keyedGame
-  simp only [if_true]
+  simp only [ite_true]
   exact EvalDistEq.bind_right _ fun kR => (OracleComp.EvalDistEq.bind_const _ _).symm
 
 theorem keyedKS_false_evalDistEq :
     keyedKS cipher macS kdfS streamS geom A false
       =ᵈ prgRealExperiment (hopKeysPRG kem kdfS) (keyedKeyAdv cipher macS kdfS streamS geom A) := by
   unfold keyedKS prgRealExperiment keyedKeyAdv
-  simp only [Bool.false_eq_true, if_false]
+  simp only [Bool.false_eq_true, ite_false]
   exact EvalDistEq.rfl
 
 theorem prgIdeal_keyedKeyAdv_evalDistEq :
