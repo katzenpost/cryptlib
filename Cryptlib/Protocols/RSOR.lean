@@ -199,29 +199,44 @@ structure Patch where
 
 variable {S}
 
-/-- An honest relay processes a header once (Assumption 3). -/
-def process (hon : Honest S) (sk : Role → S.Secret) (patch : Patch S) :
-    QueryImpl (Role × S.Onion →ₒ Option S.Step) (StateT (Log S) ProbComp) := fun (h, o) => do
+section Oracle
+
+variable {m : Type → Type} [Monad m] [MonadLiftT ProbComp m]
+
+/-- An honest relay processes a header once (Assumption 3). `proc` is how a relay's own answer
+is had: from its secret key in the games, from an oracle in a reduction. -/
+def process (proc : Role → S.Onion → m (Option S.Step)) (patch : Patch S) :
+    QueryImpl (Role × S.Onion →ₒ Option S.Step) (StateT (Log S) m) := fun (h, o) => do
   let log ← get
   if (h, o.1) ∈ log.seen then return none
   set ({ seen := (h, o.1) :: log.seen, held := (h, o) :: log.held } : Log S)
-  patch.proc h o (S.proc (sk h) (hon h).name o)
+  let out ← proc h o
+  (patch.proc h o out : ProbComp _)
 
 /-- An honest relay replies once to an onion it has processed. -/
-def answer (hon : Honest S) (sk : Role → S.Secret) (patch : Patch S) :
-    QueryImpl (Role × S.Msg × S.Onion →ₒ Option (S.Name × S.Onion)) (StateT (Log S) ProbComp) :=
-  fun (h, m, o) => do
+def answer (reply : Role → S.Msg → S.Onion → m (Option (S.Name × S.Onion))) (patch : Patch S) :
+    QueryImpl (Role × S.Msg × S.Onion →ₒ Option (S.Name × S.Onion)) (StateT (Log S) m) :=
+  fun (h, msg, o) => do
     let log ← get
     if (h, o) ∈ log.held then
       set { log with held := log.held.erase (h, o) }
-      return patch.reply h m o (S.reply (sk h) (hon h).name m o)
+      return patch.reply h msg o (← reply h msg o)
     else return none
 
-/-- The honest relays, running the scheme except where `patch` says otherwise. -/
-def oracle (hon : Honest S) (sk : Role → S.Secret) (patch : Patch S) :
+/-- The honest relays, answering as `proc` and `reply` do except where `patch` says otherwise. -/
+def oracle (proc : Role → S.Onion → m (Option S.Step))
+    (reply : Role → S.Msg → S.Onion → m (Option (S.Name × S.Onion))) (patch : Patch S) :
+    QueryImpl (oracleSpec S) (StateT (Log S) m) :=
+  (QueryImpl.ofLift unifSpec ProbComp).liftTarget (StateT (Log S) m)
+    + process proc patch + answer reply patch
+
+end Oracle
+
+/-- The honest relays running the scheme with their secret keys. -/
+def honest (hon : Honest S) (sk : Role → S.Secret) (patch : Patch S) :
     QueryImpl (oracleSpec S) (StateT (Log S) ProbComp) :=
-  (QueryImpl.ofLift unifSpec ProbComp).liftTarget (StateT (Log S) ProbComp)
-    + process hon sk patch + answer hon sk patch
+  oracle (fun h o => pure (S.proc (sk h) (hon h).name o))
+    (fun h msg o => pure (S.reply (sk h) (hon h).name msg o)) patch
 
 /-- What the challenger shows the adversary in one of its two worlds. -/
 structure World (S : Scheme) where
@@ -253,10 +268,10 @@ def game (names : Role → S.Name) (A : P.Adversary) : ProbComp Bool := do
   let key : Role → S.Key × S.Secret := fun | .relay => kr | .back => kb | .sender => ks
   let hon : Honest S := fun h => ⟨names h, (key h).1⟩
   let sk := fun h => (key h).2
-  let ((c, st), log) ← (simulateQ (oracle hon sk {}) (A.choose hon)).run {}
+  let ((c, st), log) ← (simulateQ (honest hon sk {}) (A.choose hon)).run {}
   let b ← $ᵗ Bool
   let w ← P.world c b
-  let b' ← (simulateQ (oracle hon sk w.patch) (A.guess st w.onion)).run' log
+  let b' ← (simulateQ (honest hon sk w.patch) (A.guess st w.onion)).run' log
   return b == b'
 
 noncomputable def advantage (names : Role → S.Name) (A : P.Adversary) : ℝ≥0∞ :=

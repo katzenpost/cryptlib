@@ -477,14 +477,18 @@ private def advProc (key : kem.PrivateKey) (o : RSOR.Onion geom) : Option (Step 
 private def askProc (hon : Honest (sch kem geom hvalid h16)) (sk : Role → kem.PrivateKey)
     (w : World (sch kem geom hvalid h16)) (log : Log (sch kem geom hvalid h16)) (role : Role)
     (o : RSOR.Onion geom) : IO (Option (Step geom) × Log (sch kem geom hvalid h16)) :=
-  OracleComp.runIO ((Cryptlib.Protocols.RSOR.process hon sk w.patch (role, o)).run log)
+  OracleComp.runIO ((Cryptlib.Protocols.RSOR.process (m := ProbComp)
+    (fun h o => pure ((sch kem geom hvalid h16).proc (sk h) (hon h).name o)) w.patch
+    (role, o)).run log)
 
 /-- An honest relay's oracle replies to an onion. -/
 private def askReply (hon : Honest (sch kem geom hvalid h16)) (sk : Role → kem.PrivateKey)
     (w : World (sch kem geom hvalid h16)) (log : Log (sch kem geom hvalid h16)) (role : Role)
     (m : RSOR.Msg geom) (o : RSOR.Onion geom) :
     IO (Option (RSOR.Name × RSOR.Onion geom) × Log (sch kem geom hvalid h16)) :=
-  OracleComp.runIO ((Cryptlib.Protocols.RSOR.answer hon sk w.patch (role, m, o)).run log)
+  OracleComp.runIO ((Cryptlib.Protocols.RSOR.answer (m := ProbComp)
+    (fun h msg o => pure ((sch kem geom hvalid h16).reply (sk h) (hon h).name msg o)) w.patch
+    (role, m, o)).run log)
 
 /-- Play `play` in both worlds and compare what the adversary saw with `want`. -/
 private def bothWorlds (name : String) (want : List String)
