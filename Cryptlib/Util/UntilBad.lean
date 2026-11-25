@@ -39,19 +39,19 @@ theorem run'_flagged (impl : QueryImpl spec ProbComp) (isBad : spec.Domain → B
     simulateQ_liftTarget]
   simp
 
-/-- **Agreeing until a bad query.** -/
-theorem abs_sub_le_bad (impl₁ impl₂ : QueryImpl spec ProbComp) (isBad : spec.Domain → Bool)
-    (h : ∀ t, isBad t = false → impl₁ t = impl₂ t) (oa : OracleComp spec Bool) :
-    |(Pr{let x ← simulateQ impl₁ oa}[x = true]).toReal
-      - (Pr{let x ← simulateQ impl₂ oa}[x = true]).toReal|
-    ≤ (Pr{let z ← (simulateQ (logged impl₂) oa).run []}[z.2.any isBad = true]).toReal := by
+/-- **Agreeing until a bad query**, as a distance between the two runs. -/
+theorem measureETVDist_le_bad (impl₁ impl₂ : QueryImpl spec ProbComp)
+    (isBad : spec.Domain → Bool) (h : ∀ t, isBad t = false → impl₁ t = impl₂ t)
+    (oa : OracleComp spec Bool) :
+    measureETVDist (simulateQ impl₁ oa) (simulateQ impl₂ oa)
+      ≤ Pr{let z ← (simulateQ (logged impl₂) oa).run []}[z.2.any isBad = true] := by
   have hagree : ∀ t s, ¬ s = true → ∀ q : spec.Range t × Bool → Prop,
       Pr{let z ← (flagged impl₁ isBad t).run s}[q z ∧ ¬ z.2 = true]
         = Pr{let z ← (flagged impl₂ isBad t).run s}[q z ∧ ¬ z.2 = true] := by
     intro t s _ q
     cases hb : isBad t
     · rw [show flagged impl₁ isBad t = flagged impl₂ isBad t by simp only [flagged, h t hb]]
-    · simp [flagged, hb, prEvent_map]
+    · simp [flagged, hb]
   have hmono : ∀ impl : QueryImpl spec ProbComp, ∀ t s, s = true →
       ∀ z ∈ support ((flagged impl isBad t).run s), z.2 = true := by
     intro impl t s hs z hz
@@ -70,8 +70,31 @@ theorem abs_sub_le_bad (impl₁ impl₂ : QueryImpl spec ProbComp) (isBad : spec
     (OracleComp.map_run_simulateQ_eq_of_query_map_eq (logged impl₂) (flagged impl₂ isBad)
       (fun l => l.any isBad) (fun t s => by simp [logged, flagged]) oa []).symm
   rw [e, prEvent_map] at hd
+  exact hd
+
+/-- Agreeing until a bad query, for one event and one direction. The bad queries are counted on
+the second implementation either way. -/
+theorem prEvent_le_add_bad (impl₁ impl₂ : QueryImpl spec ProbComp) (isBad : spec.Domain → Bool)
+    (h : ∀ t, isBad t = false → impl₁ t = impl₂ t) (oa : OracleComp spec Bool)
+    (p : Bool → Prop) :
+    Pr{let x ← simulateQ impl₁ oa}[p x] ≤ Pr{let x ← simulateQ impl₂ oa}[p x]
+        + Pr{let z ← (simulateQ (logged impl₂) oa).run []}[z.2.any isBad = true] ∧
+    Pr{let x ← simulateQ impl₂ oa}[p x] ≤ Pr{let x ← simulateQ impl₁ oa}[p x]
+        + Pr{let z ← (simulateQ (logged impl₂) oa).run []}[z.2.any isBad = true] :=
+  ⟨(prEvent_le_prEvent_add_measureETVDist _ _ p Measurable.of_discrete).trans
+      (add_le_add le_rfl (measureETVDist_le_bad impl₁ impl₂ isBad h oa)),
+    (prEvent_le_prEvent_add_measureETVDist _ _ p Measurable.of_discrete).trans
+      (add_le_add le_rfl ((measureETVDist_comm _ _).trans_le
+        (measureETVDist_le_bad impl₁ impl₂ isBad h oa)))⟩
+
+/-- **Agreeing until a bad query.** -/
+theorem abs_sub_le_bad (impl₁ impl₂ : QueryImpl spec ProbComp) (isBad : spec.Domain → Bool)
+    (h : ∀ t, isBad t = false → impl₁ t = impl₂ t) (oa : OracleComp spec Bool) :
+    |(Pr{let x ← simulateQ impl₁ oa}[x = true]).toReal
+      - (Pr{let x ← simulateQ impl₂ oa}[x = true]).toReal|
+    ≤ (Pr{let z ← (simulateQ (logged impl₂) oa).run []}[z.2.any isBad = true]).toReal := by
   refine (abs_prEvent_toReal_sub_le_measureTVDist _ _ (· = true) Measurable.of_discrete).trans ?_
   rw [measureTVDist_eq_toReal_measureETVDist]
-  exact ENNReal.toReal_mono (prEvent_ne_top _) hd
+  exact ENNReal.toReal_mono (prEvent_ne_top _) (measureETVDist_le_bad impl₁ impl₂ isBad h oa)
 
 end Cryptlib.Util.UntilBad
