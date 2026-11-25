@@ -164,6 +164,88 @@ theorem decapOf_encapOf (sk : kem.PrivateKey) (s : Vector UInt8 32)
     rw [hE] at h
     cases h
 
+/-! ## The filler of a later layer, with one hop's keys given
+
+The filler of the layer for a position past the first is the sender's filler followed by blocks
+of every remaining hop's header keystream (`tailFiller`). So it depends on each hop's keys, and
+the layer with one hop's keys given needs its filler computed from those keys. -/
+
+/-- `tailPad`, with each hop's keys given by `keys`. -/
+def tailPadOf (keys : ℕ → HopKeys) : ℕ → ByteArray
+  | 0 => tailPadBlock streamS geom (keys 0) 0
+  | i + 1 => xorBytes (tailPadBlock streamS geom (keys (i + 1)) (i + 1)) (tailPadOf keys i)
+
+theorem tailPadOf_kemHopKeys (path : Array PathHop) (seeds : Array (Vector UInt8 32)) (i : ℕ) :
+    tailPadOf streamS geom (kemHopKeys kem kdfS path seeds) i
+      = tailPad kem kdfS streamS geom path seeds i := by
+  induction i with
+  | zero => rfl
+  | succ i ih => rw [tailPadOf, tailPad, ih]
+
+/-- `tailPadOf` uses a hop's keys only through its header encryption key and IV. -/
+theorem tailPadOf_congr (k₁ k₂ : ℕ → HopKeys) (i : ℕ)
+    (h : ∀ m ≤ i, (k₁ m).headerEncryption = (k₂ m).headerEncryption
+      ∧ (k₁ m).headerEncryptionIV = (k₂ m).headerEncryptionIV) :
+    tailPadOf streamS geom k₁ i = tailPadOf streamS geom k₂ i := by
+  induction i with
+  | zero =>
+    simp only [tailPadOf, tailPadBlock, headerKeystream, (h 0 le_rfl).1, (h 0 le_rfl).2]
+  | succ i ih =>
+    simp only [tailPadOf, tailPadBlock, headerKeystream, (h (i + 1) le_rfl).1,
+      (h (i + 1) le_rfl).2, ih fun m hm => h m (Nat.le_succ_of_le hm)]
+
+/-- `tailFiller` for a path of `size` hops, with each hop's keys given by `keys`. -/
+def tailFillerOf (keys : ℕ → HopKeys) (size : ℕ) (filler : ByteArray) : ByteArray :=
+  (if geom.nrHops > size then filler else ByteArray.empty)
+    ++ tailPadOf streamS geom keys (size - 1)
+
+/-- The filler of the layer for position `i`, with hop `j`'s keys `t` given. -/
+def fillerAtK (hops : Array PathHop) (seeds : Array (Vector UInt8 32)) (filler : ByteArray)
+    (j : ℕ) (t : KeyTuple) : ℕ → ByteArray
+  | 0 => filler
+  | i + 1 => tailFillerOf streamS geom
+      (fun k => if i + k = j then hopKeysOf t else kemHopKeys kem kdfS hops seeds (i + k))
+      (hops.size - i) (fillerAtK hops seeds filler j t i)
+
+/-- With the keys that hop `j`'s seed gives, `fillerAtK` is the filler built from the seeds, for
+a layer up to hop `j`'s. The seeds may differ at `j`, which `fillerAtK` does not read. -/
+theorem fillerAtK_real (hops : Array PathHop) (seeds seeds' : Array (Vector UInt8 32))
+    (filler : ByteArray) (j : ℕ) (c ss : ByteArray) (hj : j < hops.size)
+    (hsz : seeds'.size = hops.size)
+    (henc : kemEncap kem (hops[j]!).publicKey (seeds'[j]!) = .ok (c, ss))
+    (hagree : ∀ k, k ≠ j → seeds[k]! = seeds'[k]!) (i : ℕ) (hi : i ≤ j) :
+    fillerAtK kem kdfS streamS geom hops seeds filler j (keyTuple (deriveHopKeys kdfS ss)) i
+      = RSOR.fillerAt kem kdfS streamS geom hops seeds' filler i := by
+  induction i with
+  | zero => rfl
+  | succ i ih =>
+    simp only [fillerAtK, RSOR.fillerAt]
+    rw [ih (by omega)]
+    unfold tailFillerOf tailFiller
+    rw [show (hops.extract i hops.size).size = hops.size - i by simp]
+    congr 1
+    rw [← tailPadOf_kemHopKeys]
+    apply tailPadOf_congr
+    intro m hm
+    have hlt : i + m < hops.size := by omega
+    have hk : kemHopKeys kem kdfS (hops.extract i hops.size) (seeds'.extract i seeds'.size) m
+        = kemHopKeys kem kdfS hops seeds' (i + m) := by
+      unfold kemHopKeys
+      rw [getElem!_extract_from _ _ _ hlt, getElem!_extract_from _ _ _ (by omega)]
+    rw [hk]
+    split_ifs with hij
+    · have : kemHopKeys kem kdfS hops seeds' (i + m) = deriveHopKeys kdfS ss := by
+        rw [hij]
+        unfold kemHopKeys
+        rw [henc]
+      rw [this]
+      exact ⟨rfl, rfl⟩
+    · have : kemHopKeys kem kdfS hops seeds (i + m) = kemHopKeys kem kdfS hops seeds' (i + m) := by
+        unfold kemHopKeys
+        rw [hagree _ hij]
+      rw [this]
+      exact ⟨rfl, rfl⟩
+
 end PacketK
 
 /-! # Tagging-forward layer unlinkability: the worlds as keyed games -/
