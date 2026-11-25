@@ -873,6 +873,84 @@ theorem createKEMHeader_unfold (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : 
           simp only at hkeys
           rw [← hkeys]
 
+/-- What `createKEMHeaderFrom` computes, for any ciphertexts and keys: the keystream prefixes,
+the paddings, and the routing info and MAC after each hop from the last to the first. -/
+theorem createKEMHeaderFrom_unfold (kem : KEM) (macS : MAC) (streamS : StreamCipher)
+    (geom : Geometry) (kemElements : Array ByteArray) (keys : Array HopKeys) (filler : ByteArray)
+    (path : Array PathHop) (hdr : ByteArray) (sprpKeys : Array SPRPKey)
+    (h : createKEMHeaderFrom kem macS streamS geom kemElements keys filler path
+      = .ok (hdr, sprpKeys)) :
+    ∃ (riKeyStream riPadding : Array ByteArray) (s : Nat → ByteArray × ByteArray),
+      riKeyStream.size = path.size ∧ riPadding.size = path.size ∧
+      (∀ i (_hi : i < path.size),
+        riKeyStream[i]! = (streamS.keystream (ofVector (keys[i]!).headerEncryption)
+            (ofVector (keys[i]!).headerEncryptionIV)
+            (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract 0
+          ((geom.routingInfoLength + geom.perHopRoutingInfoLength)
+            - (i + 1) * geom.perHopRoutingInfoLength) ∧
+        riPadding[i]! =
+          (let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
+           let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
+             (ofVector (keys[i]!).headerEncryptionIV) totalRiLen
+           let ksLen := totalRiLen - (i + 1) * geom.perHopRoutingInfoLength
+           let thisPad0 := ks.extract ksLen totalRiLen
+           if i > 0 then
+             xorBytes (thisPad0.extract 0 riPadding[i - 1]!.size) riPadding[i - 1]!
+               ++ thisPad0.extract riPadding[i - 1]!.size thisPad0.size
+           else thisPad0)) ∧
+      s 0 = (if geom.nrHops > path.size then filler else ByteArray.empty, ByteArray.empty) ∧
+      (∀ j (_hj : j < path.size), ∃ riFragment,
+        kemRiFragment kem geom path kemElements (s j).2 path.size (path.size - 1 - j)
+            = Except.ok riFragment ∧
+        (s (j + 1)).1 = xorBytes (riFragment ++ (s j).1) (riKeyStream[path.size - 1 - j]!) ∧
+        (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[path.size - 1 - j]!).headerMAC)
+          (v0AD ++ kemElements[path.size - 1 - j]! ++ (s (j + 1)).1
+            ++ (if path.size - 1 - j > 0 then riPadding[path.size - 1 - j - 1]!
+              else ByteArray.empty)))) ∧
+      hdr = v0AD ++ kemElements[0]! ++ (s path.size).1 ++ (s path.size).2 ∧
+      sprpKeys = Array.ofFn (fun i : Fin path.size =>
+        { key := keys[i.val]!.payloadEncryption, iv := keys[i.val]!.headerEncryptionIV }) := by
+  unfold createKEMHeaderFrom at h
+  dsimp only at h
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one] at h
+  obtain ⟨loop2Final, hLoop2, h⟩ := Cryptlib.Protocols.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+  obtain ⟨loop3Final, hLoop3, h⟩ := Cryptlib.Protocols.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+  obtain ⟨s, hs0, hsl, hstep⟩ := createKEMHeader_loop3_trace kem macS geom path keys
+    kemElements loop2Final.1 loop2Final.2 path.size _ loop3Final hLoop3
+  refine ⟨loop2Final.1, loop2Final.2, s, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · have := Cryptlib.Protocols.Sphinx.Common.List.forIn_add_of_forall_mem (List.range' 0 path.size) _
+      (fun (a : Array ByteArray × Array ByteArray) => a.1.size) 1
+      (fun a a' i hi hgb => by
+        split at hgb <;>
+          · simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hgb
+            rw [← hgb]; simp)
+      (fun a a' i hi hgb => by
+        split at hgb <;> · simp_all [pure, Except.pure])
+      (#[], #[]) loop2Final hLoop2
+    simpa [List.length_range'] using this
+  · have := Cryptlib.Protocols.Sphinx.Common.List.forIn_add_of_forall_mem (List.range' 0 path.size) _
+      (fun (a : Array ByteArray × Array ByteArray) => a.2.size) 1
+      (fun a a' i hi hgb => by
+        split at hgb <;>
+          · simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hgb
+            rw [← hgb]; simp)
+      (fun a a' i hi hgb => by
+        split at hgb <;> · simp_all [pure, Except.pure])
+      (#[], #[]) loop2Final hLoop2
+    simpa [List.length_range'] using this
+  · exact createKEMHeader_loop2_content streamS geom keys path.size loop2Final hLoop2
+  · exact hs0
+  · exact hstep
+  · injection h with h
+    have hhdreq := congrArg Prod.fst h
+    simp only at hhdreq
+    rw [← hhdreq, hsl]
+  · injection h with h
+    have hkeys := congrArg Prod.snd h
+    simp only at hkeys
+    rw [← hkeys]
+
 /-- `createKEMHeader`'s header is `geom.headerLength` bytes. -/
 theorem createKEMHeader_hdr_size (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
     (geom : Geometry)
