@@ -124,6 +124,46 @@ theorem packetK_congr (seeds seeds' : Array (Vector UInt8 32)) (filler : ByteArr
       · rfl
       · simp only [kemHopCt, kemHopKeys, h i hi]
 
+/-- The bytes `kemEncap` returns for an encoded public key are the encodings of what `encapOf`
+returns. -/
+theorem kemEncap_encapOf (pk : kem.PublicKey) (s : Vector UInt8 32) (ct ss : ByteArray)
+    (h : kemEncap kem (ofVector (kem.encodePublicKey pk)) s = .ok (ct, ss)) :
+    ct = ofVector (kem.encodeCiphertext (encapOf kem pk s).1) ∧
+      ss = ofVector (kem.encodePlaintext (encapOf kem pk s).2) := by
+  unfold kemEncap at h
+  unfold encapOf
+  rw [Cryptlib.Protocols.Sphinx.Common.toVecN_ofVector, kem.decode_encode_pub] at h
+  dsimp only at h
+  cases hE : kem.encap pk (kem.stateFromSeed s) with
+  | ok r a =>
+    rw [hE] at h
+    simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+    exact ⟨h.1.symm, h.2.symm⟩
+  | error a b =>
+    rw [hE] at h
+    cases h
+
+/-- From a reliable seed, a relay's private key decapsulates what was encapsulated to its public
+key. -/
+theorem decapOf_encapOf (sk : kem.PrivateKey) (s : Vector UInt8 32)
+    (hrel : kem.Reliable (kem.stateFromSeed s)) (ct ss : ByteArray)
+    (h : kemEncap kem (ofVector (kem.encodePublicKey (kem.derivePublicKey sk))) s = .ok (ct, ss)) :
+    decapOf kem sk (encapOf kem (kem.derivePublicKey sk) s).1
+      = some (encapOf kem (kem.derivePublicKey sk) s).2 := by
+  unfold kemEncap at h
+  rw [Cryptlib.Protocols.Sphinx.Common.toVecN_ofVector, kem.decode_encode_pub] at h
+  dsimp only at h
+  unfold encapOf decapOf
+  cases hE : kem.encap (kem.derivePublicKey sk) (kem.stateFromSeed s) with
+  | ok r a =>
+    obtain ⟨t', hd⟩ := kem.honestRoundTrip sk (kem.stateFromSeed s) hrel r.1 r.2 a hE
+      (kem.stateFromSeed (Vector.replicate 32 0))
+    dsimp only
+    rw [hd]
+  | error a b =>
+    rw [hE] at h
+    cases h
+
 end PacketK
 
 /-! # Tagging-forward layer unlinkability: the worlds as keyed games -/
@@ -360,6 +400,72 @@ theorem forwardAdv_post (names : Role → RSOR.Name)
   unfold forwardAdv
   simp only [StateT.run', simulateQ_map]
   exact congrArg (fun x => (·.1) <$> x) hv
+
+/-- The draws of world 0 of TLU→: the honest relays' key pairs, the adversary's first phase, the
+challenger's randomness, and the seed of the encapsulation to the honest relay. -/
+structure ForwardDraw (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) where
+  k : Key kem × kem.PrivateKey
+  ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1
+  st : A.State
+  log : Protocols.RSOR.Log 𝒮
+  r : RSOR.Randomness geom
+  s : Vector UInt8 32
+
+/-- The secret keys of the honest relays in a draw. -/
+def ForwardDraw.sk {names : Role → RSOR.Name}
+    {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (d : ForwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) :
+    Role → kem.PrivateKey :=
+  fun | .relay => d.k.2 | .back => d.ch.kb.2 | .sender => d.ch.ks.2
+
+def forwardDraw (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    ProbComp (ForwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) := do
+  let k ← keygen kem
+  let kb ← keygen kem
+  let ks ← keygen kem
+  let out ← (simulateQ (Protocols.RSOR.honest
+      (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1 kb.1 ks.1)
+      (fun | .relay => k.2 | .back => kb.2 | .sender => ks.2) {})
+    (A.choose (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1 kb.1
+      ks.1))).run {}
+  let r ← $ᵗ (RSOR.Randomness geom)
+  let s ← $ᵗ (Vector UInt8 32)
+  return ⟨k, ⟨kb, ks, out.1.1⟩, out.1.2, out.2, r, s⟩
+
+/-- World 0 of TLU→ as its draws, then the adversary's guess on the first layer of its own
+onion, built with the seed drawn apart at the honest relay's position. -/
+theorem play_false_evalDistEq (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    Protocols.RSOR.Property.play names A false
+      =ᵈ forwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun d =>
+        (simulateQ (Protocols.RSOR.honest
+            (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.k.1 d.ch.kb.1
+              d.ch.ks.1) d.sk {})
+          (A.guess d.st (RSOR.form kem cipher macS kdfS streamS geom d.ch.c.req
+            (setSeed geom d.r d.ch.c.pos d.s) d.ch.c.req.first))).run' d.log := by
+  unfold Protocols.RSOR.Property.play Protocols.RSOR.Property.playFrom forwardDraw
+  simp only [bind_assoc, pure_bind]
+  refine EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun kb =>
+    EvalDistEq.bind_right _ fun ks => EvalDistEq.bind_right _ fun out => ?_
+  have hlt : (out.1.1.pos : ℕ) < geom.nrHops :=
+    lt_of_lt_of_le out.1.1.pos.isLt out.1.1.req.fwd.length_le
+  have h := evalDistEq_setSeed geom out.1.1.pos hlt fun r =>
+    (simulateQ (Protocols.RSOR.honest (Protocols.RSOR.Property.honestOf names k kb ks)
+        (fun | .relay => k.2 | .back => kb.2 | .sender => ks.2) {})
+      (A.guess out.1.2 (RSOR.form kem cipher macS kdfS streamS geom out.1.1.req r
+        out.1.1.req.first))).run' out.2
+  have hw : Protocols.RSOR.forwardUnlinkable.world out.1.1 false = (do
+      let r ← $ᵗ (RSOR.Randomness geom)
+      return { onion := (RSOR.form kem cipher macS kdfS streamS geom out.1.1.req r
+        out.1.1.req.first) }) := by
+    simp [Protocols.RSOR.forwardUnlinkable]
+    rfl
+  refine EvalDistEq.trans ?_ h.symm
+  rw [hw]
+  simp only [bind_assoc, pure_bind]
+  exact EvalDistEq.rfl
 
 end Forward
 
