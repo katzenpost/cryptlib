@@ -86,7 +86,8 @@ def badQuery (c : kem.Ciphertext) (bad : ByteArray → Bool) : procSpec.Domain �
 theorem procImplF_congr (sk : kem.PrivateKey) (c : kem.Ciphertext)
     (f₁ f₂ : ByteArray → ProcResult) (t : procSpec.Domain)
     (h : ∀ pkt, t = .inr pkt → carries kem c pkt = true → f₁ pkt = f₂ pkt) :
-    procImplF kem cipher macS kdfS streamS geom sk c f₁ t = procImplF kem cipher macS kdfS streamS geom sk c f₂ t := by
+    procImplF kem cipher macS kdfS streamS geom sk c f₁ t
+      = procImplF kem cipher macS kdfS streamS geom sk c f₂ t := by
   cases t with
   | inl t => rfl
   | inr pkt =>
@@ -327,6 +328,101 @@ theorem keyedChain_le :
     (fun x => x = true)
   rw [kemExpK_keyedKEMAdv, kemExpK_keyedKEMAdv, e1, e0, e2]
   exact abs_sub_le _ _ _
+
+/-! ## The node's answers to the challenge ciphertext, as a parameter -/
+
+/-- The keyed game with uniform keys, with the node answering packets that carry the challenge
+ciphertext by `hand`. -/
+def keyedGameH (hand : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → KeyTuple
+    → ByteArray → ProcResult) : ProbComp Bool := do
+  let u ← $ᵗ KeyTuple
+  let k ← keygen kem
+  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom k.2) (A.pre k.1)
+  let s ← $ᵗ (Vector UInt8 32)
+  let o ← S.drawOth cs.1
+  simulateQ (procImplF kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s).1
+      (hand cs.1 o (encapOf kem k.1.1 s).1 u))
+    (S.final cs.1 o (encapOf kem k.1.1 s).1 u
+      <$> A.post cs.2 (S.view cs.1 o (encapOf kem k.1.1 s).1 u))
+
+/-- The same game, run with a record of the node's queries: whether one was a bad packet
+carrying the challenge ciphertext. -/
+def keyedBadH (hand : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → KeyTuple
+      → ByteArray → ProcResult)
+    (bad : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → KeyTuple → ByteArray → Bool) :
+    ProbComp Bool := do
+  let u ← $ᵗ KeyTuple
+  let k ← keygen kem
+  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom k.2) (A.pre k.1)
+  let s ← $ᵗ (Vector UInt8 32)
+  let o ← S.drawOth cs.1
+  let z ← (simulateQ (Util.UntilBad.logged
+      (procImplF kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s).1
+        (hand cs.1 o (encapOf kem k.1.1 s).1 u)))
+    (S.final cs.1 o (encapOf kem k.1.1 s).1 u
+      <$> A.post cs.2 (S.view cs.1 o (encapOf kem k.1.1 s).1 u))).run []
+  return z.2.any (badQuery kem (encapOf kem k.1.1 s).1 (bad cs.1 o (encapOf kem k.1.1 s).1 u))
+
+/-- The keyed game with uniform keys is the one where the node answers with those keys. -/
+theorem keyedIdeal_evalDistEq :
+    keyedIdeal cipher macS kdfS streamS geom A
+      =ᵈ keyedGameH cipher macS kdfS streamS geom A fun _ _ _ u pkt =>
+        procKeys kem cipher macS streamS geom u pkt := by
+  unfold keyedIdeal keyedGame keyedGameH
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+  refine EvalDistEq.bind_right _ fun u => EvalDistEq.bind_right _ fun k =>
+    EvalDistEq.bind_right _ fun cs => EvalDistEq.bind_right _ fun s =>
+    EvalDistEq.bind_right _ fun o => ?_
+  rw [simulateQ_map, map_eq_bind_pure_comp]
+  exact EvalDistEq.rfl
+
+omit [SampleableType kem.Plaintext] in
+/-- **Changing the node's answers to the challenge ciphertext.** Two ways of answering that
+agree except on bad packets change the game by at most the chance that the adversary sends a
+bad packet carrying the challenge ciphertext. -/
+theorem keyedGameH_sub_le_bad
+    (hand₁ hand₂ : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → KeyTuple
+      → ByteArray → ProcResult)
+    (bad : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → KeyTuple → ByteArray → Bool)
+    (h : ∀ {pk : Key kem} (ch : S.Ch pk) (o : S.Oth) (c : kem.Ciphertext) (u : KeyTuple)
+      (pkt : ByteArray), carries kem c pkt = true → bad ch o c u pkt = false →
+        hand₁ ch o c u pkt = hand₂ ch o c u pkt) :
+    |(Pr{let x ← keyedGameH cipher macS kdfS streamS geom A hand₁}[x = true]).toReal
+      - (Pr{let x ← keyedGameH cipher macS kdfS streamS geom A hand₂}[x = true]).toReal|
+    ≤ (Pr{let x ← keyedBadH cipher macS kdfS streamS geom A hand₂ bad}[x = true]).toReal := by
+  have hstep := fun (u : KeyTuple) (k : Key kem × kem.PrivateKey) (cs : S.Ch k.1 × A.St)
+      (s : Vector UInt8 32) (o : S.Oth) =>
+    procImplF_le_add_bad kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s).1
+      (hand₁ cs.1 o (encapOf kem k.1.1 s).1 u) (hand₂ cs.1 o (encapOf kem k.1.1 s).1 u)
+      (bad cs.1 o (encapOf kem k.1.1 s).1 u) (fun pkt hc hb => h cs.1 o _ u pkt hc hb)
+      (S.final cs.1 o (encapOf kem k.1.1 s).1 u
+        <$> A.post cs.2 (S.view cs.1 o (encapOf kem k.1.1 s).1 u)) (· = true)
+  have h12 : Pr{let x ← keyedGameH cipher macS kdfS streamS geom A hand₁}[x = true]
+      ≤ Pr{let x ← keyedGameH cipher macS kdfS streamS geom A hand₂}[x = true]
+        + Pr{let x ← keyedBadH cipher macS kdfS streamS geom A hand₂ bad}[x = true] := by
+    unfold keyedGameH keyedBadH
+    refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun u => ?_
+    refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun k => ?_
+    refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun cs => ?_
+    refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun s => ?_
+    refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun o => ?_
+    simpa only [bind_pure_comp, prEvent_map] using (hstep u k cs s o).1
+  have h21 : Pr{let x ← keyedGameH cipher macS kdfS streamS geom A hand₂}[x = true]
+      ≤ Pr{let x ← keyedGameH cipher macS kdfS streamS geom A hand₁}[x = true]
+        + Pr{let x ← keyedBadH cipher macS kdfS streamS geom A hand₂ bad}[x = true] := by
+    unfold keyedGameH keyedBadH
+    refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun u => ?_
+    refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun k => ?_
+    refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun cs => ?_
+    refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun s => ?_
+    refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun o => ?_
+    simpa only [bind_pure_comp, prEvent_map] using (hstep u k cs s o).2
+  have r12 := ENNReal.toReal_mono
+    (ENNReal.add_ne_top.mpr ⟨prEvent_ne_top _, prEvent_ne_top _⟩) h12
+  have r21 := ENNReal.toReal_mono
+    (ENNReal.add_ne_top.mpr ⟨prEvent_ne_top _, prEvent_ne_top _⟩) h21
+  rw [ENNReal.toReal_add (prEvent_ne_top _) (prEvent_ne_top _)] at r12 r21
+  exact abs_sub_le_iff.2 ⟨by linarith, by linarith⟩
 
 end Keyed
 

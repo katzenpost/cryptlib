@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import VCVio.ProgramLogic.Relational.SimulateQ.UntilBad
 import VCVio.OracleComp.SimSemantics.StateT.StateProjection
+import VCVio.EvalDist.Monad.Disagreement.Measure
 
 /-! # Two oracles that agree until a bad query
 
@@ -96,5 +97,16 @@ theorem abs_sub_le_bad (impl₁ impl₂ : QueryImpl spec ProbComp) (isBad : spec
   refine (abs_prEvent_toReal_sub_le_measureTVDist _ _ (· = true) Measurable.of_discrete).trans ?_
   rw [measureTVDist_eq_toReal_measureETVDist]
   exact ENNReal.toReal_mono (prEvent_ne_top _) (measureETVDist_le_bad impl₁ impl₂ isBad h oa)
+
+/-- A bound that holds after every outcome of a common prefix holds with the prefix in front:
+the two sides and the allowance each keep the prefix. -/
+theorem prEvent_bind_le_add {α β γ : Type} (mx : ProbComp α) (my oc : α → ProbComp β)
+    (ob : α → ProbComp γ) (q : β → Prop) (r : γ → Prop)
+    (h : ∀ x, Pr{let y ← my x}[q y] ≤ Pr{let y ← oc x}[q y] + Pr{let z ← ob x}[r z]) :
+    Pr{let y ← mx >>= my}[q y] ≤ Pr{let y ← mx >>= oc}[q y] + Pr{let z ← mx >>= ob}[r z] := by
+  have := prEvent_bind_le_add_bad_of_disagree' (mx := mx) (my := my) (oc := oc) (ob := ob)
+    (q := q) (r := r) (D := fun _ => False) (ε := 0) (fun _ _ hD => hD.elim)
+    (fun x _ _ => by simpa using h x)
+  simpa using this
 
 end Cryptlib.Util.UntilBad
