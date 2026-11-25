@@ -276,6 +276,35 @@ theorem keyedBadH_le_forge (hmactag : macS.tagSize = macLength)
     simp only [Bool.and_eq_true, decide_eq_true_eq, beq_iff_eq]
     exact ⟨hpm, htag⟩
 
+/-- **The MAC step.** For a keyed game whose view uses the node's MAC key for one tag, the
+node may answer the challenge ciphertext under the challenge header only: that changes the game
+with uniform keys by at most the forgery adversary's chance against the MAC and the chance of a
+draw that is not `good`. -/
+theorem keyedIdeal_sub_tagged_le (hmactag : macS.tagSize = macLength)
+    [SampleableType kem.Plaintext]
+    (M : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → RestKeys → ByteArray)
+    (viewT : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → RestKeys
+      → Vector UInt8 macS.tagSize → V)
+    (good : KeyedDraw A → Prop)
+    (hM : ∀ (d : KeyedDraw A) (r : RestKeys), good d →
+      (M d.cs.1 d.o d.c r).size = 2 + kem.ciphertextSize + geom.routingInfoLength)
+    (hview : ∀ (d : KeyedDraw A) (u : KeyTuple), good d →
+      S.view d.cs.1 d.o d.c u = viewT d.cs.1 d.o d.c (restOf u)
+        (macS.mac (ofVector u.2.2.1) (M d.cs.1 d.o d.c (restOf u))))
+    (hfin : ∀ {pk : Key kem} (ch : S.Ch pk) (o : S.Oth) (c : kem.Ciphertext) (u u' : KeyTuple),
+      S.final ch o c u = S.final ch o c u') :
+    |(Pr{let x ← keyedIdeal cipher macS kdfS streamS geom A}[x = true]).toReal
+      - (Pr{let x ← (keyedGameH cipher macS kdfS streamS geom A
+          (onlyHeader cipher macS streamS geom (tagged macS M)))}[x = true]).toReal|
+    ≤ (Pr{let x ← (Primitives.MAC.forgeExp macS
+          (forgeAdv cipher macS kdfS streamS geom A M viewT))}[x = true]).toReal
+      + (Pr{let d ← keyedDraw cipher macS kdfS streamS geom A}[¬ good d]).toReal := by
+  refine (keyedIdeal_sub_onlyHeader_le cipher macS kdfS streamS geom A (tagged macS M)).trans ?_
+  have h := ENNReal.toReal_mono
+    (ENNReal.add_ne_top.mpr ⟨prEvent_ne_top _, prEvent_ne_top _⟩)
+    (keyedBadH_le_forge cipher macS kdfS streamS geom A hmactag M viewT good hM hview hfin)
+  rwa [ENNReal.toReal_add (prEvent_ne_top _) (prEvent_ne_top _)] at h
+
 end KeyedMac
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx

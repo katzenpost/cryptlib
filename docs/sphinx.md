@@ -72,10 +72,27 @@ packets with the game's keys (`keyedChain_le`).
   chance of a bad draw in either world, the KEM and KDF advantages of named adversaries, and
   the distance between the two worlds once the honest relay's keys are uniform.
 
-Not proved yet: the bound on that last distance by the MAC, the stream cipher and the payload
-cipher; SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx. The games for a MAC used once
-(`MAC.forgeExp`) and a payload key used for one block (`WideBlockCipher.oneQueryExp`) are
-stated for that work and not yet used.
+- The MAC step, for any keyed game (`keyedIdeal_sub_tagged_le`). If the view uses the honest
+  relay's MAC key for one tag, the relay may answer the challenge ciphertext under the challenge
+  header only, at the cost of a forgery against the MAC (`MAC.forgeExp`) and the bad draws. It
+  is not yet applied to the two worlds of TLU→.
+
+Not proved yet: the rest of the bound on that last distance (the payload cipher, the stream
+cipher, and that the two ideal worlds agree); SLU← and STI↔ for KEM Sphinx; all three for NIKE
+Sphinx. The game for a payload key used for one block (`WideBlockCipher.oneQueryExp`) is stated
+for that work and not yet used.
+
+## How the bounds are built
+
+The structural lemmas are stated for packets built from any keys (`newKEMPacketFrom`), not only
+from keys the KDF derives. A packet with uniform keys at one hop is covered by taking the KDF
+that returns those keys whatever its input (`keysKDF`). So the lemmas about real packets are
+corollaries, and the same lemmas serve the games after the keys are replaced.
+
+A step that changes how the relay answers is one use of `Util.UntilBad`: two oracles without
+state that agree except on bad queries differ by at most the chance of a bad query, counted on
+the second oracle with a record of its queries. A reduction answers as the second oracle does
+and hands the record to its own challenger.
 
 ## Checks
 
