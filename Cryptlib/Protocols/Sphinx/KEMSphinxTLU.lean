@@ -985,6 +985,7 @@ theorem layerPK_self_last (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSiz
       = some (some (if hasSurbReply (hops[j]!).commands
           then (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload else payload),
         replayTag, (hops[j]!).commands, none)) ∧
+    (∃ frag, kemRiFragment kem geom #[hops[j]!] #[c] ByteArray.empty 1 0 = .ok frag) ∧
     pkt = pkt1 kem cipher macS streamS geom c t
       (fillerAtF kem kdfS streamS geom hops (d.1.toArray.extract 0 hops.size)
         ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength))
@@ -1122,6 +1123,93 @@ theorem layerPK_self_last (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSiz
         simp
     rw [hKEeq, hKSeq, hP] at hpk
     exact newKEMPacketFrom_one kem cipher macS streamS geom c (hopKeysOf t) _ _ payload pkt hpk
+
+/-- The bytes of the keyed hop's layer in front of its tag, at the end of the path: its
+ciphertext and its routing info under its keystream `U`. They do not use its MAC key. -/
+def relayFrontLast (hops : Array PathHop) (d : RSOR.Draw geom) (j : ℕ) (c U : ByteArray) :
+    ByteArray :=
+  v0AD ++ c ++ xorBytes
+    ((match kemRiFragment kem geom #[hops[j]!] #[c] ByteArray.empty 1 0 with
+      | .ok f => f
+      | .error _ => ByteArray.empty)
+      ++ (if geom.nrHops > 1 then fillerAtF kem kdfS streamS geom hops
+            (d.1.toArray.extract 0 hops.size)
+            ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength))
+            j U j
+          else ByteArray.empty))
+    (U.extract 0 (geom.routingInfoLength + geom.perHopRoutingInfoLength - (0 + 1) *
+        geom.perHopRoutingInfoLength))
+
+/-- The bytes of the keyed hop's layer behind its tag, at the end of the path: the payload
+under its payload encryption `encf`. -/
+def relayBackLast (payload : ByteArray) (encf : ByteArray → ByteArray) : ByteArray :=
+  encf ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)
+
+set_option maxHeartbeats 1000000 in
+/-- **The keyed hop's layer in three parts, at the end of the path**: the bytes in front, their
+tag under its MAC key, and the payload behind. Only the tag uses the MAC key. -/
+theorem layerPK_self_last_parts (hvalid : geom.ValidForKEM kem)
+    (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (payload pkt privKey : ByteArray) (j : ℕ)
+    (c : ByteArray) (t : KeyTuple) (s : Vector UInt8 32) (ss : ByteArray)
+    (hj : j + 1 = hops.size) (hlen : hops.size ≤ geom.nrHops)
+    (hencj : kemEncap kem (hops[j]!).publicKey s = .ok (c, ss))
+    (hrel : kem.Reliable (kem.stateFromSeed s))
+    (hpp : kemSelfPublicKeyBytes kem privKey = (hops[j]!).publicKey)
+    (hcmdnn : ∀ x ∈ (hops[j]!).commands, x ≠ RoutingCommand.null)
+    (hcmdnh : ∀ x ∈ (hops[j]!).commands, ∀ id m, x ≠ RoutingCommand.nextNodeHop id m)
+    (hpk : layerPK kem cipher macS kdfS streamS geom hops d payload j c t j = .ok pkt) :
+    pkt = relayFrontLast kem kdfS streamS geom hops d j c (ksOf streamS geom t)
+        ++ ofVector (macS.mac (ofVector t.2.2.1)
+          (relayFrontLast kem kdfS streamS geom hops d j c (ksOf streamS geom t)))
+        ++ relayBackLast geom payload (encOf cipher t) ∧
+      (relayFrontLast kem kdfS streamS geom hops d j c (ksOf streamS geom t)).size
+        = 2 + kem.ciphertextSize + geom.routingInfoLength := by
+  obtain ⟨-, ⟨frag, hfrag⟩, hpkt⟩ := layerPK_self_last kem cipher macS kdfS streamS geom hvalid
+      hmactag h16 hops d payload
+    pkt privKey j c t s ss hj hlen hencj hrel hpp hcmdnn hcmdnh hpk
+  obtain ⟨hnnh, hperhopEq, hrouting, -⟩ := id hvalid
+  have hcsz : c.size = kem.ciphertextSize := kemEncap_size kem _ _ c ss hencj
+  refine ⟨?_, ?_⟩
+  · refine hpkt.trans ?_
+    unfold pkt1 hdr1 relayFrontLast relayBackLast encOf ksOf
+    dsimp only
+    rw [ByteArray.append_empty]
+    rfl
+  · unfold relayFrontLast
+    rw [hfrag]
+    dsimp only
+    have hfr := kemRiFragment_size kem geom #[hops[j]!] #[c] ByteArray.empty 1 0 (by omega)
+      (by omega) hnnh rfl (fun i hi => by
+        have hi0 : i = 0 := by simpa using hi
+        subst hi0
+        exact hcsz) frag hfrag
+    have hF : ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) *
+        geom.perHopRoutingInfoLength)).size
+        = (geom.nrHops - hops.size) * geom.perHopRoutingInfoLength := by
+      have hle : (geom.nrHops - hops.size) * geom.perHopRoutingInfoLength
+          ≤ geom.perHopRoutingInfoLength * geom.nrHops := by
+        rw [Nat.mul_comm]
+        exact Nat.mul_le_mul_left _ (Nat.sub_le _ _)
+      rw [ByteArray.size_extract, Util.Bytes.size_ofVector, hrouting]
+      omega
+    have h0 : v0AD.size = 2 := rfl
+    rw [ByteArray.size_append, ByteArray.size_append, size_xorBytes, ByteArray.size_append, hfr,
+      h0, hcsz]
+    split_ifs with hn
+    · rw [fillerAtF_size kem kdfS streamS geom hrouting hops _ _ j (ksOf streamS geom t) hlen hF
+        (show (ksOf streamS geom t).size = _ from streamS.keystream_size _ _ _) j (by omega),
+        show geom.nrHops - hops.size + j = geom.nrHops - 1 by omega, hrouting]
+      have : geom.perHopRoutingInfoLength + (geom.nrHops - 1) * geom.perHopRoutingInfoLength
+          = geom.perHopRoutingInfoLength * geom.nrHops := by
+        obtain ⟨m, hm⟩ : ∃ m, geom.nrHops = m + 1 := ⟨geom.nrHops - 1, by omega⟩
+        rw [hm, Nat.add_sub_cancel]
+        ring
+      omega
+    · have hn1 : geom.nrHops = 1 := by omega
+      rw [hrouting, hn1, Nat.mul_one]
+      rfl
 
 /-- `RSOR.layer` with hop `j`'s ciphertext `c`, header keystream `U`, tagging function `tagf`
 and payload encryption `encf` given: the layer for position `i`. -/

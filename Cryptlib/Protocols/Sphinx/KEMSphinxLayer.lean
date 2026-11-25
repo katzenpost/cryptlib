@@ -735,12 +735,14 @@ theorem newKEMPacket_one (seed : Vector UInt8 32) (filler : ByteArray) (hop : Pa
   · rw [hsize1, show (#[hop] : Array PathHop).size = 0 + 1 from rfl, ht1, ht0, hH, hkey]
     rfl
 
-/-- A packet built for one hop from a ciphertext and keys is `pkt1` on them. -/
+/-- A packet built for one hop from a ciphertext and keys is `pkt1` on them, and the hop's
+routing fragment was built. -/
 theorem newKEMPacketFrom_one (c : ByteArray) (K : HopKeys) (filler : ByteArray) (hop : PathHop)
     (payload pkt : ByteArray)
     (h : newKEMPacketFrom kem cipher macS streamS geom #[c] #[K] filler #[hop] payload
       = .ok pkt) :
-    pkt = pkt1 kem cipher macS streamS geom c (keyTuple K) filler hop payload := by
+    (∃ frag, kemRiFragment kem geom #[hop] #[c] ByteArray.empty 1 0 = .ok frag) ∧
+      pkt = pkt1 kem cipher macS streamS geom c (keyTuple K) filler hop payload := by
   obtain ⟨-, hdr, sprpKeys, t, hhdr, ht0, htstep, rfl⟩ :=
     newKEMPacketFrom_unfold kem cipher macS streamS geom _ _ _ _ _ _ h
   obtain ⟨riKS, riPad, s, -, -, hrik, hs0, hsstep, rfl, rfl⟩ :=
@@ -765,6 +767,7 @@ theorem newKEMPacketFrom_one (c : ByteArray) (K : HopKeys) (filler : ByteArray) 
     unfold hdr1
     rw [hfrag]
     rfl
+  refine ⟨⟨frag, hfrag⟩, ?_⟩
   rw [show (Array.ofFn (fun i : Fin (#[hop] : Array PathHop).size =>
       ({ key := (#[K] : Array HopKeys)[i.val]!.payloadEncryption,
          iv := (#[K] : Array HopKeys)[i.val]!.headerEncryptionIV } : SPRPKey))).size = 0 + 1
