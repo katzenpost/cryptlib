@@ -5,6 +5,7 @@ keywords = ["cryptography", "post-quantum", "verification", "sphinx", "mixnet"]
 homepage = "https://cryptlib.io"
 license = "AGPL-3.0-only"
 defaultTargets = ["Cryptlib"]
+lintDriver = "Cryptlib.check_axioms"
 
 [leanOptions]
 pp.unicode.fun = true
@@ -30,6 +31,9 @@ rev = "v4.35.0"
 
 [[lean_lib]]
 name = "Cryptlib"
+
+[[lean_exe]]
+name = "Cryptlib.check_axioms"
 
 [[lean_exe]]
 name = "Cryptlib.Data.test"

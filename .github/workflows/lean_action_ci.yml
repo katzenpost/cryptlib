@@ -37,8 +37,8 @@ jobs:
           ./.lake/build/bin/Cryptlib-Protocols-GroupComm-GroupChatKatzenqt1-scenarios
           ./.lake/build/bin/Cryptlib-Primitives-Sign-MLDSA-mldsa_test
           sha256sum -c testdata/mldsa65_keygen.json.sha256 testdata/mldsa65_siggen.json.sha256 testdata/mldsa65_sigver.json.sha256
-      - name: Check the group chat theorems use no axioms beyond Lean's own
-        run: ./scripts/check-axioms.sh
+      - name: Check that no theorem rests on an unlisted axiom
+        run: lake lint
 
   tla:
     runs-on: ubuntu-latest

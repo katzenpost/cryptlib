@@ -172,8 +172,8 @@ check-bacap-vectors: build ## generate hpqc's BACAP vectors with the Lean implem
 verify-vectors: ## sha256sum-compare vendored testdata/ files against their hpqc/katzenpost/katzenqt source copies
 	@./scripts/verify-vectors.sh "$(HPQC_DIR)" "$(KATZENPOST_DIR)" "$(KATZENQT_DIR)"
 
-axioms: build ## fail if a group chat theorem rests on sorry, native_decide or a declared axiom
-	@./scripts/check-axioms.sh
+axioms: build ## fail if a theorem rests on sorry, native_decide or an axiom Cryptlib/check_axioms.lean does not list
+	@$(LAKE) lint
 
 tla: ## model-check every GroupChat/tla protocol and impl config against its EXPECT line (needs java and tla2tools.jar)
 	@./Cryptlib/Protocols/GroupComm/GroupChatKatzenqt1/tla/check.sh
