@@ -251,6 +251,73 @@ theorem newKEMPacketFrom_layer (hvalid : geom.ValidForKEM kem)
     unfold hopPacket
     rw [Nat.sub_zero, if_neg (lt_irrefl 0), ByteArray.append_empty]
 
+/-- A hop's layer from what it forwards: `layerIn` on the hop's ciphertext and keys, with the
+routing fragment read off the forwarded packet. -/
+def wrapHop (path : Array PathHop) (ct : ByteArray) (K : HopKeys) (fwd : ByteArray) : ByteArray :=
+  layerIn cipher macS ct K.payloadEncryption K.headerEncryptionIV K.headerMAC
+    ((streamS.keystream (ofVector K.headerEncryption) (ofVector K.headerEncryptionIV)
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract 0 geom.routingInfoLength)
+    ((match kemRiFragment kem geom path
+        #[ByteArray.empty, fwd.extract 2 (2 + kem.ciphertextSize)]
+        (fwd.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+          (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)) path.size 0 with
+      | .ok f => f
+      | .error _ => ByteArray.empty)
+      ++ fwd.extract (2 + kem.ciphertextSize)
+        (2 + kem.ciphertextSize + geom.routingInfoLength - geom.perHopRoutingInfoLength))
+    (fwd.extract (payloadOffset kem geom) fwd.size)
+
+/-- **One hop, for any keys.** The first hop forwards the packet built on the rest of the path,
+and its own layer is `wrapHop` of what it forwards. -/
+theorem newKEMPacketFrom_step (hvalid : geom.ValidForKEM kem)
+    (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (kemElements : Array ByteArray) (keys : Array HopKeys) (filler : ByteArray)
+    (path : Array PathHop) (payload pkt privKey : ByteArray) (h2 : 2 ≤ path.size)
+    (hple : path.size ≤ geom.nrHops)
+    (hfsize : geom.nrHops > path.size →
+      filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hknsize : kemElements.size = path.size) (hkeysArrSize : keys.size = path.size)
+    (hksize : ∀ j (hj : j < kemElements.size), (kemElements[j]'hj).size = kem.ciphertextSize)
+    (hpp : kemSelfPublicKeyBytes kem privKey = (path[0]!).publicKey)
+    (hkey : ∃ seed ss, kem.Reliable (kem.stateFromSeed seed) ∧
+      kemEncap kem (path[0]!).publicKey seed = Except.ok (kemElements[0]!, ss) ∧
+      keys[0]! = deriveHopKeys kdfS ss)
+    (hcmdnn : ∀ c ∈ (path[0]!).commands, c ≠ RoutingCommand.null)
+    (hcmdnh : ∀ c ∈ (path[0]!).commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
+    (hnk : newKEMPacketFrom kem cipher macS streamS geom kemElements keys filler path payload
+      = Except.ok pkt) :
+    ∃ (replayTag mac : Vector UInt8 32) (fwd : Vector UInt8 pkt.size),
+      unwrapKEM kem cipher macS kdfS streamS geom privKey pkt
+        = Except.ok (none, replayTag,
+            (path[0]!).commands ++ [RoutingCommand.nextNodeHop (path[1]!).id mac], some fwd) ∧
+      newKEMPacketFrom kem cipher macS streamS geom (kemElements.extract 1 kemElements.size)
+          (keys.extract 1 keys.size)
+          ((if geom.nrHops > path.size then filler else ByteArray.empty)
+            ++ tailPadOf geom (fun i => headerKeystream streamS geom (keys[i]!)) (path.size - 1))
+          (path.extract 1 path.size) payload
+        = Except.ok (ofVector fwd) ∧
+      pkt = wrapHop kem cipher macS streamS geom path (kemElements[0]!) (keys[0]!)
+        (ofVector fwd) := by
+  obtain ⟨h2', -⟩ := newKEMPacketFrom_unwrapKEM kem cipher macS kdfS streamS geom hvalid hmactag
+    h16 kemElements keys filler path payload pkt privKey hple hfsize hknsize hkeysArrSize hksize
+    hpp hkey hcmdnn hcmdnh hnk
+  obtain ⟨replayTag, mac, fwd, hun, hfwd⟩ := h2' h2
+  obtain ⟨replayTag', cmds', fwd', frag, hun', hfrag, hpkt⟩ := newKEMPacketFrom_layer kem cipher
+    macS kdfS streamS geom hvalid hmactag h16 kemElements keys filler path payload pkt privKey h2
+    hple hfsize hknsize hksize hpp hkey hcmdnn hcmdnh hnk
+  have hff : fwd' = fwd := by
+    have := hun'.symm.trans hun
+    injection this with this
+    injection this with _ this
+    injection this with _ this
+    injection this with _ this
+    injection this
+  rw [hff] at hfrag hpkt
+  refine ⟨replayTag, mac, fwd, hun, hfwd, hpkt.trans ?_⟩
+  unfold wrapHop
+  rw [hfrag, Cryptlib.Util.Bytes.size_ofVector]
+
 theorem newKEMPacket_layer (hvalid : geom.ValidForKEM kem)
     (hmactag : macS.tagSize = macLength)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)

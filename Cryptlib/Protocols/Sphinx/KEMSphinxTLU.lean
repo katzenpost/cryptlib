@@ -259,15 +259,18 @@ theorem packetK_step (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = m
             ++ tailPadOf geom (fun k => if k = j then ksOf streamS geom t
               else headerKeystream streamS geom (kemHopKeys kem kdfS path seeds k))
               (path.size - 1))
-          (path.extract 1 path.size) payload (j - 1) c t = .ok (ofVector fwd) := by
+          (path.extract 1 path.size) payload (j - 1) c t = .ok (ofVector fwd) ∧
+      pkt = wrapHop kem cipher macS streamS geom path (kemHopCt kem path seeds 0)
+        (kemHopKeys kem kdfS path seeds 0) (ofVector fwd) := by
   obtain ⟨ct0, ss0, henc0⟩ := henc 0 (by omega) (by omega)
   have hget : ∀ {α : Type} [Inhabited α] (f : Fin path.size → α) (i : ℕ) (hi : i < path.size),
       (Array.ofFn f)[i]! = f ⟨i, hi⟩ := fun f i hi => by
     rw [getElem!_pos _ i (by simpa using hi)]
     simp only [Array.getElem_ofFn]
   unfold packetK at hpk
-  obtain ⟨h2, -⟩ := newKEMPacketFrom_unwrapKEM kem cipher macS kdfS streamS geom hvalid hmactag
-    h16 _ _ filler path payload pkt privKey hple hfsize (by simp) (by simp)
+  obtain ⟨replayTag, mac, fwd, hun, hfwd, hwrap⟩ := newKEMPacketFrom_step kem cipher macS kdfS
+    streamS geom hvalid hmactag h16 _ _ filler path payload pkt privKey (by omega) hple hfsize
+    (by simp) (by simp)
     (fun i hi => by
       have hi' : i < path.size := by simpa using hi
       simp only [Array.getElem_ofFn]
@@ -288,8 +291,9 @@ theorem packetK_step (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = m
       unfold kemHopKeys
       rw [henc0]⟩
     hcmdnn hcmdnh hpk
-  obtain ⟨replayTag, mac, fwd, hun, hfwd⟩ := h2 (by omega)
-  refine ⟨replayTag, mac, fwd, hun, ?_⟩
+  rw [hget _ 0 (by omega), hget _ 0 (by omega)] at hwrap
+  simp only [show ¬ (0 = j) by omega, ↓reduceIte] at hwrap
+  refine ⟨replayTag, mac, fwd, hun, ?_, hwrap⟩
   have hps : (path.extract 1 path.size).size = path.size - 1 := by simp
   unfold packetK
   rw [← hfwd]
@@ -460,7 +464,13 @@ theorem layerPK_step (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = m
             (hops[i]!).commands ++ [RoutingCommand.nextNodeHop (hops[i + 1]!).id mac],
             some fwd) ∧
       layerPK kem cipher macS kdfS streamS geom hops d payload j c t (i + 1)
-        = .ok (ofVector fwd) := by
+        = .ok (ofVector fwd) ∧
+      pkt = wrapHop kem cipher macS streamS geom (hops.extract i hops.size)
+        (kemHopCt kem (hops.extract i hops.size)
+          ((d.1.toArray.extract 0 hops.size).extract i (d.1.toArray.extract 0 hops.size).size) 0)
+        (kemHopKeys kem kdfS (hops.extract i hops.size)
+          ((d.1.toArray.extract 0 hops.size).extract i (d.1.toArray.extract 0 hops.size).size) 0)
+        (ofVector fwd) := by
   obtain ⟨-, -, hrouting, -⟩ := id hvalid
   unfold layerPK at hpk ⊢
   dsimp only at hpk ⊢
@@ -487,8 +497,9 @@ theorem layerPK_step (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = m
       exact Nat.mul_le_mul_left _ (Nat.sub_le _ _)
     rw [ByteArray.size_extract, Util.Bytes.size_ofVector, hrouting]
     omega
-  obtain ⟨replayTag, mac, fwd, hun, hfwd⟩ := packetK_step kem cipher macS kdfS streamS geom hvalid
-    hmactag h16 (S.extract i S.size) _ (hops.extract i hops.size) payload pkt privKey (j - i) c t
+  obtain ⟨replayTag, mac, fwd, hun, hfwd, hwrap⟩ := packetK_step kem cipher macS kdfS streamS geom
+    hvalid hmactag h16 (S.extract i S.size) _ (hops.extract i hops.size) payload pkt privKey
+    (j - i) c t
     (by omega) (by rw [hpi]; omega) (by rw [hpi]; omega) (by rw [hpi, hsi])
     (fun _ => by
       rw [fillerAtF_size kem kdfS streamS geom hrouting hops S _ j (ksOf streamS geom t) hlen hF
@@ -506,7 +517,7 @@ theorem layerPK_step (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = m
     (by rw [hpget 0 (by omega), Nat.add_zero]; exact hcmdnn)
     (by rw [hpget 0 (by omega), Nat.add_zero]; exact hcmdnh) hpk
   rw [hpget 0 (by omega), hpget 1 (by omega), Nat.add_zero] at hun
-  refine ⟨replayTag, mac, fwd, hun, ?_⟩
+  refine ⟨replayTag, mac, fwd, hun, ?_, hwrap⟩
   rw [extract_extract_one, extract_extract_one, hpi] at hfwd
   have hfill : fillerAtF kem kdfS streamS geom hops S
         ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength))
