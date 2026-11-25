@@ -262,4 +262,85 @@ theorem keyedChain_le :
 
 end Keyed
 
+/-! ## The games of `Protocols.RSOR`, with one relay behind an oracle -/
+
+section Games
+
+open Cryptlib.Protocols.RSOR (Role)
+
+variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+  (geom : Geometry) (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+  (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+
+/-- The honest node's oracle answers a sampling query by sampling. -/
+theorem simulateQ_procImpl_liftM (sk : kem.PrivateKey) {α : Type} (x : ProbComp α) :
+    simulateQ (procImpl kem cipher macS kdfS streamS geom sk) (liftM x : OracleComp procSpec α)
+      = x := by
+  unfold procImpl
+  rw [QueryImpl.add_eq_hAdd, QueryImpl.simulateQ_add_liftM_left]
+  simp
+
+/-- KEM Sphinx as the scheme of the games. -/
+abbrev sphinx : Protocols.RSOR.Scheme :=
+  RSOR.scheme kem cipher macS kdfS streamS geom hvalid hmactag h16
+
+/-- The honest relays of a game, with the relay `.relay` answered by an oracle for its unwrapped
+packets, and the other two by their secret keys. -/
+def viaOracle (sk : Role → kem.PrivateKey)
+    (patch : Protocols.RSOR.Patch (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) :
+    QueryImpl
+      (Protocols.RSOR.oracleSpec (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
+      (StateT (Protocols.RSOR.Log (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
+        (OracleComp procSpec)) :=
+  Protocols.RSOR.oracle
+    (fun h o => if h = .relay then
+        RSOR.stepOf geom <$>
+          (liftM ((ByteArray →ₒ ProcResult).query (RSOR.join o)) : OracleComp procSpec ProcResult)
+      else pure (RSOR.proc kem cipher macS kdfS streamS geom (sk h) o))
+    (fun h msg o => if h = .relay then
+        RSOR.replyOf cipher geom msg <$>
+          (liftM ((ByteArray →ₒ ProcResult).query (RSOR.join o)) : OracleComp procSpec ProcResult)
+      else pure (RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o))
+    patch
+
+/-- Answering that oracle with the relay's secret key gives the honest relays of the game. -/
+theorem viaOracle_honest
+    (hon : Protocols.RSOR.Honest (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
+    (sk : Role → kem.PrivateKey)
+    (patch : Protocols.RSOR.Patch (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
+    {α : Type}
+    (oa : OracleComp
+      (Protocols.RSOR.oracleSpec (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) α)
+    (log : Protocols.RSOR.Log (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) :
+    simulateQ (procImpl kem cipher macS kdfS streamS geom (sk .relay))
+        ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 sk patch)
+          oa).run log)
+      = (simulateQ (Protocols.RSOR.honest hon sk patch) oa).run log := by
+  refine simulateQ_StateT_compose _ _ _ (fun q log => ?_) oa log
+  rcases q with (t | ⟨h, o⟩) | ⟨h, msg, o⟩
+  · simp only [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle]
+    simpa using simulateQ_procImpl_liftM kem cipher macS kdfS streamS geom (sk .relay)
+      (liftM (OracleSpec.query t))
+  · by_cases hs : (h, o.1) ∈ log.seen
+    · simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.process, hs]
+    · by_cases hr : h = .relay
+      · subst hr
+        simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.process,
+          hs, simulateQ_procImpl_liftM]
+        rfl
+      · simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.process,
+          hs, hr, simulateQ_procImpl_liftM]
+        rfl
+  · by_cases hs : (h, o) ∈ log.held
+    · by_cases hr : h = .relay
+      · subst hr
+        simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.answer, hs]
+        rfl
+      · simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.answer,
+          hs, hr]
+        rfl
+    · simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.answer, hs]
+
+end Games
+
 end Cryptlib.Protocols.Sphinx.KEMSphinx
