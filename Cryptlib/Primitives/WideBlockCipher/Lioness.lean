@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Cryptlib.Primitives.Cipher.ChaCha20
 import Cryptlib.Primitives.Hash.Blake2b
+import Cryptlib.Primitives.KDF.HKDF
 import Cryptlib.Primitives.MAC.MAC
 import Cryptlib.Primitives.StreamCipher.StreamCipher
 import Cryptlib.Primitives.WideBlockCipher.WideBlockCipher
@@ -13,6 +14,7 @@ import Cryptlib.Util.Bytes
 namespace Cryptlib.Primitives.WideBlockCipher.Lioness
 
 open Cryptlib.Primitives.MAC (MAC)
+open Cryptlib.Primitives.KDF (KDF)
 open Cryptlib.Primitives.StreamCipher (StreamCipher)
 open Cryptlib.Primitives.WideBlockCipher (WideBlockCipher)
 open Cryptlib.Util.Bytes
@@ -207,5 +209,27 @@ def blake2b256 : MAC where
 
 /-- Lioness over ChaCha20 and keyed BLAKE2b-256: 128-byte key, 48-byte IV. -/
 def chacha20Blake2b : WideBlockCipher := lioness chacha20 blake2b256
+
+/-! ## Lioness for Sphinx -/
+
+/-- `c` for a user whose key and IV are shorter than `c`'s: `kdf` expands them, with the IV as its
+info, into `c`'s key followed by `c`'s IV. The laws are `c`'s. -/
+def rekeyed (c : WideBlockCipher) (kdf : KDF) (keySize ivSize : Nat) : WideBlockCipher where
+  keySize := keySize
+  ivSize := ivSize
+  encrypt key iv msg :=
+    let okm := kdf.expand ⟨key⟩ iv (c.keySize + c.ivSize)
+    c.encrypt (okm.extract 0 c.keySize).data (okm.extract c.keySize (c.keySize + c.ivSize)) msg
+  decrypt key iv msg :=
+    let okm := kdf.expand ⟨key⟩ iv (c.keySize + c.ivSize)
+    c.decrypt (okm.extract 0 c.keySize).data (okm.extract c.keySize (c.keySize + c.ivSize)) msg
+  encrypt_size _ _ _ := c.encrypt_size _ _ _
+  decrypt_size _ _ _ := c.decrypt_size _ _ _
+  roundTrip _ _ msg h := c.roundTrip _ _ msg h
+
+/-- Lioness as Sphinx's payload cipher: Sphinx gives a 48-byte key and a 16-byte IV, which
+HKDF-SHA256-Expand stretches to Lioness's 128 and 48. With it in place of AEZ, no law of the
+cipher under a Sphinx scheme is assumed. -/
+def sphinx : WideBlockCipher := rekeyed chacha20Blake2b KDF.HKDF.hkdfSha256Expand 48 16
 
 end Cryptlib.Primitives.WideBlockCipher.Lioness

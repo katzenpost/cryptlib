@@ -9,6 +9,7 @@ import Cryptlib.Protocols.Sphinx.Types
 import Cryptlib.Protocols.Sphinx.KEMSphinxTail
 import Cryptlib.Protocols.Sphinx.KEMSphinxRSOR
 import Cryptlib.Protocols.Sphinx.SURB
+import Cryptlib.Primitives.WideBlockCipher.Lioness
 import Cryptlib.Util.HexBytes
 import Cryptlib.Util.Bytes
 
@@ -342,10 +343,11 @@ private def flipBit {n : Nat} (v : Vector UInt8 n) (i : Nat) : Vector UInt8 n :=
 `nBack` relays, and the sender opening it. Each layer a relay receives is compared with `form`
 or `formBack`, which is what the scheme's laws state. A relay must reject a changed header, and
 a changed reply payload must not open. -/
-def runRSORRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
+def runRSORRound (cipher : Cryptlib.Primitives.WideBlockCipher.WideBlockCipher) (kem : KEM)
+    (geom : Geometry) (hvalid : geom.ValidForKEM kem)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) (nFwd nBack : Nat) :
     IO Bool := do
-  let S := RSOR.scheme kem wbCipher macS kdfS streamS geom hvalid rfl h16
+  let S := RSOR.scheme kem cipher macS kdfS streamS geom hvalid rfl h16
   let fwd ← (List.range nFwd).mapM fun _ => newRelay kem
   let back ← (List.range nBack).mapM fun _ => newRelay kem
   let fh := fwd.map (·.1)
@@ -716,9 +718,13 @@ def runSuite (schemeName : String) (kem : KEM) : IO Bool := do
     rw [ofKEMWith_payloadTagLength schemeName kem 103 true 5]
     unfold Cryptlib.Protocols.Sphinx.Constants.payloadTagLength; omega
   for (nFwd, nBack) in [(1, 1), (3, 2), (5, 5), (2, 0)] do
-    let rsorOk ← runRSORRound kem geom5surb hvalid5s h165s nFwd nBack
+    let rsorOk ← runRSORRound wbCipher kem geom5surb hvalid5s h165s nFwd nBack
     IO.println s!"RSOR scheme ({nFwd} forward, {nBack} back of 5): {if rsorOk then "ok" else "FAIL"}"
     ok := ok && rsorOk
+    let lionessOk ← runRSORRound Cryptlib.Primitives.WideBlockCipher.Lioness.sphinx kem geom5surb
+      hvalid5s h165s nFwd nBack
+    IO.println s!"RSOR scheme with Lioness ({nFwd} forward, {nBack} back of 5): {if lionessOk then "ok" else "FAIL"}"
+    ok := ok && lionessOk
 
   for (atExit, tag) in [(true, false), (false, false), (true, true), (false, true)] do
     ok := (← runForwardGame kem geom5surb hvalid5s h165s atExit tag) && ok
