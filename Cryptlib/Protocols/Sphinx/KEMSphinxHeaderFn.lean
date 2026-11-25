@@ -120,6 +120,39 @@ theorem hdrTrace_succ_ok (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → B
     · cases h
     · next frag hf => exact ⟨s, frag, hs, hf, (Except.ok.inj h).symm⟩
 
+/-- Whether a hop's routing fragment can be built depends on the path only: its commands must
+fit their slot. -/
+theorem kemRiFragment_ok_congr (path : Array PathHop) (ke ke' : Array ByteArray)
+    (mac mac' : ByteArray) (n i : ℕ) (f : ByteArray)
+    (h : kemRiFragment kem geom path ke mac n i = .ok f) :
+    ∃ f', kemRiFragment kem geom path ke' mac' n i = .ok f' := by
+  unfold kemRiFragment at h ⊢
+  dsimp only at h ⊢
+  obtain ⟨b, hb, -⟩ := Cryptlib.Protocols.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+  rw [hb]
+  by_cases ht : (!i == n - 1) = true
+  · simp only [ht, ↓reduceIte]
+    exact ⟨_, rfl⟩
+  · simp only [ht]
+    exact ⟨_, rfl⟩
+
+/-- Whether `hdrTrace` succeeds depends on the path only. -/
+theorem hdrTrace_ok_congr (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ke ke' : Array ByteArray) (filler filler' : ByteArray) (path : Array PathHop) (j : ℕ)
+    (s : ByteArray × ByteArray) (h : hdrTrace kem geom ks tag ke filler path j = .ok s) :
+    ∃ s', hdrTrace kem geom ks' tag' ke' filler' path j = .ok s' := by
+  induction j generalizing s with
+  | zero => exact ⟨_, rfl⟩
+  | succ j ih =>
+    obtain ⟨s0, frag, hs0, hf, -⟩ := hdrTrace_succ_ok kem geom ks tag ke filler path j s h
+    obtain ⟨s0', hs0'⟩ := ih s0 hs0
+    obtain ⟨frag', hf'⟩ := kemRiFragment_ok_congr kem geom path ke ke' s0.2 s0'.2 path.size
+      (path.size - 1 - j) frag hf
+    rw [hdrTrace, hs0']
+    dsimp only
+    rw [hf']
+    exact ⟨_, rfl⟩
+
 variable (macS : MAC) (streamS : StreamCipher)
 
 /-- Each hop's header keystream, from its keys. -/
@@ -293,6 +326,26 @@ theorem pktFn_congr (ks ks' : ℕ → ByteArray) (tag tag' enc enc' : ℕ → By
   unfold pktFn
   rw [hdrTrace_congr kem geom ks ks' tag tag' ke filler path
     (fun i hi => ⟨(h i hi).1, (h i hi).2.1⟩) _ le_rfl, hf]
+
+/-- Whether `pktFn` gives a packet depends on the path and the payload's length only. -/
+theorem pktFn_isSome_congr (ks ks' : ℕ → ByteArray) (tag tag' enc enc' : ℕ → ByteArray → ByteArray)
+    (ke ke' : Array ByteArray) (filler filler' : ByteArray) (path : Array PathHop)
+    (payload p : ByteArray) (h : pktFn kem geom ks tag enc ke filler path payload = some p) :
+    ∃ p', pktFn kem geom ks' tag' enc' ke' filler' path payload = some p' := by
+  unfold pktFn at h ⊢
+  by_cases hp : payload.size = geom.forwardPayloadLength
+  · simp only [hp, ↓reduceIte] at h ⊢
+    cases ht : hdrTrace kem geom ks tag ke filler path path.size with
+    | error e =>
+      rw [ht] at h
+      cases h
+    | ok s =>
+      obtain ⟨s', hs'⟩ := hdrTrace_ok_congr kem geom ks ks' tag tag' ke ke' filler filler' path
+        path.size s ht
+      rw [hs']
+      exact ⟨_, rfl⟩
+  · simp only [hp, ↓reduceIte] at h
+    cases h
 
 /-- Each hop's payload encryption, from its keys. -/
 def keysEnc (keys : Array HopKeys) (i : ℕ) (b : ByteArray) : ByteArray :=

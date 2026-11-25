@@ -126,6 +126,35 @@ theorem packetK_congr (seeds seeds' : Array (Vector UInt8 32)) (filler : ByteArr
       · rfl
       · simp only [kemHopCt, kemHopKeys, h i hi]
 
+/-- Whether the keyed packet can be built does not depend on the ciphertext and keys given, nor
+on the seeds or the filler. -/
+theorem packetK_ok_congr (seeds seeds' : Array (Vector UInt8 32)) (filler filler' : ByteArray)
+    (path : Array PathHop) (payload pkt : ByteArray) (j : ℕ) (c c' : ByteArray) (t t' : KeyTuple)
+    (h : packetK kem cipher macS kdfS streamS geom seeds filler path payload j c t = .ok pkt) :
+    ∃ pkt', packetK kem cipher macS kdfS streamS geom seeds' filler' path payload j c' t'
+      = .ok pkt' := by
+  unfold packetK at h ⊢
+  have h1 := newKEMPacketFrom_pktFn kem geom macS streamS cipher
+    (Array.ofFn fun i : Fin path.size => if i.val = j then c else kemHopCt kem path seeds i)
+    (Array.ofFn fun i : Fin path.size =>
+      if i.val = j then hopKeysOf t else kemHopKeys kem kdfS path seeds i) filler path payload
+  rw [h] at h1
+  obtain ⟨p', hp'⟩ := pktFn_isSome_congr kem geom _ _ _ _ _ _ _ _ _ _ path payload pkt h1.symm
+  have h2 := newKEMPacketFrom_pktFn kem geom macS streamS cipher
+    (Array.ofFn fun i : Fin path.size => if i.val = j then c' else kemHopCt kem path seeds' i)
+    (Array.ofFn fun i : Fin path.size =>
+      if i.val = j then hopKeysOf t' else kemHopKeys kem kdfS path seeds' i) filler' path payload
+  rw [hp'] at h2
+  cases hr : newKEMPacketFrom kem cipher macS streamS geom
+      (Array.ofFn fun i : Fin path.size => if i.val = j then c' else kemHopCt kem path seeds' i)
+      (Array.ofFn fun i : Fin path.size =>
+        if i.val = j then hopKeysOf t' else kemHopKeys kem kdfS path seeds' i) filler' path
+      payload with
+  | ok q => exact ⟨q, rfl⟩
+  | error e =>
+    rw [hr] at h2
+    cases h2
+
 theorem kemHopCt_extract (path : Array PathHop) (seeds : Array (Vector UInt8 32)) (i : ℕ)
     (hp : 1 + i < path.size) (hs : 1 + i < seeds.size) :
     kemHopCt kem (path.extract 1 path.size) (seeds.extract 1 seeds.size) i
@@ -443,6 +472,13 @@ def layerPK (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j
       ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength))
       j (ksOf streamS geom t) i)
     (hops.extract i hops.size) payload (j - i) c t
+
+/-- Whether a keyed layer can be built does not depend on the ciphertext and keys given. -/
+theorem layerPK_ok_congr (hops : Array PathHop) (d : RSOR.Draw geom) (payload pkt : ByteArray)
+    (j : ℕ) (c c' : ByteArray) (t t' : KeyTuple) (i : ℕ)
+    (h : layerPK kem cipher macS kdfS streamS geom hops d payload j c t i = .ok pkt) :
+    ∃ pkt', layerPK kem cipher macS kdfS streamS geom hops d payload j c' t' i = .ok pkt' :=
+  packetK_ok_congr kem cipher macS kdfS streamS geom _ _ _ _ _ payload pkt (j - i) c c' t t' h
 
 set_option maxHeartbeats 1000000 in
 /-- **Each hop before the keyed one forwards the next keyed layer.** -/
