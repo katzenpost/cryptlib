@@ -285,7 +285,7 @@ abbrev sphinx : Protocols.RSOR.Scheme :=
   RSOR.scheme kem cipher macS kdfS streamS geom hvalid hmactag h16
 
 /-- The honest relays of a game, with the relay `.relay` answered by an oracle for its unwrapped
-packets, and the other two by their secret keys. -/
+packets, and the other two by their secret keys. `sk .relay` is not used. -/
 def viaOracle (sk : Role → kem.PrivateKey)
     (patch : Protocols.RSOR.Patch (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) :
     QueryImpl
@@ -303,23 +303,24 @@ def viaOracle (sk : Role → kem.PrivateKey)
       else pure (RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o))
     patch
 
-/-- Answering that oracle with the relay's secret key gives the honest relays of the game. -/
+/-- Answering that oracle with the relay's secret key gives the honest relays of the game. The
+keys `viaOracle` is given need only agree with the game's for the other two relays. -/
 theorem viaOracle_honest
     (hon : Protocols.RSOR.Honest (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
-    (sk : Role → kem.PrivateKey)
+    (sk sk' : Role → kem.PrivateKey) (hsk : ∀ h, h ≠ .relay → sk h = sk' h)
     (patch : Protocols.RSOR.Patch (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
     {α : Type}
     (oa : OracleComp
       (Protocols.RSOR.oracleSpec (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) α)
     (log : Protocols.RSOR.Log (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) :
-    simulateQ (procImpl kem cipher macS kdfS streamS geom (sk .relay))
+    simulateQ (procImpl kem cipher macS kdfS streamS geom (sk' .relay))
         ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 sk patch)
           oa).run log)
-      = (simulateQ (Protocols.RSOR.honest hon sk patch) oa).run log := by
+      = (simulateQ (Protocols.RSOR.honest hon sk' patch) oa).run log := by
   refine simulateQ_StateT_compose _ _ _ (fun q log => ?_) oa log
   rcases q with (t | ⟨h, o⟩) | ⟨h, msg, o⟩
   · simp only [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle]
-    simpa using simulateQ_procImpl_liftM kem cipher macS kdfS streamS geom (sk .relay)
+    simpa using simulateQ_procImpl_liftM kem cipher macS kdfS streamS geom (sk' .relay)
       (liftM (OracleSpec.query t))
   · by_cases hs : (h, o.1) ∈ log.seen
     · simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.process, hs]
@@ -329,7 +330,7 @@ theorem viaOracle_honest
           hs, simulateQ_procImpl_liftM]
         rfl
       · simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.process,
-          hs, hr, simulateQ_procImpl_liftM]
+          hs, hr, simulateQ_procImpl_liftM, hsk h hr]
         rfl
   · by_cases hs : (h, o) ∈ log.held
     · by_cases hr : h = .relay
@@ -337,7 +338,7 @@ theorem viaOracle_honest
         simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.answer, hs]
         rfl
       · simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.answer,
-          hs, hr]
+          hs, hr, hsk h hr]
         rfl
     · simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.answer, hs]
 
