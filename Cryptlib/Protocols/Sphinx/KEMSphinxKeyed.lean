@@ -424,6 +424,40 @@ theorem keyedGameH_sub_le_bad
   rw [ENNReal.toReal_add (prEvent_ne_top _) (prEvent_ne_top _)] at r12 r21
   exact abs_sub_le_iff.2 ⟨by linarith, by linarith⟩
 
+/-- The node's answers to the challenge ciphertext, for packets with the header `H` only. -/
+def onlyHeader (H : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → KeyTuple → ByteArray)
+    {pk : Key kem} (ch : S.Ch pk) (o : S.Oth) (c : kem.Ciphertext) (u : KeyTuple)
+    (pkt : ByteArray) : ProcResult :=
+  if pkt.extract 0 (payloadOffset kem geom) = H ch o c u
+  then procKeys kem cipher macS streamS geom u pkt else none
+
+/-- A packet the node accepts under another header than `H`. -/
+def otherHeader (H : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → KeyTuple → ByteArray)
+    {pk : Key kem} (ch : S.Ch pk) (o : S.Oth) (c : kem.Ciphertext) (u : KeyTuple)
+    (pkt : ByteArray) : Bool :=
+  decide (pkt.extract 0 (payloadOffset kem geom) ≠ H ch o c u)
+    && (procKeys kem cipher macS streamS geom u pkt).isSome
+
+/-- **The node may answer the challenge ciphertext under one header only.** That changes the
+keyed game with uniform keys by at most the chance that the adversary sends a packet with the
+challenge ciphertext and another header which the node accepts. -/
+theorem keyedIdeal_sub_onlyHeader_le
+    (H : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → KeyTuple → ByteArray) :
+    |(Pr{let x ← keyedIdeal cipher macS kdfS streamS geom A}[x = true]).toReal
+      - (Pr{let x ← (keyedGameH cipher macS kdfS streamS geom A
+          (onlyHeader cipher macS streamS geom H))}[x = true]).toReal|
+    ≤ (Pr{let x ← (keyedBadH cipher macS kdfS streamS geom A
+        (onlyHeader cipher macS streamS geom H)
+        (otherHeader cipher macS streamS geom H))}[x = true]).toReal := by
+  rw [(keyedIdeal_evalDistEq cipher macS kdfS streamS geom A).prEvent_eq (fun x => x = true)]
+  refine keyedGameH_sub_le_bad cipher macS kdfS streamS geom A _ _ _ fun ch o c u pkt _ hb => ?_
+  unfold otherHeader at hb
+  unfold onlyHeader
+  by_cases hH : pkt.extract 0 (payloadOffset kem geom) = H ch o c u
+  · rw [if_pos hH]
+  · rw [if_neg hH]
+    simpa [hH] using hb
+
 end Keyed
 
 /-! ## The games of `Protocols.RSOR`, with one relay behind an oracle -/
