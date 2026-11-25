@@ -1368,29 +1368,17 @@ def wrapKEMSURB (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (
     if hsize : surb.size = geom.surbLength then pure (⟨surb.data, hsize⟩, k)
     else throw "sphinx: internal error: newKEMSURB produced a wrong-sized SURB"
 
-/-- Process one hop with decapsulation given as a function of the ciphertext bytes: returns
-`(payload, replayTag, cmds, forwardPkt)`. The forwarded packet carries the next-hop ciphertext
-copied from the decrypted routing-info block. The private key is used nowhere else, so a
-decapsulation oracle is enough to process a packet. -/
-def unwrapKEMWith (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
-    (streamS : StreamCipher) (geom : Geometry) (dec : ByteArray → Except String ByteArray)
-    (pkt : ByteArray) :
+/-- Process one hop with the hop's keys: check the header MAC, decrypt the routing info and the
+payload, and forward or deliver. -/
+def unwrapKEMKeys (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (streamS : StreamCipher)
+    (geom : Geometry) (keys : HopKeys) (replayTag : Vector UInt8 32) (pkt : ByteArray)
+    (h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength) :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
   let geOff := 2
   let riOff := geOff + kem.ciphertextSize
   let macOff := riOff + geom.routingInfoLength
   let payloadOff := macOff + macLength
-
-  if h1 : pkt.size < payloadOff then throw "sphinx: invalid packet, truncated"
-  else do
-  if (pkt.extract 0 2).data ≠ v0AD.data then throw "sphinx: invalid packet, unknown version"
-
-  let kemCiphertext := pkt.extract geOff riOff
-  let replayTag := sha512_256 kemCiphertext
-  let sharedSecret ← dec kemCiphertext
-
-  let keys := deriveHopKeys kdfS sharedSecret
   let gotMac := macS.mac (ofVector keys.headerMAC) (pkt.extract 0 macOff)
   if (ofVector gotMac).data ≠ (pkt.extract macOff (macOff + macLength)).data then
     throw "sphinx: invalid packet, MAC mismatch"
@@ -1468,6 +1456,30 @@ def unwrapKEMWith (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KD
       let tag := decPayload.extract 0 geom.payloadTagLength
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
+
+/-- Process one hop with decapsulation given as a function of the ciphertext bytes: returns
+`(payload, replayTag, cmds, forwardPkt)`. The forwarded packet carries the next-hop ciphertext
+copied from the decrypted routing-info block. The private key is used nowhere else, so a
+decapsulation oracle is enough to process a packet. -/
+def unwrapKEMWith (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (dec : ByteArray → Except String ByteArray)
+    (pkt : ByteArray) :
+    Except String
+      (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
+  let geOff := 2
+  let riOff := geOff + kem.ciphertextSize
+  let macOff := riOff + geom.routingInfoLength
+  let payloadOff := macOff + macLength
+
+  if h1 : pkt.size < payloadOff then throw "sphinx: invalid packet, truncated"
+  else do
+  if (pkt.extract 0 2).data ≠ v0AD.data then throw "sphinx: invalid packet, unknown version"
+
+  let kemCiphertext := pkt.extract geOff riOff
+  let replayTag := sha512_256 kemCiphertext
+  let sharedSecret ← dec kemCiphertext
+
+  unwrapKEMKeys kem cipher macS streamS geom (deriveHopKeys kdfS sharedSecret) replayTag pkt h1
 
 /-- Process one hop with the hop's private key. -/
 def unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
@@ -1738,7 +1750,7 @@ theorem unwrapKEM_hopPacket_nonterminal (kem : KEM) (cipher : WideBlockCipher) (
   have hnottrunc : ¬ (hopPacket kemElements riPadding s t nrHops k).size
       < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by
     rw [hpktsize, hpayoff, hpacket']; omega
-  unfold unwrapKEM unwrapKEMWith
+  unfold unwrapKEM unwrapKEMWith unwrapKEMKeys
   dsimp only
   rw [dif_neg hnottrunc]
   have hversion : ¬ (((hopPacket kemElements riPadding s t nrHops k).extract 0 2).data
@@ -2049,7 +2061,7 @@ theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (mac
   have hnottrunc : ¬ (hopPacket kemElements riPadding s t nrHops k).size
       < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by
     rw [hpktsize, hpayoff, hpacket']; omega
-  unfold unwrapKEM unwrapKEMWith
+  unfold unwrapKEM unwrapKEMWith unwrapKEMKeys
   dsimp only
   rw [dif_neg hnottrunc]
   have hversion : ¬ (((hopPacket kemElements riPadding s t nrHops k).extract 0 2).data
