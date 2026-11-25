@@ -13,6 +13,7 @@ open Cryptlib.Protocols.Sphinx.Commands
 open Cryptlib.Protocols.Sphinx.Types
 open Cryptlib.Protocols.Sphinx.Common
 open Cryptlib.Protocols.Sphinx.NIKESphinx (HopKeys deriveHopKeys)
+open Cryptlib.Primitives.WideBlockCipher (WideBlockCipher)
 open Cryptlib.Primitives.MAC (MAC)
 open Cryptlib.Primitives.StreamCipher (StreamCipher)
 open Cryptlib.Primitives.KEM.KEM (KEM)
@@ -162,9 +163,10 @@ theorem createKEMHeaderFrom_hdrTrace (kemElements : Array ByteArray) (keys : Arr
       refine Prod.ext rfl ?_
       rw [h2]
       by_cases hp : path.size - 1 - j > 0
-      · rw [if_pos hp, if_pos hp, hpad _ (by omega)]
+      · simp only [hp, ↓reduceIte]
+        rw [hpad _ (by omega)]
         rfl
-      · rw [if_neg hp, if_neg hp]
+      · simp only [hp, ↓reduceIte]
         rfl
   exact ⟨s path.size, htr _ le_rfl, hhdr, hsprp⟩
 
@@ -233,11 +235,69 @@ theorem hdrTrace_createKEMHeaderFrom (kemElements : Array ByteArray) (keys : Arr
       · rw [hx, hrk _ (by omega)]
       · rw [hx]
         by_cases hp : path.size - 1 - j > 0
-        · simp only [if_pos hp, hrp _ (show path.size - 1 - j - 1 < path.size by omega)]
+        · simp only [hp, ↓reduceIte, hrp _ (show path.size - 1 - j - 1 < path.size by omega)]
           rfl
-        · simp only [if_neg hp]
+        · simp only [hp, ↓reduceIte]
           rfl)
   rwa [hsn] at this
+
+/-! ## The packet -/
+
+variable (cipher : WideBlockCipher)
+
+/-- The packet, from each hop's keystream `ks`, tagging function `tag` and payload encryption
+`enc`. -/
+def pktFn (ks : ℕ → ByteArray) (tag enc : ℕ → ByteArray → ByteArray) (ke : Array ByteArray)
+    (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) : Option ByteArray :=
+  if payload.size = geom.forwardPayloadLength then
+    match hdrTrace kem geom ks tag ke filler path path.size with
+    | .error _ => none
+    | .ok s => some (v0AD ++ ke[0]! ++ s.1 ++ s.2
+        ++ (List.range' 0 path.size).foldl (fun b iRev => enc (path.size - 1 - iRev) b)
+          ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload))
+  else none
+
+/-- Each hop's payload encryption, from its keys. -/
+def keysEnc (keys : Array HopKeys) (i : ℕ) (b : ByteArray) : ByteArray :=
+  cipher.encrypt (keys[i]!).payloadEncryption.toArray (ofVector (keys[i]!).headerEncryptionIV) b
+
+/-- **A packet uses a hop's keys in three ways only**: the hop's header keystream, its MAC, and
+one encryption of the payload. -/
+theorem newKEMPacketFrom_pktFn (kemElements : Array ByteArray) (keys : Array HopKeys)
+    (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) :
+    (newKEMPacketFrom kem cipher macS streamS geom kemElements keys filler path payload).toOption
+      = pktFn kem geom (keysKs geom streamS keys) (keysTag macS keys) (keysEnc cipher keys)
+          kemElements filler path payload := by
+  unfold newKEMPacketFrom pktFn
+  dsimp only
+  by_cases hp : payload.size = geom.forwardPayloadLength
+  · simp only [hp, ne_eq, not_true_eq_false, ↓reduceIte, Std.Legacy.Range.forIn_eq_forIn_range',
+      Std.Legacy.Range.size, Nat.sub_zero, Nat.add_sub_cancel, Nat.div_one,
+      List.forIn_pure_yield_eq_foldl, pure_bind]
+    cases hc : createKEMHeaderFrom kem macS streamS geom kemElements keys filler path with
+    | error e =>
+      cases ht : hdrTrace kem geom (keysKs geom streamS keys) (keysTag macS keys) kemElements
+          filler path path.size with
+      | error _ => rfl
+      | ok s =>
+        rw [hdrTrace_createKEMHeaderFrom kem geom macS streamS kemElements keys filler path s ht]
+          at hc
+        cases hc
+    | ok x =>
+      obtain ⟨hdr, sprp⟩ := x
+      obtain ⟨s, hs, rfl, rfl⟩ := createKEMHeaderFrom_hdrTrace kem geom macS streamS kemElements
+        keys filler path hdr sprp hc
+      rw [hs]
+      show some _ = some _
+      congr 2
+      rw [Array.size_ofFn]
+      refine List.foldl_ext _ _ _ fun b iRev hi => ?_
+      have hlt : iRev < path.size := by simpa using hi
+      simp only [keysEnc]
+      rw [getElem!_pos _ _ (by simpa using (by omega : path.size - 1 - iRev < path.size))]
+      simp only [Array.getElem_ofFn]
+  · simp only [hp, ne_eq, not_false_eq_true, ↓reduceIte]
+    rfl
 
 end HeaderFn
 
