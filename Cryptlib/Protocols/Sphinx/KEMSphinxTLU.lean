@@ -379,11 +379,156 @@ theorem fillerAtF_real (hops : Array PathHop) (seeds seeds' : Array (Vector UInt
         rw [hagree _ hij]
       rw [this]
 
+/-- The keyed filler of the layer for position `i` has one block for each slot the path does
+not use, and one for each hop before `i`. -/
+theorem fillerAtF_size (hrouting : geom.routingInfoLength
+      = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hops : Array PathHop) (seeds : Array (Vector UInt8 32)) (filler : ByteArray) (j : ℕ)
+    (U : ByteArray) (hlen : hops.size ≤ geom.nrHops)
+    (hf : filler.size = (geom.nrHops - hops.size) * geom.perHopRoutingInfoLength)
+    (hU : U.size = geom.routingInfoLength + geom.perHopRoutingInfoLength) (i : ℕ)
+    (hi : i < hops.size) :
+    (fillerAtF kem kdfS streamS geom hops seeds filler j U i).size
+      = (geom.nrHops - hops.size + i) * geom.perHopRoutingInfoLength := by
+  induction i with
+  | zero => simpa [fillerAtF] using hf
+  | succ i ih =>
+    have hpad : (tailPadOf geom (fun k => if i + k = j then U
+        else headerKeystream streamS geom (kemHopKeys kem kdfS hops seeds (i + k)))
+        (hops.size - i - 1)).size = geom.perHopRoutingInfoLength := by
+      refine tailPadOf_size geom _ _ (fun m _ => ?_) ?_
+      · show (if i + m = j then U else _).size = _
+        split_ifs
+        · exact hU
+        · exact streamS.keystream_size _ _ _
+      · rw [Nat.sub_add_cancel (by omega), hrouting,
+          Nat.mul_comm geom.perHopRoutingInfoLength]
+        exact le_trans (Nat.mul_le_mul_right _ (by omega : hops.size - i ≤ geom.nrHops))
+          (Nat.le_add_right _ _)
+    rw [fillerAtF, tailFillerOf, ByteArray.size_append, hpad]
+    split_ifs with hc
+    · rw [ih (by omega), ← Nat.succ_mul]
+      congr 1
+    · rw [show geom.nrHops - hops.size + (i + 1) = 0 + 1 by omega, Nat.one_mul]
+      exact Nat.zero_add _
+
+theorem extract_extract_one {α : Type} (a : Array α) (i : ℕ) :
+    (a.extract i a.size).extract 1 (a.extract i a.size).size = a.extract (i + 1) a.size := by
+  apply Array.ext
+  · simp
+    omega
+  · intro k h1 h2
+    simp only [Array.getElem_extract]
+    congr 1
+    omega
+
 theorem extract_getElem!_congr {α : Type} [Inhabited α] (a b : Array α) (i m : ℕ)
     (hsz : a.size = b.size) (h : a[i + m]? = b[i + m]?) :
     (a.extract i a.size)[m]! = (b.extract i b.size)[m]! := by
   rw [Array.getElem!_eq_getD, Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
     Array.getD_eq_getD_getElem?, Array.getElem?_extract, Array.getElem?_extract, hsz, h]
+
+/-- `RSOR.layer` with hop `j`'s ciphertext `c` and keys `t` given: the layer for position
+`i`. -/
+def layerPK (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (c : ByteArray) (t : KeyTuple) (i : ℕ) : Except String ByteArray :=
+  let seeds := d.1.toArray.extract 0 hops.size
+  packetK kem cipher macS kdfS streamS geom (seeds.extract i seeds.size)
+    (fillerAtF kem kdfS streamS geom hops seeds
+      ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength))
+      j (ksOf streamS geom t) i)
+    (hops.extract i hops.size) payload (j - i) c t
+
+set_option maxHeartbeats 1000000 in
+/-- **Each hop before the keyed one forwards the next keyed layer.** -/
+theorem layerPK_step (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (payload pkt privKey : ByteArray) (j : ℕ)
+    (c : ByteArray) (t : KeyTuple) (i : ℕ) (hi : i < j) (hj : j < hops.size)
+    (hlen : hops.size ≤ geom.nrHops) (hc : c.size = kem.ciphertextSize)
+    (henc : ∀ m, m < hops.size → m ≠ j →
+      ∃ ct ss, kemEncap kem (hops[m]!).publicKey (d.1.toArray[m]!) = .ok (ct, ss))
+    (hrel : kem.Reliable (kem.stateFromSeed d.1.toArray[i]!))
+    (hpp : kemSelfPublicKeyBytes kem privKey = (hops[i]!).publicKey)
+    (hcmdnn : ∀ x ∈ (hops[i]!).commands, x ≠ RoutingCommand.null)
+    (hcmdnh : ∀ x ∈ (hops[i]!).commands, ∀ id m, x ≠ RoutingCommand.nextNodeHop id m)
+    (hpk : layerPK kem cipher macS kdfS streamS geom hops d payload j c t i = .ok pkt) :
+    ∃ (replayTag mac : Vector UInt8 32) (fwd : Vector UInt8 pkt.size),
+      unwrapKEM kem cipher macS kdfS streamS geom privKey pkt
+        = .ok (none, replayTag,
+            (hops[i]!).commands ++ [RoutingCommand.nextNodeHop (hops[i + 1]!).id mac],
+            some fwd) ∧
+      layerPK kem cipher macS kdfS streamS geom hops d payload j c t (i + 1)
+        = .ok (ofVector fwd) := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  unfold layerPK at hpk ⊢
+  dsimp only at hpk ⊢
+  obtain ⟨S, hSdef⟩ : ∃ S, S = d.1.toArray.extract 0 hops.size := ⟨_, rfl⟩
+  rw [← hSdef] at hpk ⊢
+  have hSsz : S.size = hops.size := by
+    rw [hSdef]
+    simp
+    omega
+  have hSget : ∀ m, m < hops.size → S[m]! = d.1.toArray[m]! := fun m hm => by
+    rw [hSdef, getElem!_extract_zero _ _ _ hm (by rw [Vector.size_toArray]; exact hlen)]
+  have hpi : (hops.extract i hops.size).size = hops.size - i := by simp
+  have hsi : (S.extract i S.size).size = hops.size - i := by simp [hSsz]
+  have hpget : ∀ m, i + m < hops.size → (hops.extract i hops.size)[m]! = hops[i + m]! :=
+    fun m hm => getElem!_extract_from hops i m hm
+  have hsget : ∀ m, i + m < hops.size → (S.extract i S.size)[m]! = S[i + m]! :=
+    fun m hm => getElem!_extract_from S i m (by omega)
+  have hF : ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) *
+      geom.perHopRoutingInfoLength)).size
+      = (geom.nrHops - hops.size) * geom.perHopRoutingInfoLength := by
+    have hle : (geom.nrHops - hops.size) * geom.perHopRoutingInfoLength
+        ≤ geom.perHopRoutingInfoLength * geom.nrHops := by
+      rw [Nat.mul_comm]
+      exact Nat.mul_le_mul_left _ (Nat.sub_le _ _)
+    rw [ByteArray.size_extract, Util.Bytes.size_ofVector, hrouting]
+    omega
+  obtain ⟨replayTag, mac, fwd, hun, hfwd⟩ := packetK_step kem cipher macS kdfS streamS geom hvalid
+    hmactag h16 (S.extract i S.size) _ (hops.extract i hops.size) payload pkt privKey (j - i) c t
+    (by omega) (by rw [hpi]; omega) (by rw [hpi]; omega) (by rw [hpi, hsi])
+    (fun _ => by
+      rw [fillerAtF_size kem kdfS streamS geom hrouting hops S _ j (ksOf streamS geom t) hlen hF
+        (show (ksOf streamS geom t).size = _ from streamS.keystream_size _ _ _) i (by omega),
+        hpi]
+      congr 1
+      omega)
+    hc
+    (fun m hm hmj => by
+      rw [hpi] at hm
+      rw [hpget m (by omega), hsget m (by omega), hSget _ (by omega)]
+      exact henc (i + m) (by omega) (by omega))
+    (by rw [hsget 0 (by omega), Nat.add_zero, hSget i (by omega)]; exact hrel)
+    (by rw [hpget 0 (by omega), Nat.add_zero]; exact hpp)
+    (by rw [hpget 0 (by omega), Nat.add_zero]; exact hcmdnn)
+    (by rw [hpget 0 (by omega), Nat.add_zero]; exact hcmdnh) hpk
+  rw [hpget 0 (by omega), hpget 1 (by omega), Nat.add_zero] at hun
+  refine ⟨replayTag, mac, fwd, hun, ?_⟩
+  rw [extract_extract_one, extract_extract_one, hpi] at hfwd
+  have hfill : fillerAtF kem kdfS streamS geom hops S
+        ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength))
+        j (ksOf streamS geom t) (i + 1)
+      = (if geom.nrHops > hops.size - i then fillerAtF kem kdfS streamS geom hops S
+            ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength))
+            j (ksOf streamS geom t) i else ByteArray.empty)
+        ++ tailPadOf geom (fun k => if k = j - i then ksOf streamS geom t
+            else headerKeystream streamS geom
+              (kemHopKeys kem kdfS (hops.extract i hops.size) (S.extract i S.size) k))
+          (hops.size - i - 1) := by
+    rw [fillerAtF, tailFillerOf]
+    congr 1
+    refine tailPadOf_congr geom _ _ _ fun m hm => ?_
+    show (if i + m = j then _ else _) = (if m = j - i then _ else _)
+    have hk : kemHopKeys kem kdfS (hops.extract i hops.size) (S.extract i S.size) m
+        = kemHopKeys kem kdfS hops S (i + m) := by
+      unfold kemHopKeys
+      rw [hpget m (by omega), hsget m (by omega)]
+    rw [hk]
+    split_ifs <;> first | rfl | omega
+  rw [hfill, show j - (i + 1) = j - i - 1 by omega]
+  exact hfwd
 
 /-- `RSOR.layer` with hop `j`'s ciphertext `c`, header keystream `U`, tagging function `tagf`
 and payload encryption `encf` given: the layer for position `i`. -/
