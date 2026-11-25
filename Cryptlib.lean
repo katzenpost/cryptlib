@@ -97,6 +97,7 @@ import Cryptlib.Protocols.Sphinx.KEMSphinxLayerIn
 import Cryptlib.Protocols.Sphinx.KEMSphinxLU
 import Cryptlib.Protocols.RSOR
 import Cryptlib.Protocols.Sphinx.KEMSphinxRSOR
+import Cryptlib.Protocols.Sphinx.KEMSphinxKeyed
 import Cryptlib.Protocols.Sphinx.Schemes
 import Cryptlib.Protocols.GroupComm
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.AckCodec
