@@ -645,6 +645,42 @@ theorem newKEMPacket_one (seed : Vector UInt8 32) (filler : ByteArray) (hop : Pa
   · rw [hsize1, show (#[hop] : Array PathHop).size = 0 + 1 from rfl, ht1, ht0, hH, hkey]
     rfl
 
+/-- A packet built for one hop from a ciphertext and keys is `pkt1` on them. -/
+theorem newKEMPacketFrom_one (c : ByteArray) (K : HopKeys) (filler : ByteArray) (hop : PathHop)
+    (payload pkt : ByteArray)
+    (h : newKEMPacketFrom kem cipher macS streamS geom #[c] #[K] filler #[hop] payload
+      = .ok pkt) :
+    pkt = pkt1 kem cipher macS streamS geom c (keyTuple K) filler hop payload := by
+  obtain ⟨-, hdr, sprpKeys, t, hhdr, ht0, htstep, rfl⟩ :=
+    newKEMPacketFrom_unfold kem cipher macS streamS geom _ _ _ _ _ _ h
+  obtain ⟨riKS, riPad, s, -, -, hrik, hs0, hsstep, rfl, rfl⟩ :=
+    createKEMHeaderFrom_unfold kem macS streamS geom _ _ _ _ _ _ hhdr
+  have hsz : (#[hop] : Array PathHop).size = 1 := rfl
+  rw [hsz] at hs0
+  obtain ⟨hrik0, -⟩ := hrik 0 Nat.zero_lt_one
+  obtain ⟨frag, hfrag, hs1, hs2⟩ := hsstep 0 Nat.zero_lt_one
+  have e10 : (#[hop] : Array PathHop).size - 1 - 0 = 0 := rfl
+  rw [e10] at hfrag hs1 hs2
+  rw [hsz] at hfrag
+  rw [if_neg (by decide : ¬ (0 > 0))] at hs2
+  have hs0b : (s 0).2 = ByteArray.empty := by rw [hs0]
+  have hs0a : (s 0).1 = if geom.nrHops > 1 then filler else ByteArray.empty := by rw [hs0]
+  rw [hs0b] at hfrag
+  have ht1 := htstep 0 (by simp)
+  unfold payloadEncryptStep at ht1
+  have hH : v0AD ++ (#[c] : Array ByteArray)[0]! ++ (s (0 + 1)).1 ++ (s (0 + 1)).2
+      = hdr1 kem macS streamS geom c K.headerEncryptionIV K.headerMAC K.headerEncryption filler
+          hop := by
+    rw [hs2, hs1, hrik0, hs0a]
+    unfold hdr1
+    rw [hfrag]
+    rfl
+  rw [show (Array.ofFn (fun i : Fin (#[hop] : Array PathHop).size =>
+      ({ key := (#[K] : Array HopKeys)[i.val]!.payloadEncryption,
+         iv := (#[K] : Array HopKeys)[i.val]!.headerEncryptionIV } : SPRPKey))).size = 0 + 1
+      from rfl, show (#[hop] : Array PathHop).size = 0 + 1 from rfl, ht1, ht0, hH]
+  rfl
+
 end Tagging
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
