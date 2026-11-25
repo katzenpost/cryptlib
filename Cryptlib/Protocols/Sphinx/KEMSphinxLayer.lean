@@ -118,10 +118,10 @@ theorem extract_append_tail (a d : ByteArray) (n m : Nat) (hn : a.size = n)
     Nat.add_sub_cancel_left]
   exact ByteArray.extract_zero_size
 
-/-- Decryption is injective on blocks of one size, of at least 16 bytes. It inverts encryption,
-which is an injection of a finite set into itself. -/
-theorem decrypt_injective (key : Array UInt8) (iv a b : ByteArray) (ha : 16 ≤ a.size)
-    (hab : b.size = a.size) (h : cipher.decrypt key iv a = cipher.decrypt key iv b) : a = b := by
+/-- Encryption inverts decryption as well, on blocks of at least 16 bytes: it is an injection of
+the blocks of one size into themselves, so it is onto. -/
+theorem encrypt_decrypt (key : Array UInt8) (iv a : ByteArray) (ha : 16 ≤ a.size) :
+    cipher.encrypt key iv (cipher.decrypt key iv a) = a := by
   have hinj : Function.Injective (fun v : Vector UInt8 a.size =>
       Util.Bytes.toVecN a.size (cipher.encrypt key iv (ofVector v))) := by
     intro v w hvw
@@ -134,22 +134,24 @@ theorem decrypt_injective (key : Array UInt8) (iv a b : ByteArray) (ha : 16 ≤ 
       cipher.roundTrip _ _ _ (by rw [Util.Bytes.size_ofVector]; exact ha)] at h2
     have h3 := congrArg (Util.Bytes.toVecN a.size) h2
     simpa using h3
-  have hsurj := Finite.injective_iff_surjective.mp hinj
-  obtain ⟨v, hv⟩ := hsurj (Util.Bytes.toVecN a.size a)
-  obtain ⟨w, hw⟩ := hsurj (Util.Bytes.toVecN a.size b)
+  obtain ⟨v, hv⟩ := Finite.injective_iff_surjective.mp hinj (Util.Bytes.toVecN a.size a)
   have hv' : cipher.encrypt key iv (ofVector v) = a := by
     have := congrArg ofVector hv
     simp only at this
     rwa [Util.Bytes.ofVector_toVecN _ (by rw [cipher.encrypt_size, Util.Bytes.size_ofVector]),
       Util.Bytes.ofVector_toVecN _ rfl] at this
-  have hw' : cipher.encrypt key iv (ofVector w) = b := by
-    have := congrArg ofVector hw
-    simp only at this
-    rwa [Util.Bytes.ofVector_toVecN _ (by rw [cipher.encrypt_size, Util.Bytes.size_ofVector]),
-      Util.Bytes.ofVector_toVecN _ hab] at this
-  rw [← hv', ← hw', cipher.roundTrip _ _ _ (by rw [Util.Bytes.size_ofVector]; exact ha),
-    cipher.roundTrip _ _ _ (by rw [Util.Bytes.size_ofVector]; exact ha)] at h
-  rw [← hv', ← hw', h]
+  calc cipher.encrypt key iv (cipher.decrypt key iv a)
+      = cipher.encrypt key iv (cipher.decrypt key iv (cipher.encrypt key iv (ofVector v))) := by
+        rw [hv']
+    _ = cipher.encrypt key iv (ofVector v) := by
+        rw [cipher.roundTrip _ _ _ (by rw [Util.Bytes.size_ofVector]; exact ha)]
+    _ = a := hv'
+
+/-- Decryption is injective on blocks of one size, of at least 16 bytes. -/
+theorem decrypt_injective (key : Array UInt8) (iv a b : ByteArray) (ha : 16 ≤ a.size)
+    (hab : b.size = a.size) (h : cipher.decrypt key iv a = cipher.decrypt key iv b) : a = b := by
+  have := congrArg (cipher.encrypt key iv) h
+  rwa [encrypt_decrypt cipher _ _ _ ha, encrypt_decrypt cipher _ _ _ (hab ▸ ha)] at this
 
 set_option maxHeartbeats 1000000 in
 /-- A payload changed before a mix is still changed after it: the two forwarded packets have the
