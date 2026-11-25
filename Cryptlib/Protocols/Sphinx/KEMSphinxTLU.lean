@@ -317,22 +317,34 @@ theorem forwardOnionK_real (names : Role → RSOR.Name) {pk : Key kem}
       (ofVector (kem.encodeCiphertext c)) (keyTuple (deriveHopKeys kdfS ss)) = .ok pkt := h1
   rw [h1']
 
-/-- World 0 of TLU→ around the honest relay's ciphertext and keys: the challenger draws its
-randomness and shows the first layer of the adversary's own onion. -/
-def forwardSetup (names : Role → RSOR.Name) :
+/-- A world of TLU→ around the honest relay's ciphertext and keys: what the challenger draws,
+and the world it shows. The game's output is the adversary's guess. -/
+def forwardSetupOf (names : Role → RSOR.Name) (Oth : Type) (draw : ProbComp Oth)
+    (view : {pk : Key kem} → ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      → Oth → kem.Ciphertext → KeyTuple → Protocols.RSOR.World 𝒮) :
     KeyedSetup kem (Protocols.RSOR.World 𝒮) Bool where
   Ch := ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names
-  Oth := RSOR.Randomness geom
-  drawOth _ := $ᵗ RSOR.Randomness geom
-  view ch r c t :=
-    { onion := forwardOnionK kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch r c t }
+  Oth := Oth
+  drawOth _ := draw
+  view := view
   final _ _ _ _ out := out
+
+/-- World 0: the challenger draws its randomness and shows the first layer of the adversary's
+own onion. -/
+abbrev forwardSetup (names : Role → RSOR.Name) :
+    KeyedSetup kem (Protocols.RSOR.World 𝒮) Bool :=
+  forwardSetupOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names (RSOR.Randomness geom)
+    ($ᵗ RSOR.Randomness geom) fun ch r c t =>
+      { onion := forwardOnionK kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch r c t }
 
 /-- The adversary of the keyed game that an adversary of TLU→ gives. It draws the keys of the
 two honest relays that are not behind the oracle, and answers for all three. -/
-def forwardAdv (names : Role → RSOR.Name)
+def forwardAdvOf (names : Role → RSOR.Name) (Oth : Type) (draw : ProbComp Oth)
+    (view : {pk : Key kem} → ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      → Oth → kem.Ciphertext → KeyTuple → Protocols.RSOR.World 𝒮)
     (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
-    KeyedAdversary (forwardSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names) where
+    KeyedAdversary (forwardSetupOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth
+      draw view) where
   St := A.State × Protocols.RSOR.Log 𝒮 × (Role → kem.PrivateKey)
   pre pk := do
     let kb ← (liftM (keygen kem) : OracleComp procSpec _)
@@ -346,12 +358,21 @@ def forwardAdv (names : Role → RSOR.Name)
     (simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 st.2.2 w.patch)
       (A.guess st.1 w.onion)).run' st.2.1
 
+/-- The adversary for world 0. -/
+abbrev forwardAdv (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    KeyedAdversary (forwardSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names) :=
+  forwardAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names _ _ _ A
+
 /-- The first phase of `forwardAdv`, answered by the honest relay: it is the first phase of the
 adversary of TLU→ against the game's honest relays. -/
-theorem forwardAdv_pre (names : Role → RSOR.Name)
+theorem forwardAdv_pre (names : Role → RSOR.Name) (Oth : Type) (draw : ProbComp Oth)
+    (view : {pk : Key kem} → ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      → Oth → kem.Ciphertext → KeyTuple → Protocols.RSOR.World 𝒮)
     (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) (k : Key kem × kem.PrivateKey) :
     simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
-        ((forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).pre k.1)
+        ((forwardAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth draw view
+          A).pre k.1)
       = (do
         let kb ← keygen kem
         let ks ← keygen kem
@@ -374,19 +395,21 @@ theorem forwardAdv_pre (names : Role → RSOR.Name)
       (fun | .relay => kb.2 | .back => kb.2 | .sender => ks.2)
       (fun | .relay => k.2 | .back => kb.2 | .sender => ks.2)
       (fun h hr => by cases h <;> first | rfl | exact absurd rfl hr) {} oa {}
-  unfold forwardAdv
+  unfold forwardAdvOf
   simp only [simulateQ_bind, simulateQ_pure, simulateQ_procImpl_liftM, hv]
 
 /-- The second phase of `forwardAdv`, answered by the keyed relay with the keys of the
 ciphertext's own secret: it is the second phase of the adversary of TLU→ against the game's
 honest relays. -/
-theorem forwardAdv_post (names : Role → RSOR.Name)
+theorem forwardAdv_post (names : Role → RSOR.Name) (Oth : Type) (draw : ProbComp Oth)
+    (view : {pk : Key kem} → ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      → Oth → kem.Ciphertext → KeyTuple → Protocols.RSOR.World 𝒮)
     (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) (k kb ks : Key kem × kem.PrivateKey)
     (c : kem.Ciphertext) (K : kem.Plaintext) (hdec : decapOf kem k.2 c = some K)
     (st : A.State) (log : Protocols.RSOR.Log 𝒮) (w : Protocols.RSOR.World 𝒮) :
     simulateQ (procImplK kem cipher macS kdfS streamS geom k.2 c ((hopKeysPRG kem kdfS).gen K))
-        ((forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).post
-          (st, log, fun | .relay => kb.2 | .back => kb.2 | .sender => ks.2) w)
+        ((forwardAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth draw view
+          A).post (st, log, fun | .relay => kb.2 | .back => kb.2 | .sender => ks.2) w)
       = (simulateQ (Protocols.RSOR.honest
             (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1 kb.1 ks.1)
             (fun | .relay => k.2 | .back => kb.2 | .sender => ks.2) w.patch)
@@ -397,7 +420,7 @@ theorem forwardAdv_post (names : Role → RSOR.Name)
     (fun | .relay => k.2 | .back => kb.2 | .sender => ks.2)
     (fun h hr => by cases h <;> first | rfl | exact absurd rfl hr) w.patch (A.guess st w.onion) log
   rw [procImplK_real kem cipher macS kdfS streamS geom k.2 c K hdec]
-  unfold forwardAdv
+  unfold forwardAdvOf
   simp only [StateT.run', simulateQ_map]
   exact congrArg (fun x => (·.1) <$> x) hv
 
@@ -486,8 +509,8 @@ theorem keyedReal_forwardAdv_evalDistEq (names : Role → RSOR.Name)
   unfold keyedReal keyedGame forwardDraw
   refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
   refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
-  simp only [forwardAdv_pre]
-  simp only [forwardSetup, bind_assoc, pure_bind, bind_pure]
+  simp only [forwardAdv, forwardAdv_pre]
+  simp only [forwardSetup, forwardSetupOf, bind_assoc, pure_bind, bind_pure]
   refine EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun kb =>
     EvalDistEq.bind_right _ fun ks => EvalDistEq.bind_right _ fun out => ?_
   exact OracleComp.EvalDistEq.bind_bind_swap _ _ _
@@ -568,8 +591,8 @@ theorem play_false_sub_keyedReal_le (names : Role → RSOR.Name)
           d.ch.c.req.first :=
     forwardOnionK_real kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.ch d.r d.s _ _
       pkt henc hpkt
-  rw [forwardAdv_post kem cipher macS kdfS streamS geom hvalid hmactag h16 names A d.k d.ch.kb
-    d.ch.ks _ _ hdec d.st d.log _]
+  rw [forwardAdv_post kem cipher macS kdfS streamS geom hvalid hmactag h16 names _ _ _ A d.k
+    d.ch.kb d.ch.ks _ _ hdec d.st d.log _]
   simp only [honion]
   rfl
 
