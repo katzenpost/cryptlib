@@ -6,6 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Cryptlib.Protocols.Sphinx.Geometry
 import Cryptlib.Protocols.Sphinx.Types
 import Cryptlib.Protocols.Sphinx.KEMSphinxTail
+import Cryptlib.Protocols.Sphinx.KEMSphinxRSOR
 import Cryptlib.Protocols.Sphinx.SURB
 import Cryptlib.Util.HexBytes
 import Cryptlib.Util.Bytes
@@ -14,7 +15,8 @@ import Cryptlib.Util.Bytes
 # KEM-Sphinx create/unwrap round-trip self-test
 
 Builds packets with fresh keys and checks that unwrapping recovers them, for every registered
-KEM-Sphinx scheme. -/
+KEM-Sphinx scheme. `runRSORRound` runs KEM Sphinx as a `Protocols.RSOR.Scheme`: a request, the
+exit relay's reply, and the sender opening it. -/
 
 open Cryptlib.Util.HexBytes
 open Cryptlib.Protocols.Sphinx.Geometry
@@ -315,6 +317,115 @@ def runSURBRound (kem : KEM) (geom : Geometry) : IO Bool := do
                     ok := false
       pure ok
 
+/-- A relay of the RSOR scheme and its private key, made as the scheme's `keygen` makes them. -/
+private def newRelay (kem : KEM) :
+    IO (Cryptlib.Protocols.RSOR.Hop (Vector UInt8 32) kem.PublicKey × kem.PrivateKey) := do
+  let sk := (keygenOf kem (← randomVector 32)).2
+  pure (⟨← randomVector 32, kem.derivePublicKey sk⟩, sk)
+
+private def randomDraw (geom : Geometry) : IO (RSOR.Draw geom) := do
+  let bs ← randomBytes (32 * geom.nrHops)
+  pure (Vector.ofFn fun i : Fin geom.nrHops => Vector.ofFn fun j : Fin 32 => bs[32 * i.val + j.val]!,
+    ← randomVector _)
+
+/-- What a relay of the scheme gets from an onion. -/
+private abbrev Step (geom : Geometry) :=
+  Cryptlib.Protocols.RSOR.Step RSOR.Name (RSOR.Onion geom) (RSOR.Msg geom) RSOR.Name
+    (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+
+/-- `v` with one bit of its byte `i` flipped. -/
+private def flipBit {n : Nat} (v : Vector UInt8 n) (i : Nat) : Vector UInt8 n :=
+  Vector.ofFn fun k => if k.val = i then v[k] ^^^ 1 else v[k]
+
+/-- The RSOR scheme end to end: a request over `nFwd` relays, the exit relay's reply over
+`nBack` relays, and the sender opening it. Each layer a relay receives is compared with `form`
+or `formBack`, which is what the scheme's laws state. A relay must reject a changed header, and
+a changed reply payload must not open. -/
+def runRSORRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) (nFwd nBack : Nat) :
+    IO Bool := do
+  let S := RSOR.scheme kem wbCipher macS kdfS streamS geom hvalid rfl h16
+  let fwd ← (List.range nFwd).mapM fun _ => newRelay kem
+  let back ← (List.range nBack).mapM fun _ => newRelay kem
+  let fh := fwd.map (·.1)
+  let bh := back.map (·.1)
+  if h : fh.length ≤ geom.nrHops ∧ (fh.map (·.name)).Nodup ∧ bh.length ≤ geom.nrHops ∧
+      (bh.map (·.name)).Nodup ∧ 0 < fh.length then
+    let some (_, exitKey) := fwd.getLast? | return false
+    let q : RSOR.Request kem geom :=
+      { msg := ← randomVector _, receiver := ← randomVector 32, fwd := ⟨fh, h.1, h.2.1⟩,
+        back := ⟨bh, h.2.2.1, h.2.2.2.1⟩, fwd_ne := List.ne_nil_of_length_pos h.2.2.2.2 }
+    let r : RSOR.Randomness geom := (← randomDraw geom, ← randomDraw geom, ← randomVector 64,
+      ← randomVector 16)
+    let answer : RSOR.Msg geom ← randomVector _
+    let mut ok := true
+    let mut o : RSOR.Onion geom := S.form q r q.first
+    for (i, sk) in (List.finRange q.fwd.hops.length).zip (fwd.map (·.2)) do
+      let want : RSOR.Onion geom := S.form q r i
+      if o ≠ want then
+        IO.eprintln s!"  forward hop {i}: the layer is not form's"
+        ok := false
+      if (S.proc sk q.fwd.hops[i].name (flipBit o.1 (geom.headerLength - 1), o.2)).isSome then
+        IO.eprintln s!"  forward hop {i}: accepted a changed header"
+        ok := false
+      let step : Option (Step geom) := S.proc sk q.fwd.hops[i].name o
+      match step with
+      | some (.forward next o') =>
+        if some next ≠ (q.fwd.hops[i.val + 1]?).map (·.name) then
+          IO.eprintln s!"  forward hop {i}: wrong next relay"
+          ok := false
+        o := o'
+      | some (.deliver m receiver) =>
+        if i.val + 1 ≠ q.fwd.hops.length ∨ m ≠ q.msg ∨ receiver ≠ q.receiver then
+          IO.eprintln s!"  forward hop {i}: wrong delivery"
+          ok := false
+      | _ =>
+        IO.eprintln s!"  forward hop {i}: proc failed"
+        ok := false
+    let exit : Option (RSOR.Name × RSOR.Onion geom) :=
+      S.reply exitKey q.fwd.hops[q.last].name answer o
+    if hb : q.back.hops.length = 0 then
+      if exit.isSome then
+        IO.eprintln "  the exit relay replied to a request with no backward path"
+        ok := false
+    else
+      match exit with
+      | none =>
+        IO.eprintln "  the exit relay's reply failed"
+        ok := false
+      | some (next, first) =>
+        if some next ≠ (q.back.hops[0]?).map (·.name) then
+          IO.eprintln "  the reply goes to the wrong relay"
+          ok := false
+        let mut ob := first
+        for (j, sk) in (List.finRange q.back.hops.length).zip (back.map (·.2)) do
+          let want : RSOR.Onion geom := S.formBack q r answer j
+          if ob ≠ want then
+            IO.eprintln s!"  backward hop {j}: the layer is not formBack's"
+            ok := false
+          let step : Option (Step geom) := S.proc sk q.back.hops[j].name ob
+          match step with
+          | some (.forward next ob') =>
+            if some next ≠ (q.back.hops[j.val + 1]?).map (·.name) then
+              IO.eprintln s!"  backward hop {j}: wrong next relay"
+              ok := false
+            ob := ob'
+          | some (.reply p) =>
+            let opened : Option (RSOR.Msg geom) := S.recover q r p
+            if j.val + 1 ≠ q.back.hops.length ∨ opened ≠ some answer then
+              IO.eprintln s!"  backward hop {j}: the sender does not recover the reply"
+              ok := false
+            if (S.recover q r (flipBit p 0)).isSome then
+              IO.eprintln s!"  backward hop {j}: a changed reply payload opened"
+              ok := false
+          | _ =>
+            IO.eprintln s!"  backward hop {j}: proc failed"
+            ok := false
+    pure ok
+  else
+    IO.eprintln "  runRSORRound: the paths are not routes"
+    pure false
+
 /-- Every round, against one KEM-Sphinx scheme. -/
 def runSuite (schemeName : String) (kem : KEM) : IO Bool := do
   IO.println s!"-- {schemeName} --"
@@ -366,6 +477,16 @@ def runSuite (schemeName : String) (kem : KEM) : IO Bool := do
     let surbOk ← runSURBRound kem geom
     IO.println s!"SURB round trip ({nrHops} hop(s)): {if surbOk then "ok" else "FAIL"}"
     ok := ok && surbOk
+
+  let geom5surb := ofKEMWith schemeName kem 103 true 5
+  let hvalid5s := ofKEMWith_validForKEM schemeName kem 103 true 5
+  let h165s : 16 ≤ geom5surb.payloadTagLength + geom5surb.forwardPayloadLength := by
+    rw [ofKEMWith_payloadTagLength schemeName kem 103 true 5]
+    unfold Cryptlib.Protocols.Sphinx.Constants.payloadTagLength; omega
+  for (nFwd, nBack) in [(1, 1), (3, 2), (5, 5), (2, 0)] do
+    let rsorOk ← runRSORRound kem geom5surb hvalid5s h165s nFwd nBack
+    IO.println s!"RSOR scheme ({nFwd} forward, {nBack} back of 5): {if rsorOk then "ok" else "FAIL"}"
+    ok := ok && rsorOk
 
   pure ok
 
