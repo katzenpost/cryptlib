@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Cryptlib.Protocols.Sphinx.KEMSphinxHop
 import Cryptlib.Protocols.Sphinx.KEMSphinxRSOR
+import Cryptlib.Util.UntilBad
 
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
 
@@ -63,6 +64,67 @@ def procImplK (sk : kem.PrivateKey) (c : kem.Ciphertext) (t : KeyTuple) :
     QueryImpl procSpec ProbComp :=
   decImplX kem sk c ∘ₛ procFromDecC kem cipher macS kdfS streamS geom c
     (procKeys kem cipher macS streamS geom t)
+
+/-- The honest node's oracle, answering packets that carry the ciphertext `c` with `f`. -/
+def procImplF (sk : kem.PrivateKey) (c : kem.Ciphertext) (f : ByteArray → ProcResult) :
+    QueryImpl procSpec ProbComp :=
+  decImplX kem sk c ∘ₛ procFromDecC kem cipher macS kdfS streamS geom c f
+
+/-- Whether a packet carries the ciphertext `c`. -/
+def carries (c : kem.Ciphertext) (pkt : ByteArray) : Bool :=
+  match kem.decodeCiphertext
+      (toVecN kem.ciphertextSize (pkt.extract 2 (2 + kem.ciphertextSize))) with
+  | some c' => decide (kem.encodeCiphertext c' = kem.encodeCiphertext c)
+  | none => false
+
+/-- A query is bad if it is a packet that carries `c` and is bad. -/
+def badQuery (c : kem.Ciphertext) (bad : ByteArray → Bool) : procSpec.Domain → Bool
+  | .inl _ => false
+  | .inr pkt => carries kem c pkt && bad pkt
+
+/-- `procImplF` asks `f` only about packets that carry `c`. -/
+theorem procImplF_congr (sk : kem.PrivateKey) (c : kem.Ciphertext)
+    (f₁ f₂ : ByteArray → ProcResult) (t : procSpec.Domain)
+    (h : ∀ pkt, t = .inr pkt → carries kem c pkt = true → f₁ pkt = f₂ pkt) :
+    procImplF kem cipher macS kdfS streamS geom sk c f₁ t = procImplF kem cipher macS kdfS streamS geom sk c f₂ t := by
+  cases t with
+  | inl t => rfl
+  | inr pkt =>
+    have h' := h pkt rfl
+    unfold carries at h'
+    simp only [procImplF, QueryImpl.apply_compose, procFromDecC, QueryImpl.add_eq_hAdd,
+      QueryImpl.add_apply_inr]
+    cases hd : kem.decodeCiphertext
+        (toVecN kem.ciphertextSize (pkt.extract 2 (2 + kem.ciphertextSize))) with
+    | none => rfl
+    | some c' =>
+      rw [hd] at h'
+      by_cases he : kem.encodeCiphertext c' = kem.encodeCiphertext c
+      · simp only [he, ↓reduceIte, h' (by simp [he])]
+      · simp only [he, ↓reduceIte]
+
+/-- **Two handlers that agree except on bad packets.** The node's oracles with them differ, for
+any adversary and event, by at most the chance that the adversary sends a bad packet carrying
+`c`. The bad packets are counted in the run with the second handler. -/
+theorem procImplF_le_add_bad (sk : kem.PrivateKey) (c : kem.Ciphertext)
+    (f₁ f₂ : ByteArray → ProcResult) (bad : ByteArray → Bool)
+    (h : ∀ pkt, carries kem c pkt = true → bad pkt = false → f₁ pkt = f₂ pkt)
+    (oa : OracleComp procSpec Bool) (p : Bool → Prop) :
+    Pr{let x ← simulateQ (procImplF kem cipher macS kdfS streamS geom sk c f₁) oa}[p x]
+      ≤ Pr{let x ← simulateQ (procImplF kem cipher macS kdfS streamS geom sk c f₂) oa}[p x]
+        + Pr{let z ← (simulateQ (Util.UntilBad.logged
+            (procImplF kem cipher macS kdfS streamS geom sk c f₂)) oa).run []}[z.2.any
+              (badQuery kem c bad) = true] ∧
+    Pr{let x ← simulateQ (procImplF kem cipher macS kdfS streamS geom sk c f₂) oa}[p x]
+      ≤ Pr{let x ← simulateQ (procImplF kem cipher macS kdfS streamS geom sk c f₁) oa}[p x]
+        + Pr{let z ← (simulateQ (Util.UntilBad.logged
+            (procImplF kem cipher macS kdfS streamS geom sk c f₂)) oa).run []}[z.2.any
+              (badQuery kem c bad) = true] :=
+  Util.UntilBad.prEvent_le_add_bad _ _ (badQuery kem c bad)
+    (fun t ht => procImplF_congr kem cipher macS kdfS streamS geom sk c f₁ f₂ t fun pkt hp hc =>
+      h pkt hc (by
+        subst hp
+        simpa [badQuery, hc] using ht)) oa p
 
 /-- With the keys the KDF derives from the ciphertext's own secret, the keyed oracle is the
 honest node's. -/
