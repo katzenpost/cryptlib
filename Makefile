@@ -28,6 +28,7 @@ TESTS := \
 	Cryptlib.Protocols.BACAP.test \
 	Cryptlib.Protocols.Sphinx.crypto_test \
 	Cryptlib.Primitives.WideBlockCipher.test \
+	Cryptlib.Primitives.WideBlockCipher.lioness_test \
 	Cryptlib.Protocols.Sphinx.commands_test \
 	Cryptlib.Protocols.Sphinx.geometry_test \
 	Cryptlib.Protocols.Sphinx.nike_selftest \

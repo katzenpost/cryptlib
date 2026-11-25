@@ -86,6 +86,9 @@ name = "Cryptlib.Protocols.Sphinx.crypto_test"
 name = "Cryptlib.Primitives.WideBlockCipher.test"
 
 [[lean_exe]]
+name = "Cryptlib.Primitives.WideBlockCipher.lioness_test"
+
+[[lean_exe]]
 name = "Cryptlib.Protocols.Sphinx.commands_test"
 
 [[lean_exe]]
