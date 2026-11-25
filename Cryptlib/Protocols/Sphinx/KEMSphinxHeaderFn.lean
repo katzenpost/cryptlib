@@ -76,6 +76,25 @@ def hdrTrace (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (k
             ++ (if path.size - 1 - j > 0 then padAt geom ks (path.size - 1 - j - 1)
               else ByteArray.empty)))
 
+/-- `padAt` reads the keystreams of the hops up to `i` only. -/
+theorem padAt_congr (ks ks' : ℕ → ByteArray) (i : ℕ) (h : ∀ m ≤ i, ks m = ks' m) :
+    padAt geom ks i = padAt geom ks' i := by
+  induction i with
+  | zero => simp only [padAt, h 0 le_rfl]
+  | succ i ih => simp only [padAt, h (i + 1) le_rfl, ih fun m hm => h m (Nat.le_succ_of_le hm)]
+
+/-- `hdrTrace` reads the keystreams and tagging functions of the path's hops only. -/
+theorem hdrTrace_congr (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ke : Array ByteArray) (filler : ByteArray) (path : Array PathHop)
+    (h : ∀ i, i < path.size → ks i = ks' i ∧ tag i = tag' i) (j : ℕ) (hj : j ≤ path.size) :
+    hdrTrace kem geom ks tag ke filler path j = hdrTrace kem geom ks' tag' ke filler path j := by
+  induction j with
+  | zero => rfl
+  | succ j ih =>
+    rw [hdrTrace, hdrTrace, ih (by omega)]
+    simp only [(h (path.size - 1 - j) (by omega)).1, (h (path.size - 1 - j) (by omega)).2,
+      padAt_congr geom ks ks' (path.size - 1 - j - 1) fun m _ => (h m (by omega)).1]
+
 /-- A step of `hdrTrace` that succeeds: the steps before it succeeded, and so did the routing
 fragment. -/
 theorem hdrTrace_succ_ok (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
@@ -256,6 +275,24 @@ def pktFn (ks : ℕ → ByteArray) (tag enc : ℕ → ByteArray → ByteArray) (
         ++ (List.range' 0 path.size).foldl (fun b iRev => enc (path.size - 1 - iRev) b)
           ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload))
   else none
+
+/-- `pktFn` reads the keystreams, tagging functions and payload encryptions of the path's hops
+only. -/
+theorem pktFn_congr (ks ks' : ℕ → ByteArray) (tag tag' enc enc' : ℕ → ByteArray → ByteArray)
+    (ke : Array ByteArray) (filler : ByteArray) (path : Array PathHop) (payload : ByteArray)
+    (h : ∀ i, i < path.size → ks i = ks' i ∧ tag i = tag' i ∧ enc i = enc' i) :
+    pktFn kem geom ks tag enc ke filler path payload
+      = pktFn kem geom ks' tag' enc' ke filler path payload := by
+  have hf : (List.range' 0 path.size).foldl (fun b iRev => enc (path.size - 1 - iRev) b)
+        ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)
+      = (List.range' 0 path.size).foldl (fun b iRev => enc' (path.size - 1 - iRev) b)
+        ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload) :=
+    List.foldl_ext _ _ _ fun b iRev hi => by
+      have hlt : iRev < path.size := by simpa using hi
+      rw [(h (path.size - 1 - iRev) (by omega)).2.2]
+  unfold pktFn
+  rw [hdrTrace_congr kem geom ks ks' tag tag' ke filler path
+    (fun i hi => ⟨(h i hi).1, (h i hi).2.1⟩) _ le_rfl, hf]
 
 /-- Each hop's payload encryption, from its keys. -/
 def keysEnc (keys : Array HopKeys) (i : ℕ) (b : ByteArray) : ByteArray :=

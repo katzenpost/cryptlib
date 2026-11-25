@@ -4,6 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Cryptlib.Protocols.Sphinx.KEMSphinxKeyed
+import Cryptlib.Protocols.Sphinx.KEMSphinxHeaderFn
 
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
 
@@ -123,6 +124,48 @@ theorem packetK_congr (seeds seeds' : Array (Vector UInt8 32)) (filler : ByteArr
       split_ifs with hi
       · rfl
       · simp only [kemHopCt, kemHopKeys, h i hi]
+
+/-- `packetK`'s packet, with hop `j`'s header keystream `U`, tagging function `tagf` and payload
+encryption `encf` given in place of its keys. -/
+def packetF (seeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop)
+    (payload : ByteArray) (j : Nat) (c U : ByteArray) (tagf encf : ByteArray → ByteArray) :
+    Option ByteArray :=
+  pktFn kem geom
+    (Function.update (keysKs geom streamS
+      (Array.ofFn fun i : Fin path.size => kemHopKeys kem kdfS path seeds i)) j U)
+    (Function.update (keysTag macS
+      (Array.ofFn fun i : Fin path.size => kemHopKeys kem kdfS path seeds i)) j tagf)
+    (Function.update (keysEnc cipher
+      (Array.ofFn fun i : Fin path.size => kemHopKeys kem kdfS path seeds i)) j encf)
+    (Array.ofFn fun i : Fin path.size => if i.val = j then c else kemHopCt kem path seeds i)
+    filler path payload
+
+/-- **A packet uses the keys given for hop `j` in three ways only**: their header keystream,
+their MAC, and one encryption of the payload. -/
+theorem packetK_eq_packetF (seeds : Array (Vector UInt8 32)) (filler : ByteArray)
+    (path : Array PathHop) (payload : ByteArray) (j : Nat) (c : ByteArray) (t : KeyTuple) :
+    (packetK kem cipher macS kdfS streamS geom seeds filler path payload j c t).toOption
+      = packetF kem cipher macS kdfS streamS geom seeds filler path payload j c
+          (streamS.keystream (ofVector t.2.2.2) (ofVector t.2.1)
+            (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+          (fun m => ofVector (macS.mac (ofVector t.2.2.1) m))
+          (fun b => cipher.encrypt t.1.toArray (ofVector t.2.1) b) := by
+  unfold packetK packetF
+  rw [newKEMPacketFrom_pktFn]
+  refine pktFn_congr kem geom _ _ _ _ _ _ _ _ _ _ fun i hi => ?_
+  have hget : ∀ f : Fin path.size → HopKeys, (Array.ofFn f)[i]! = f ⟨i, hi⟩ := fun f => by
+    rw [getElem!_pos _ i (by simpa using hi)]
+    simp only [Array.getElem_ofFn]
+  by_cases hij : i = j
+  · subst hij
+    refine ⟨?_, funext fun m => ?_, funext fun b => ?_⟩
+    · simp only [Function.update_self, keysKs, hget, ↓reduceIte, hopKeysOf]
+    · simp only [Function.update_self, keysTag, hget, ↓reduceIte, hopKeysOf]
+    · simp only [Function.update_self, keysEnc, hget, ↓reduceIte, hopKeysOf]
+  · refine ⟨?_, funext fun m => ?_, funext fun b => ?_⟩
+    · simp only [Function.update_of_ne hij, keysKs, hget, hij, ↓reduceIte]
+    · simp only [Function.update_of_ne hij, keysTag, hget, hij, ↓reduceIte]
+    · simp only [Function.update_of_ne hij, keysEnc, hget, hij, ↓reduceIte]
 
 /-- The bytes `kemEncap` returns for an encoded public key are the encodings of what `encapOf`
 returns. -/
