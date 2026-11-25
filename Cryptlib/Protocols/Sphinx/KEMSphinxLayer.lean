@@ -499,6 +499,42 @@ theorem procWith_eq_procKeys (dec : ByteArray → Except String ByteArray) (pkt 
   unfold unwrapKEMWith
   simp only [hb, hc]
 
+/-- A hop that accepts a packet has checked its MAC: the tag in the packet is the MAC of what
+comes before it, under the hop's MAC key. -/
+theorem procWith_mac (dec : ByteArray → Except String ByteArray) (pkt ss : ByteArray)
+    (res : Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option ByteArray)
+    (hd : dec (pkt.extract 2 (2 + kem.ciphertextSize)) = .ok ss)
+    (h : procWith kem cipher macS kdfS streamS geom dec pkt = some res) :
+    (ofVector (macS.mac (ofVector (deriveHopKeys kdfS ss).headerMAC)
+        (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength)))).data
+      = (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+        (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)).data := by
+  unfold procWith unwrapKEMWith unwrapKEMKeys at h
+  dsimp only at h
+  by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
+  · rw [dif_pos h1] at h; cases h
+  rw [dif_neg h1] at h
+  by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
+  · rw [if_pos h2] at h; cases h
+  rw [if_neg h2, hd] at h
+  dsimp only [Bind.bind, Except.bind] at h
+  by_contra h3
+  rw [if_pos h3] at h
+  cases h
+
+/-- A hop that accepts a packet with its keys given has checked its MAC under the MAC key. -/
+theorem procKeys_mac (t : KeyTuple) (pkt : ByteArray)
+    (res : Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option ByteArray)
+    (h : procKeys kem cipher macS streamS geom t pkt = some res) :
+    (ofVector (macS.mac (ofVector t.2.2.1)
+        (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength)))).data
+      = (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+        (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)).data := by
+  have hm := procWith_mac kem cipher macS (keysKDF t) streamS geom (fun _ => .ok .empty) pkt
+    .empty res rfl h
+  rwa [show (deriveHopKeys (keysKDF t) ByteArray.empty).headerMAC = t.2.2.1 from
+    congrArg (·.2.2.1) (keyTuple_keysKDF t .empty)] at hm
+
 /-- The header of a one-hop packet in closed form. It does not use the payload key. -/
 def hdr1 (ct : ByteArray) (iv : Vector UInt8 16) (km ke : Vector UInt8 32) (filler : ByteArray)
     (hop : PathHop) : ByteArray :=

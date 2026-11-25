@@ -663,13 +663,14 @@ theorem newKEMPacket_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MA
   subst hpkteq2
   refine ⟨fun h2 => ?_, fun h1 => ⟨_, unwrapKEM_hopPacket_terminal kem cipher
     macS kdfS streamS geom path keys kemElements riKeyStream riPadding sprpKeys path.size s t
-    hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent hkeyscontent
+    hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent
     htsize ht0size htstep hsprpkey hsprp hple h16 0 (by omega) hcmdnn hcmdnh payload
-    hpaysize ht0content privKey hpp⟩⟩
+    hpaysize ht0content privKey hpp (hkeyscontent 0 (by omega))⟩⟩
   obtain ⟨replayTag, cmds, hnewsize, hunwrap, rfl⟩ := unwrapKEM_hopPacket_nonterminal kem cipher
     macS kdfS streamS geom path keys kemElements riKeyStream riPadding sprpKeys path.size s t
-    hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent hkeyscontent
+    hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent
     htsize ht0size htstep hsprpkey hsprp hple h16 0 (by omega) hcmdnn hcmdnh privKey hpp
+    (hkeyscontent 0 (by omega))
   refine ⟨replayTag, _,
     ⟨(hopPacket kemElements riPadding s t path.size (0 + 1)).data, hnewsize⟩, hunwrap, ?_⟩
   show newKEMPacket kem cipher macS kdfS streamS geom (seeds.extract 1 seeds.size)

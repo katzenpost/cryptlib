@@ -1673,10 +1673,6 @@ theorem unwrapKEM_hopPacket_nonterminal (kem : KEM) (cipher : WideBlockCipher) (
          xorBytes (thisPad0.extract 0 riPadding[i - 1]!.size) riPadding[i - 1]!
            ++ thisPad0.extract riPadding[i - 1]!.size thisPad0.size
        else thisPad0))
-    (hkeyscontent : ∀ i (_hi : i < nrHops), ∃ seed ss,
-        kem.Reliable (kem.stateFromSeed seed) ∧
-        kemEncap kem (path[i]!).publicKey seed = Except.ok (kemElements[i]!, ss) ∧
-        keys[i]! = deriveHopKeys kdfS ss)
     (htsize : ∀ j (_hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
     (ht0size : (t 0).size = geom.payloadTagLength + geom.forwardPayloadLength)
     (htstep : ∀ j (_hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j)
@@ -1687,7 +1683,10 @@ theorem unwrapKEM_hopPacket_nonterminal (kem : KEM) (cipher : WideBlockCipher) (
     (k : Nat) (hk : k + 1 < nrHops)
     (hcmdnn : ∀ c ∈ (path[k]!).commands, c ≠ RoutingCommand.null)
     (hcmdnh : ∀ c ∈ (path[k]!).commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
-    (privKey : ByteArray) (hpp : kemSelfPublicKeyBytes kem privKey = (path[k]!).publicKey) :
+    (privKey : ByteArray) (hpp : kemSelfPublicKeyBytes kem privKey = (path[k]!).publicKey)
+    (hkey : ∃ seed ss, kem.Reliable (kem.stateFromSeed seed) ∧
+      kemEncap kem (path[k]!).publicKey seed = Except.ok (kemElements[k]!, ss) ∧
+      keys[k]! = deriveHopKeys kdfS ss) :
     ∃ (replayTag : Vector UInt8 32) (cmds : List RoutingCommand)
       (hnewsize : (hopPacket kemElements riPadding s t nrHops (k + 1)).size
         = (hopPacket kemElements riPadding s t nrHops k).size),
@@ -1700,7 +1699,7 @@ theorem unwrapKEM_hopPacket_nonterminal (kem : KEM) (cipher : WideBlockCipher) (
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
   have hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength := by omega
   -- The honest KEM round trip at hop `k`.
-  obtain ⟨seed, ss, hrel, hencap, hkeyseq⟩ := hkeyscontent k (by omega)
+  obtain ⟨seed, ss, hrel, hencap, hkeyseq⟩ := hkey
   have hdecap : kemDecap kem privKey kemElements[k]! = Except.ok ss :=
     kemEncap_kemDecap_of_honest kem privKey seed kemElements[k]! ss hrel (by rw [hpp]; exact hencap)
   -- The loop3 trace's step at hop `k` (`j := nrHops - 1 - k`).
@@ -2032,10 +2031,6 @@ theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (mac
          xorBytes (thisPad0.extract 0 riPadding[i - 1]!.size) riPadding[i - 1]!
            ++ thisPad0.extract riPadding[i - 1]!.size thisPad0.size
        else thisPad0))
-    (hkeyscontent : ∀ i (_hi : i < nrHops), ∃ seed ss,
-        kem.Reliable (kem.stateFromSeed seed) ∧
-        kemEncap kem (path[i]!).publicKey seed = Except.ok (kemElements[i]!, ss) ∧
-        keys[i]! = deriveHopKeys kdfS ss)
     (htsize : ∀ j (_hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
     (ht0size : (t 0).size = geom.payloadTagLength + geom.forwardPayloadLength)
     (htstep : ∀ j (_hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j)
@@ -2048,7 +2043,10 @@ theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (mac
     (hcmdnh : ∀ c ∈ (path[k]!).commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
     (payload : ByteArray) (hpayloadsize : payload.size = geom.forwardPayloadLength)
     (ht0content : t 0 = (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)
-    (privKey : ByteArray) (hpp : kemSelfPublicKeyBytes kem privKey = (path[k]!).publicKey) :
+    (privKey : ByteArray) (hpp : kemSelfPublicKeyBytes kem privKey = (path[k]!).publicKey)
+    (hkey : ∃ seed ss, kem.Reliable (kem.stateFromSeed seed) ∧
+      kemEncap kem (path[k]!).publicKey seed = Except.ok (kemElements[k]!, ss) ∧
+      keys[k]! = deriveHopKeys kdfS ss) :
     unwrapKEM kem cipher macS kdfS streamS geom privKey
         (hopPacket kemElements riPadding s t nrHops k)
       = Except.ok (some (if hasSurbReply (path[k]!).commands
@@ -2057,7 +2055,7 @@ theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (mac
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
   have hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength := by omega
   -- The honest KEM round trip at hop `k`.
-  obtain ⟨seed, ss, hrel, hencap, hkeyseq⟩ := hkeyscontent k (by omega)
+  obtain ⟨seed, ss, hrel, hencap, hkeyseq⟩ := hkey
   have hdecap : kemDecap kem privKey kemElements[k]! = Except.ok ss :=
     kemEncap_kemDecap_of_honest kem privKey seed kemElements[k]! ss hrel (by rw [hpp]; exact hencap)
   -- The loop3 trace's step at hop `k` (`j := nrHops - 1 - k = 0`).
@@ -2358,9 +2356,9 @@ theorem unwrapChain_hopPacket (kem : KEM) (cipher : WideBlockCipher) (macS : MAC
     by_cases hterm : k + 1 = nrHops
     · rw [unwrapKEM_hopPacket_terminal kem cipher macS kdfS streamS geom path keys kemElements
         riKeyStream riPadding sprpKeys nrHops s t hvalid hmactag hs0size hstep hknsize hksize
-        hpadsize hriKScontent hriPadcontent hkeyscontent htsize ht0size htstep hsprpkey hsprp
+        hpadsize hriKScontent hriPadcontent htsize ht0size htstep hsprpkey hsprp
         hgen h16 k hterm (hcmdnn k hk) (hcmdnh k hk)
-        payload hpayloadsize ht0content sk hpp0,
+        payload hpayloadsize ht0content sk hpp0 (hkeyscontent k (by omega)),
         hasSurbReply_eq_false (by rw [show k = nrHops - 1 from by omega]; exact hcmdsurb),
         if_neg Bool.false_ne_true]
       dsimp only [Bind.bind, Except.bind]
@@ -2368,9 +2366,9 @@ theorem unwrapChain_hopPacket (kem : KEM) (cipher : WideBlockCipher) (macS : MAC
     · have hklt : k + 1 < nrHops := by omega
       obtain ⟨replayTag, cmds, hnewsize, heq, hcmdseq⟩ := unwrapKEM_hopPacket_nonterminal kem cipher
         macS kdfS streamS geom path keys kemElements riKeyStream riPadding sprpKeys nrHops s t
-        hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent hkeyscontent
+        hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent
         htsize ht0size htstep hsprpkey hsprp hgen h16 k hklt (hcmdnn k (by omega)) (hcmdnh k (by omega))
-        sk hpp0
+        sk hpp0 (hkeyscontent k (by omega))
       rw [heq]
       dsimp only [Bind.bind, Except.bind]
       have hrestlen : rest.length = nrHops - (k + 1) := by

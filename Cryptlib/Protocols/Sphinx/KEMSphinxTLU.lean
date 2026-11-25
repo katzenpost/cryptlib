@@ -438,7 +438,8 @@ def onionF (q : RSOR.Request kem geom) (r : RSOR.Randomness geom) (j : ℕ) (c :
 hop at position `j` given. -/
 def onionK (q : RSOR.Request kem geom) (r : RSOR.Randomness geom) (j : ℕ) (c : kem.Ciphertext)
     (t : KeyTuple) (i : ℕ) : RSOR.Onion geom :=
-  onionF kem cipher macS kdfS streamS geom q r j c (ksOf streamS geom t) (tagOf macS t) (encOf cipher t) i
+  onionF kem cipher macS kdfS streamS geom q r j c (ksOf streamS geom t) (tagOf macS t)
+    (encOf cipher t) i
 
 /-- With the ciphertext and keys that the seed `s` gives at position `j`, the keyed layer is the
 layer of `q`'s onion built from the randomness with `s` at that position, for a layer up to

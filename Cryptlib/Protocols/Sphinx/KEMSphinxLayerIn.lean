@@ -178,8 +178,9 @@ theorem newKEMPacket_layer (hvalid : geom.ValidForKEM kem)
   have htsize := newKEMPacket_payload_size_trace cipher sprpKeys t htstep
   obtain ⟨replayTag, cmds, hnewsize, hunwrap, -⟩ := unwrapKEM_hopPacket_nonterminal kem cipher
     macS kdfS streamS geom path keys kemElements riKeyStream riPadding sprpKeys path.size s t
-    hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent hkeyscontent
+    hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent
     htsize ht0size htstep hsprpkey hsprp hple h16 0 (by omega) hcmdnn hcmdnh privKey hpp
+    (hkeyscontent 0 (by omega))
   have hsl := hopPacket_slices kem macS geom path keys kemElements riKeyStream riPadding cipher
     sprpKeys path.size s t hvalid hmactag hs0size hstep hknsize hksize hpadsize htsize ht0size
     hsprp hple 1 (by omega)
