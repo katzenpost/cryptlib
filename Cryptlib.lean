@@ -10,6 +10,7 @@ import Cryptlib.Primitives.Hash.Blake2s
 import Cryptlib.Primitives.MAC.HMAC
 import Cryptlib.Primitives.KDF.HKDF
 import Cryptlib.Primitives.KDF.Argon2
+import Cryptlib.Util.UntilBad
 import Cryptlib.Util.NatBytes
 import Cryptlib.Util.HexBytes
 import Cryptlib.Util.Hex

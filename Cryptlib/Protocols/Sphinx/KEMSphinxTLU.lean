@@ -542,6 +542,49 @@ theorem layerPK_step (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = m
   rw [hfill, show j - (i + 1) = j - i - 1 by omega]
   exact hfwd
 
+/-- Layer `i` from layer `i + n`: `wrapHop` once for each hop from `i` on, with the ciphertexts
+and keys the seeds give. -/
+def wrapUp (hops : Array PathHop) (d : RSOR.Draw geom) : ℕ → ℕ → ByteArray → ByteArray
+  | _, 0, L => L
+  | i, n + 1, L => wrapHop kem cipher macS streamS geom (hops.extract i hops.size)
+      (kemHopCt kem (hops.extract i hops.size)
+        ((d.1.toArray.extract 0 hops.size).extract i (d.1.toArray.extract 0 hops.size).size) 0)
+      (kemHopKeys kem kdfS (hops.extract i hops.size)
+        ((d.1.toArray.extract 0 hops.size).extract i (d.1.toArray.extract 0 hops.size).size) 0)
+      (wrapUp hops d (i + 1) n L)
+
+/-- **A keyed layer before the keyed hop is that hop's layer, wrapped.** The hops in between
+have keys with private keys, their seeds do not make the KEM fail, and none carries commands of
+its own that end a path. -/
+theorem layerPK_chain (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ) (c : ByteArray)
+    (t : KeyTuple) (hj : j < hops.size) (hlen : hops.size ≤ geom.nrHops)
+    (hc : c.size = kem.ciphertextSize)
+    (henc : ∀ m, m < hops.size → m ≠ j →
+      ∃ ct ss, kemEncap kem (hops[m]!).publicKey (d.1.toArray[m]!) = .ok (ct, ss))
+    (hrel : ∀ m, m < j → kem.Reliable (kem.stateFromSeed d.1.toArray[m]!))
+    (hsk : ∀ m, m < j → ∃ privKey, kemSelfPublicKeyBytes kem privKey = (hops[m]!).publicKey)
+    (hcmdnn : ∀ m, m < j → ∀ x ∈ (hops[m]!).commands, x ≠ RoutingCommand.null)
+    (hcmdnh : ∀ m, m < j → ∀ x ∈ (hops[m]!).commands, ∀ id b,
+      x ≠ RoutingCommand.nextNodeHop id b)
+    (n i : ℕ) (hi : i + n = j) (pkt : ByteArray)
+    (hpk : layerPK kem cipher macS kdfS streamS geom hops d payload j c t i = .ok pkt) :
+    ∃ L, layerPK kem cipher macS kdfS streamS geom hops d payload j c t j = .ok L ∧
+      pkt = wrapUp kem cipher macS kdfS streamS geom hops d i n L := by
+  induction n generalizing i pkt with
+  | zero =>
+    obtain rfl : i = j := by omega
+    exact ⟨pkt, hpk, rfl⟩
+  | succ n ih =>
+    obtain ⟨privKey, hpp⟩ := hsk i (by omega)
+    obtain ⟨-, -, fwd, -, hfwd, hwrap⟩ := layerPK_step kem cipher macS kdfS streamS geom hvalid
+      hmactag h16 hops d payload
+      pkt privKey j c t i (by omega) hj hlen hc henc (hrel i (by omega)) hpp
+      (hcmdnn i (by omega)) (hcmdnh i (by omega)) hpk
+    obtain ⟨L, hL, heq⟩ := ih (i + 1) (by omega) (ofVector fwd) hfwd
+    exact ⟨L, hL, by rw [hwrap, heq]; rfl⟩
+
 /-- The layer for a position past the keyed hop: built from the seeds, with the keyed filler. -/
 def layerPast (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
     (U : ByteArray) (i : ℕ) : Except String ByteArray :=
@@ -956,6 +999,15 @@ def layerF (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j 
     (fillerAtF kem kdfS streamS geom hops seeds
       ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength)) j U i)
     (hops.extract i hops.size) payload (j - i) c U tagf encf
+
+/-- The keyed layer with the keystream, tagging function and payload encryption of the keys
+`t` is the keyed layer for `t`. -/
+theorem layerF_eq_layerPK (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray)
+    (j : ℕ) (c : ByteArray) (t : KeyTuple) (i : ℕ) :
+    layerF kem cipher macS kdfS streamS geom hops d payload j c (ksOf streamS geom t)
+        (tagOf macS t) (encOf cipher t) i
+      = (layerPK kem cipher macS kdfS streamS geom hops d payload j c t i).toOption :=
+  (packetK_eq_packetF kem cipher macS kdfS streamS geom _ _ _ payload (j - i) c t).symm
 
 /-- With the ciphertext that the seed `s` gives at hop `j` and the keystream, tagging function
 and payload encryption of its keys, `layerF` is the layer built from the draw with `s` at
