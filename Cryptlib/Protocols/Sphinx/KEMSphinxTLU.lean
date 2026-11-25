@@ -172,6 +172,37 @@ theorem extract_setIfInBounds_getElem? {α : Type} (a : Array α) (j m i : ℕ) 
 def setSeed (r : RSOR.Randomness geom) (j : Nat) (s : Vector UInt8 32) : RSOR.Randomness geom :=
   ((r.1.1.setIfInBounds j s, r.1.2), r.2)
 
+theorem setIfInBounds_getElem_self {α : Type} {n : ℕ} (v : Vector α n) (j : ℕ) (h : j < n) :
+    v.setIfInBounds j v[j] = v := by
+  apply Vector.ext
+  intro i hi
+  rw [Vector.getElem_setIfInBounds]
+  split_ifs with hji
+  · subst hji; rfl
+  · rfl
+
+/-- Drawing the challenger's randomness and a seed, and putting the seed at forward position
+`j`, is drawing the randomness. -/
+theorem evalDistEq_setSeed {δ : Type} (j : ℕ) (hj : j < geom.nrHops)
+    (K : RSOR.Randomness geom → ProbComp δ) :
+    (do
+      let r ← $ᵗ (RSOR.Randomness geom)
+      let s ← $ᵗ (Vector UInt8 32)
+      K (setSeed geom r j s)) =ᵈ ($ᵗ (RSOR.Randomness geom) >>= K) := by
+  have hg : Function.Bijective (Function.uncurry
+      fun (r : RSOR.Randomness geom) (s : Vector UInt8 32) => (setSeed geom r j s, r.1.1[j])) := by
+    refine Function.bijective_iff_has_inverse.2
+      ⟨fun p => (setSeed geom p.1 j p.2, p.1.1.1[j]), ?_, ?_⟩ <;>
+    · rintro ⟨r, s⟩
+      simp [setSeed, Function.uncurry, setIfInBounds_getElem_self _ _ hj]
+  have hp := evalDistEq_pair_of_bijective
+    (g := fun (r : RSOR.Randomness geom) (s : Vector UInt8 32) => (r, s))
+    ⟨fun ⟨_, _⟩ ⟨_, _⟩ h => h, fun p => ⟨p, rfl⟩⟩ (fun p => K p.1)
+  exact ((evalDistEq_pair_of_bijective hg
+    (fun p : RSOR.Randomness geom × Vector UInt8 32 => K p.1)).trans hp.symm).trans
+    (EvalDistEq.bind_right _ fun r =>
+      OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 32)) (K r))
+
 /-- With the ciphertext and keys that the seed `s` gives at the honest relay's position, the
 keyed first layer is the first layer of the challenge's onion, built from the randomness with
 `s` at that position. -/
