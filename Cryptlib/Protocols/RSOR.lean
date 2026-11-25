@@ -260,8 +260,8 @@ structure Adversary where
 
 variable {P}
 
-/-- The game: the adversary wins if it says which world it was shown. -/
-def game (names : Role → S.Name) (A : P.Adversary) : ProbComp Bool := do
+/-- The adversary's guess when it is shown world `b`. -/
+def play (names : Role → S.Name) (A : P.Adversary) (b : Bool) : ProbComp Bool := do
   let kr ← S.keygen (names .relay)
   let kb ← S.keygen (names .back)
   let ks ← S.keygen (names .sender)
@@ -269,13 +269,22 @@ def game (names : Role → S.Name) (A : P.Adversary) : ProbComp Bool := do
   let hon : Honest S := fun h => ⟨names h, (key h).1⟩
   let sk := fun h => (key h).2
   let ((c, st), log) ← (simulateQ (honest hon sk {}) (A.choose hon)).run {}
-  let b ← $ᵗ Bool
   let w ← P.world c b
-  let b' ← (simulateQ (honest hon sk w.patch) (A.guess st w.onion)).run' log
+  (simulateQ (honest hon sk w.patch) (A.guess st w.onion)).run' log
+
+/-- The game: the challenger picks a world, and the adversary wins if it says which. -/
+def game (names : Role → S.Name) (A : P.Adversary) : ProbComp Bool := do
+  let b ← $ᵗ Bool
+  let b' ← if b then play names A true else play names A false
   return b == b'
 
 noncomputable def advantage (names : Role → S.Name) (A : P.Adversary) : ℝ≥0∞ :=
   𝒟[game names A].boolBias
+
+/-- The advantage is the distance between the adversary's guesses in the two worlds. -/
+theorem advantage_eq (names : Role → S.Name) (A : P.Adversary) :
+    advantage names A = 𝒟[play names A true].boolDist 𝒟[play names A false] :=
+  evalDist_boolBias_bind_uniformBool _ _
 
 end Property
 
