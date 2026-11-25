@@ -4,6 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Cryptlib.Protocols.Sphinx.KEMSphinxHop
+import Cryptlib.Protocols.Sphinx.KEMSphinxRSOR
 
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
 
@@ -19,6 +20,7 @@ open Cryptlib.Primitives.MAC (MAC)
 open Cryptlib.Primitives.KDF (KDF)
 open Cryptlib.Primitives.StreamCipher (StreamCipher)
 open Cryptlib.Primitives.KEM.KEM (KEM)
+open Cryptlib.Protocols.Sphinx.KEMSphinx.RSOR (Key keygen)
 open Cryptlib.Util.Bytes (ofVector)
 
 /-! # Replacing an honest node's keys while it keeps answering
@@ -27,7 +29,11 @@ open Cryptlib.Util.Bytes (ofVector)
 where the node then refuses that ciphertext. In the games of `Protocols.RSOR` the node does not
 refuse it: a relay processes any header it has not seen. `keyedChain_le` is the same replacement
 for a node that goes on answering packets with the challenge ciphertext, with the keys the game
-holds for it. With the real keys that node is the honest node (`procImplK_real`). -/
+holds for it. With the real keys that node is the honest node (`procImplK_real`).
+
+The node's key pair is drawn as a relay's is in `KEMSphinx.RSOR`: the public key is the one its
+private key gives, so the adversary is handed a `Key`. The KEM game `kemExpK` draws it the same
+way. -/
 
 section Keyed
 
@@ -98,25 +104,60 @@ theorem procImplK_real (sk : kem.PrivateKey) (c : kem.Ciphertext) (K : kem.Plain
         rw [unwrapKEMWith_const kem cipher macS kdfS streamS geom (kemDecap kem _), hk]
         simp [he]
 
-variable {kem} {V R : Type} {S : HopSetup kem V R} (A : HopAdversary S)
+/-- What the challenger does between the adversary's two phases, and how the game is scored,
+in terms of the honest node's KEM ciphertext and its four keys. -/
+structure KeyedSetup (kem : KEM) (V R : Type) where
+  /-- The adversary's choice. -/
+  Ch : Key kem → Type
+  /-- The challenger's randomness other than the seed of the encapsulation to the honest node. -/
+  Oth : Type
+  drawOth : {pk : Key kem} → Ch pk → ProbComp Oth
+  /-- The challenge. -/
+  view : {pk : Key kem} → Ch pk → Oth → kem.Ciphertext → KeyTuple → V
+  /-- The game's output, from the adversary's answer. -/
+  final : {pk : Key kem} → Ch pk → Oth → kem.Ciphertext → KeyTuple → R → Bool
+
+variable {kem} {V R : Type} (S : KeyedSetup kem V R)
+
+/-- An adversary with the honest node's oracle in both phases. -/
+structure KeyedAdversary where
+  St : Type
+  pre : (pk : Key kem) → OracleComp procSpec (S.Ch pk × St)
+  post : St → V → OracleComp procSpec R
+
+variable {S} (A : KeyedAdversary S)
 variable [SampleableType kem.Plaintext]
+
+/-- An adversary against the KEM with a decapsulation oracle: it is given a relay's public key, a
+ciphertext and a key, and guesses whether the key is the ciphertext's shared secret or uniform.
+After the challenge the oracle refuses the challenge ciphertext. -/
+structure KEMAdversaryK (kem : KEM) where
+  St : Key kem → Type
+  pre : (pk : Key kem) → OracleComp (decSpec kem) (St pk)
+  post : {pk : Key kem} → St pk → kem.Ciphertext → kem.Plaintext → OracleComp (decSpec kem) Bool
+
+/-- The experiment for `KEMAdversaryK`, with the real key for `b = true`. -/
+def kemExpK (B : KEMAdversaryK kem) (b : Bool) : ProbComp Bool := do
+  let kRand ← $ᵗ kem.Plaintext
+  let k ← keygen kem
+  let st ← simulateQ (decImpl kem k.2) (B.pre k.1)
+  let s ← $ᵗ (Vector UInt8 32)
+  simulateQ (decImplX kem k.2 (encapOf kem k.1.1 s).1)
+    (B.post st (encapOf kem k.1.1 s).1 (if b then (encapOf kem k.1.1 s).2 else kRand))
 
 /-- The game of `hopGame`, with the node answering packets that carry the challenge ciphertext
 with the game's keys. -/
 def keyedGame (sel : kem.Plaintext → kem.Plaintext → KeyTuple → KeyTuple) : ProbComp Bool := do
   let kR ← $ᵗ kem.Plaintext
   let u ← $ᵗ KeyTuple
-  let ks ← $ᵗ (Vector UInt8 32)
-  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom (keygenOf kem ks).2)
-    (A.pre (pkBytes kem ks))
+  let k ← keygen kem
+  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom k.2) (A.pre k.1)
   let s ← $ᵗ (Vector UInt8 32)
   let o ← S.drawOth cs.1
-  let r ← simulateQ (procImplK kem cipher macS kdfS streamS geom (keygenOf kem ks).2
-      (encapOf kem (keygenOf kem ks).1 s).1 (sel (encapOf kem (keygenOf kem ks).1 s).2 kR u))
-    (A.post cs.2 (S.view (keygenOf kem ks).1 cs.1 o (encapOf kem (keygenOf kem ks).1 s).1
-      (sel (encapOf kem (keygenOf kem ks).1 s).2 kR u)))
-  return S.final (keygenOf kem ks).1 cs.1 o (encapOf kem (keygenOf kem ks).1 s).1
-    (sel (encapOf kem (keygenOf kem ks).1 s).2 kR u) r
+  let r ← simulateQ (procImplK kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s).1
+      (sel (encapOf kem k.1.1 s).2 kR u))
+    (A.post cs.2 (S.view cs.1 o (encapOf kem k.1.1 s).1 (sel (encapOf kem k.1.1 s).2 kR u)))
+  return S.final cs.1 o (encapOf kem k.1.1 s).1 (sel (encapOf kem k.1.1 s).2 kR u) r
 
 /-- The node's keys are the KDF of the encapsulated secret. -/
 abbrev keyedReal : ProbComp Bool :=
@@ -129,37 +170,34 @@ abbrev keyedIdeal : ProbComp Bool :=
 /-- The KEM adversary that `A` gives: it answers the node's oracle with its decapsulation
 oracle, and packets with the challenge ciphertext with the keys it derives from the key it is
 given. -/
-def keyedKEMAdv : KEMCCAAdversary kem where
-  St := S.Ch × A.St
-  pre pk := simulateQ (procFromDec kem cipher macS kdfS streamS geom)
-    (A.pre (ofVector (kem.encodePublicKey pk)))
-  post cs pk c k := do
+def keyedKEMAdv : KEMAdversaryK kem where
+  St pk := S.Ch pk × A.St
+  pre pk := simulateQ (procFromDec kem cipher macS kdfS streamS geom) (A.pre pk)
+  post cs c k := do
     let o ← (liftM (S.drawOth cs.1) : OracleComp (decSpec kem) S.Oth)
     let r ← simulateQ (procFromDecC kem cipher macS kdfS streamS geom c
         (procKeys kem cipher macS streamS geom ((hopKeysPRG kem kdfS).gen k)))
-      (A.post cs.2 (S.view pk cs.1 o c ((hopKeysPRG kem kdfS).gen k)))
-    pure (S.final pk cs.1 o c ((hopKeysPRG kem kdfS).gen k) r)
+      (A.post cs.2 (S.view cs.1 o c ((hopKeysPRG kem kdfS).gen k)))
+    pure (S.final cs.1 o c ((hopKeysPRG kem kdfS).gen k) r)
 
-/-- `kemCCAExp` for `keyedKEMAdv`, written out. -/
+/-- `kemExpK` for `keyedKEMAdv`, written out. -/
 def keyedKS (b : Bool) : ProbComp Bool := do
   let kR ← $ᵗ kem.Plaintext
-  let ks ← $ᵗ (Vector UInt8 32)
-  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom (keygenOf kem ks).2)
-    (A.pre (pkBytes kem ks))
+  let k ← keygen kem
+  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom k.2) (A.pre k.1)
   let s ← $ᵗ (Vector UInt8 32)
   let o ← S.drawOth cs.1
-  let r ← simulateQ (procImplK kem cipher macS kdfS streamS geom (keygenOf kem ks).2
-      (encapOf kem (keygenOf kem ks).1 s).1
-      ((hopKeysPRG kem kdfS).gen (if b then (encapOf kem (keygenOf kem ks).1 s).2 else kR)))
-    (A.post cs.2 (S.view (keygenOf kem ks).1 cs.1 o (encapOf kem (keygenOf kem ks).1 s).1
-      ((hopKeysPRG kem kdfS).gen (if b then (encapOf kem (keygenOf kem ks).1 s).2 else kR))))
-  return S.final (keygenOf kem ks).1 cs.1 o (encapOf kem (keygenOf kem ks).1 s).1
-    ((hopKeysPRG kem kdfS).gen (if b then (encapOf kem (keygenOf kem ks).1 s).2 else kR)) r
+  let r ← simulateQ (procImplK kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s).1
+      ((hopKeysPRG kem kdfS).gen (if b then (encapOf kem k.1.1 s).2 else kR)))
+    (A.post cs.2 (S.view cs.1 o (encapOf kem k.1.1 s).1
+      ((hopKeysPRG kem kdfS).gen (if b then (encapOf kem k.1.1 s).2 else kR))))
+  return S.final cs.1 o (encapOf kem k.1.1 s).1
+    ((hopKeysPRG kem kdfS).gen (if b then (encapOf kem k.1.1 s).2 else kR)) r
 
-theorem kemCCAExp_keyedKEMAdv (b : Bool) :
-    kemCCAExp (keyedKEMAdv cipher macS kdfS streamS geom A) b
+theorem kemExpK_keyedKEMAdv (b : Bool) :
+    kemExpK (keyedKEMAdv cipher macS kdfS streamS geom A) b
       = keyedKS cipher macS kdfS streamS geom A b := by
-  unfold kemCCAExp keyedKEMAdv keyedKS pkBytes procImplK
+  unfold kemExpK keyedKEMAdv keyedKS procImplK
   have hl : ∀ (sk : kem.PrivateKey) (c : kem.Ciphertext) {α : Type} (x : ProbComp α),
       simulateQ (decImplX kem sk c) (liftM x : OracleComp (decSpec kem) α) = x := by
     intro sk c α x
@@ -171,15 +209,14 @@ theorem kemCCAExp_keyedKEMAdv (b : Bool) :
 
 /-- The adversary against the KDF's output that `A` gives. -/
 def keyedKeyAdv : PRGAdversary KeyTuple := fun t => do
-  let ks ← $ᵗ (Vector UInt8 32)
-  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom (keygenOf kem ks).2)
-    (A.pre (pkBytes kem ks))
+  let k ← keygen kem
+  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom k.2) (A.pre k.1)
   let s ← $ᵗ (Vector UInt8 32)
   let o ← S.drawOth cs.1
-  let r ← simulateQ (procImplK kem cipher macS kdfS streamS geom (keygenOf kem ks).2
-      (encapOf kem (keygenOf kem ks).1 s).1 t)
-    (A.post cs.2 (S.view (keygenOf kem ks).1 cs.1 o (encapOf kem (keygenOf kem ks).1 s).1 t))
-  return S.final (keygenOf kem ks).1 cs.1 o (encapOf kem (keygenOf kem ks).1 s).1 t r
+  let r ← simulateQ (procImplK kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s).1
+      (t))
+    (A.post cs.2 (S.view cs.1 o (encapOf kem k.1.1 s).1 (t)))
+  return S.final cs.1 o (encapOf kem k.1.1 s).1 (t) r
 
 theorem keyedKS_true_evalDistEq :
     keyedKS cipher macS kdfS streamS geom A true
@@ -207,8 +244,8 @@ against the KEM plus the advantage of `keyedKeyAdv` against the KDF as a generat
 theorem keyedChain_le :
     |(Pr{let x ← keyedReal cipher macS kdfS streamS geom A}[x = true]).toReal
       - (Pr{let x ← keyedIdeal cipher macS kdfS streamS geom A}[x = true]).toReal|
-    ≤ |(Pr{let x ← kemCCAExp (keyedKEMAdv cipher macS kdfS streamS geom A) true}[x = true]).toReal
-        - (Pr{let x ← (kemCCAExp (keyedKEMAdv cipher macS kdfS streamS geom A)
+    ≤ |(Pr{let x ← kemExpK (keyedKEMAdv cipher macS kdfS streamS geom A) true}[x = true]).toReal
+        - (Pr{let x ← (kemExpK (keyedKEMAdv cipher macS kdfS streamS geom A)
             false)}[x = true]).toReal|
       + |(Pr{let x ← prgRealExperiment (hopKeysPRG kem kdfS)
                         (keyedKeyAdv cipher macS kdfS streamS geom A)}[x = true]).toReal
@@ -220,7 +257,7 @@ theorem keyedChain_le :
     (fun x => x = true)
   have e2 := (prgIdeal_keyedKeyAdv_evalDistEq cipher macS kdfS streamS geom A).prEvent_eq
     (fun x => x = true)
-  rw [kemCCAExp_keyedKEMAdv, kemCCAExp_keyedKEMAdv, e1, e0, e2]
+  rw [kemExpK_keyedKEMAdv, kemExpK_keyedKEMAdv, e1, e0, e2]
   exact abs_sub_le _ _ _
 
 end Keyed
