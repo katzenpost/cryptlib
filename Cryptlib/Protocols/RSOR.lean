@@ -19,8 +19,8 @@ paper.
 Three things differ from the paper. Its challenger checks the adversary's paths; here a path
 that fails the check is not a `Route`. Its challenger also rejects a relay named on both paths
 with two keys; here the adversary may do that. Its reply oracle answers an onion any number of
-times before the challenge and once after it; here it answers once, as the protocol of §3.1.3
-does. -/
+times, except the replacement of TLU→, which it answers once; a second reply would tell the
+two worlds apart. Here every onion is answered once, as the protocol of §3.1.3 does. -/
 
 namespace Cryptlib.Protocols.RSOR
 
@@ -194,7 +194,8 @@ structure Log where
 /-- What the challenger does differently to an onion that an honest relay has accepted. -/
 structure Patch where
   proc : Role → S.Onion → S.Step → ProbComp (Option S.Step) := fun _ _ s => pure (some s)
-  reply : Role → S.Msg → S.Onion → S.Name × S.Onion → S.Name × S.Onion := fun _ _ _ o => o
+  reply : Role → S.Msg → S.Onion → Option (S.Name × S.Onion) → Option (S.Name × S.Onion) :=
+    fun _ _ _ out => out
 
 variable {S}
 
@@ -215,7 +216,7 @@ def answer (hon : Honest S) (sk : Role → S.Secret) (patch : Patch S) :
     let log ← get
     if (h, o) ∈ log.held then
       set { log with held := log.held.erase (h, o) }
-      return (S.reply (sk h) (hon h).name m o).map (patch.reply h m o)
+      return patch.reply h m o (S.reply (sk h) (hon h).name m o)
     else return none
 
 /-- The honest relays, running the scheme except where `patch` says otherwise. -/
@@ -278,7 +279,9 @@ structure ForwardChallenge (hon : Honest S) where
 /-- TLU→ (Definition 2). The adversary is shown the first layer of its onion, or of an onion
 that ends at the honest relay and carries a random message. In the second world the honest relay
 answers the replacement with what the original would have produced, and when its payload was
-changed on the way, with a random payload: the tag travels on. -/
+changed on the way, with a random payload: the tag travels on. As the exit relay it replies to
+the unchanged replacement with the original's reply. The replacement has no backward path, so
+the relay's own reply to it would fail. -/
 def forwardUnlinkable : Property S where
   Challenge := ForwardChallenge
   world c b := do
@@ -304,8 +307,8 @@ def forwardUnlinkable : Property S where
                 else pure (some (.deliver c.req.msg c.req.receiver))
               else pure (some s)
             reply := fun h m o out =>
-              if h = .relay ∧ o.1 = mine.1 ∧ c.pos + 1 = c.req.fwd.hops.length then
-                (c.req.back.hops[home].name, S.formBack c.req r m home)
+              if h = .relay ∧ o = mine ∧ c.pos + 1 = c.req.fwd.hops.length then
+                some (c.req.back.hops[home].name, S.formBack c.req r m home)
               else out } }
     else return { onion := S.form c.req r c.req.first }
 
@@ -348,7 +351,8 @@ def backwardUnlinkable : Property S where
               else if h = .relay ∧ swapAt = some o.1 then pure (some (.forward swap.1 swap.2))
               else pure (some s)
             reply := fun h _ o out =>
-              if h = .relay ∧ c.pos.val = 0 ∧ o.1 = (S.form c.req r c.req.last).1 then swap
+              if h = .relay ∧ c.pos.val = 0 ∧ o.1 = (S.form c.req r c.req.last).1 then
+                out.map fun _ => swap
               else out } }
     else return {
       onion

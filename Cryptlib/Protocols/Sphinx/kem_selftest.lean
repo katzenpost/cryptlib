@@ -3,6 +3,7 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
+import VCVio.OracleComp.RunIO
 import Cryptlib.Protocols.Sphinx.Geometry
 import Cryptlib.Protocols.Sphinx.Types
 import Cryptlib.Protocols.Sphinx.KEMSphinxTail
@@ -426,6 +427,66 @@ def runRSORRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
     IO.eprintln "  runRSORRound: the paths are not routes"
     pure false
 
+/-- The TLU→ game with the honest relay as the exit relay, played by an adversary that does
+nothing but route. The honest relay must give the same answers in both worlds: the message and
+the receiver of the adversary's request, and a reply to the first relay of its backward path. -/
+def runForwardGameRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
+  let S := RSOR.scheme kem wbCipher macS kdfS streamS geom hvalid rfl h16
+  let (first, firstKey) ← newRelay kem
+  let (relay, relayKey) ← newRelay kem
+  let (back, _) ← newRelay kem
+  let (sender, senderKey) ← newRelay kem
+  let hon : Cryptlib.Protocols.RSOR.Honest S := fun
+    | .relay => relay
+    | .back => back
+    | .sender => sender
+  let sk : Cryptlib.Protocols.RSOR.Role → kem.PrivateKey := fun
+    | .relay => relayKey
+    | .back => relayKey
+    | .sender => senderKey
+  if h : 2 ≤ geom.nrHops ∧ first.name ≠ relay.name ∧ back.name ≠ sender.name then
+    let req : RSOR.Request kem geom :=
+      { msg := ← randomVector _, receiver := ← randomVector 32
+        fwd := ⟨[first, relay], h.1, by simpa using h.2.1⟩
+        back := ⟨[back, sender], h.1, by simpa using h.2.2⟩
+        fwd_ne := by simp }
+    let c : Cryptlib.Protocols.RSOR.ForwardChallenge (S := S) hon :=
+      { req, pos := ⟨1, Nat.one_lt_two⟩, relay := rfl, sender := rfl }
+    let answer : RSOR.Msg geom ← randomVector _
+    let mut ok := true
+    for b in [false, true] do
+      let w : Cryptlib.Protocols.RSOR.World S ←
+        OracleComp.runIO (Cryptlib.Protocols.RSOR.forwardUnlinkable.world c b)
+      let shown : RSOR.Onion geom := w.onion
+      let step : Option (Step geom) := S.proc firstKey first.name shown
+      match step with
+      | some (.forward _ o) =>
+        let (out, log) ← OracleComp.runIO
+          ((Cryptlib.Protocols.RSOR.process hon sk w.patch (.relay, o)).run {})
+        let out : Option (Step geom) := out
+        match out with
+        | some (.deliver m receiver) =>
+          if m ≠ req.msg ∨ receiver ≠ req.receiver then
+            IO.eprintln s!"  world {b}: the honest relay delivers the wrong message"
+            ok := false
+        | _ =>
+          IO.eprintln s!"  world {b}: the honest relay does not deliver"
+          ok := false
+        let (re, _) ← OracleComp.runIO
+          ((Cryptlib.Protocols.RSOR.answer hon sk w.patch (.relay, answer, o)).run log)
+        let re : Option (RSOR.Name × RSOR.Onion geom) := re
+        if re.map (·.1) ≠ some back.name then
+          IO.eprintln s!"  world {b}: the honest relay does not reply to the backward path"
+          ok := false
+      | _ =>
+        IO.eprintln s!"  world {b}: the first relay does not forward"
+        ok := false
+    pure ok
+  else
+    IO.eprintln "  runForwardGameRound: the paths are not routes"
+    pure false
+
 /-- Every round, against one KEM-Sphinx scheme. -/
 def runSuite (schemeName : String) (kem : KEM) : IO Bool := do
   IO.println s!"-- {schemeName} --"
@@ -487,6 +548,10 @@ def runSuite (schemeName : String) (kem : KEM) : IO Bool := do
     let rsorOk ← runRSORRound kem geom5surb hvalid5s h165s nFwd nBack
     IO.println s!"RSOR scheme ({nFwd} forward, {nBack} back of 5): {if rsorOk then "ok" else "FAIL"}"
     ok := ok && rsorOk
+
+  let gameOk ← runForwardGameRound kem geom5surb hvalid5s h165s
+  IO.println s!"TLU→ game, honest run in both worlds: {if gameOk then "ok" else "FAIL"}"
+  ok := ok && gameOk
 
   pure ok
 
