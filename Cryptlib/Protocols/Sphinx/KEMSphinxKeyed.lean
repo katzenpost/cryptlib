@@ -238,19 +238,25 @@ theorem prgIdeal_keyedKeyAdv_evalDistEq :
   unfold prgIdealExperiment keyedKeyAdv keyedIdeal keyedGame
   exact (OracleComp.EvalDistEq.bind_const _ _).symm
 
+/-- What replacing the honest node's keys with uniform ones costs: the advantage of
+`keyedKEMAdv` against the KEM plus the advantage of `keyedKeyAdv` against the KDF as a
+generator. -/
+noncomputable def keyedCost : ℝ :=
+  |(Pr{let x ← kemExpK (keyedKEMAdv cipher macS kdfS streamS geom A) true}[x = true]).toReal
+      - (Pr{let x ← (kemExpK (keyedKEMAdv cipher macS kdfS streamS geom A)
+          false)}[x = true]).toReal|
+    + |(Pr{let x ← prgRealExperiment (hopKeysPRG kem kdfS)
+                      (keyedKeyAdv cipher macS kdfS streamS geom A)}[x = true]).toReal
+      - (Pr{let x ← prgIdealExperiment
+                      (keyedKeyAdv cipher macS kdfS streamS geom A)}[x = true]).toReal|
+
 /-- **The keyed chain.** Replacing the honest node's keys with uniform ones, while the node goes
-on answering with them, changes the game's outcome by at most the advantage of `keyedKEMAdv`
-against the KEM plus the advantage of `keyedKeyAdv` against the KDF as a generator. -/
+on answering with them, changes the game's outcome by at most `keyedCost`. -/
 theorem keyedChain_le :
     |(Pr{let x ← keyedReal cipher macS kdfS streamS geom A}[x = true]).toReal
       - (Pr{let x ← keyedIdeal cipher macS kdfS streamS geom A}[x = true]).toReal|
-    ≤ |(Pr{let x ← kemExpK (keyedKEMAdv cipher macS kdfS streamS geom A) true}[x = true]).toReal
-        - (Pr{let x ← (kemExpK (keyedKEMAdv cipher macS kdfS streamS geom A)
-            false)}[x = true]).toReal|
-      + |(Pr{let x ← prgRealExperiment (hopKeysPRG kem kdfS)
-                        (keyedKeyAdv cipher macS kdfS streamS geom A)}[x = true]).toReal
-        - (Pr{let x ← prgIdealExperiment
-                        (keyedKeyAdv cipher macS kdfS streamS geom A)}[x = true]).toReal| := by
+    ≤ keyedCost cipher macS kdfS streamS geom A := by
+  unfold keyedCost
   have e1 := (keyedKS_true_evalDistEq cipher macS kdfS streamS geom A).prEvent_eq
     (fun x => x = true)
   have e0 := (keyedKS_false_evalDistEq cipher macS kdfS streamS geom A).prEvent_eq

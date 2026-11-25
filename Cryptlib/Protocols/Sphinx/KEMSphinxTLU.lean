@@ -696,37 +696,6 @@ theorem play_false_sub_keyedReal_le (names : Role → RSOR.Name)
   simp only [honion]
   rfl
 
-open PRGScheme in
-/-- **World 0 of TLU→ with the honest relay's keys uniform.** World 0 differs from the keyed game
-with uniform keys by at most the probability of a bad draw, the advantage of `keyedKEMAdv`
-against the KEM, and the advantage of `keyedKeyAdv` against the KDF as a generator. -/
-theorem play_false_sub_keyedIdeal_le (names : Role → RSOR.Name)
-    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
-    |(Pr{let x ← Protocols.RSOR.Property.play names A false}[x = true]).toReal
-      - (Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
-          (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
-            A))}[x = true]).toReal|
-    ≤ (Pr{let d ← (forwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names
-        A)}[forwardBad kem cipher macS kdfS streamS geom hvalid hmactag h16 d]).toReal
-      + (|(Pr{let x ← (kemExpK (keyedKEMAdv cipher macS kdfS streamS geom
-            (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))
-            true)}[x = true]).toReal
-          - (Pr{let x ← (kemExpK (keyedKEMAdv cipher macS kdfS streamS geom
-            (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))
-            false)}[x = true]).toReal|
-        + |(Pr{let x ← (prgRealExperiment (hopKeysPRG kem kdfS)
-            (keyedKeyAdv cipher macS kdfS streamS geom
-              (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
-                A)))}[x = true]).toReal
-          - (Pr{let x ← (prgIdealExperiment
-            (keyedKeyAdv cipher macS kdfS streamS geom
-              (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
-                A)))}[x = true]).toReal|) :=
-  (abs_sub_le _ _ _).trans (add_le_add
-    (play_false_sub_keyedReal_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
-    (keyedChain_le cipher macS kdfS streamS geom
-      (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)))
-
 /-! ## World 1
 
 The challenger shows a replacement that ends at the honest relay, and the relay answers it as
@@ -901,6 +870,53 @@ theorem play_true_sub_keyedReal_le (names : Role → RSOR.Name)
     d.ch.kb d.ch.ks _ _ hdec d.st d.log _]
   simp only [shortView, h0, hp]
   rfl
+
+/-- **TLU→ for KEM Sphinx, down to uniform keys.** The advantage is at most the chance of a bad
+draw in either world, the cost of replacing the honest relay's keys in either world, and the
+distance between the two worlds once those keys are uniform. -/
+theorem forwardUnlinkable_le_keyedIdeal (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    ((Protocols.RSOR.forwardUnlinkable (S := 𝒮)).advantage names A).toReal
+      ≤ (Pr{let d ← (forwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+          A)}[forwardBad kem cipher macS kdfS streamS geom hvalid hmactag h16 d]).toReal
+        + (Pr{let d ← (forwardDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names _
+          (shortDraw geom)
+          A)}[shortBad kem cipher macS kdfS streamS geom hvalid hmactag h16 d]).toReal
+        + keyedCost cipher macS kdfS streamS geom
+          (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+        + keyedCost cipher macS kdfS streamS geom
+          (shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+        + |(Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+            (shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[x = true]).toReal
+          - (Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+            (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[x = true]).toReal| := by
+  refine (Protocols.RSOR.Property.advantage_toReal
+    (P := Protocols.RSOR.forwardUnlinkable (S := 𝒮)) names A).le.trans ?_
+  obtain ⟨h0, h0'⟩ := abs_le.1
+    (play_false_sub_keyedReal_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+  obtain ⟨h1, h1'⟩ := abs_le.1
+    (play_true_sub_keyedReal_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+  obtain ⟨c0, c0'⟩ := abs_le.1 (keyedChain_le cipher macS kdfS streamS geom
+    (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))
+  obtain ⟨c1, c1'⟩ := abs_le.1 (keyedChain_le cipher macS kdfS streamS geom
+    (shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))
+  have hi := le_abs_self
+    ((Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+        (shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+          A))}[x = true]).toReal
+      - (Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+        (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+          A))}[x = true]).toReal)
+  have hi' := neg_abs_le
+    ((Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+        (shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+          A))}[x = true]).toReal
+      - (Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+        (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+          A))}[x = true]).toReal)
+  refine abs_le.2 ⟨?_, ?_⟩ <;> linarith
 
 end Forward
 

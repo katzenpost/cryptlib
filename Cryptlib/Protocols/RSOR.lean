@@ -295,6 +295,15 @@ theorem advantage_eq (names : Role → S.Name) (A : P.Adversary) :
     advantage names A = 𝒟[play names A true].boolDist 𝒟[play names A false] :=
   evalDist_boolBias_bind_uniformBool _ _
 
+/-- The advantage as the difference between the two worlds' chances of the guess `true`. -/
+theorem advantage_toReal (names : Role → S.Name) (A : P.Adversary) :
+    (advantage names A).toReal
+      = |(Pr{let x ← play names A true}[x = true]).toReal
+        - (Pr{let x ← play names A false}[x = true]).toReal| := by
+  rw [advantage_eq, prEvent_eq_evalDist_singleton, prEvent_eq_evalDist_singleton]
+  exact ENNReal.absDiff_toReal (MeasureTheory.measure_ne_top _ _)
+    (MeasureTheory.measure_ne_top _ _)
+
 end Property
 
 /-! ## Tagging-forward layer unlinkability -/
