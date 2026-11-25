@@ -125,6 +125,20 @@ theorem packetK_congr (seeds seeds' : Array (Vector UInt8 32)) (filler : ByteArr
       · rfl
       · simp only [kemHopCt, kemHopKeys, h i hi]
 
+theorem kemHopCt_extract (path : Array PathHop) (seeds : Array (Vector UInt8 32)) (i : ℕ)
+    (hp : 1 + i < path.size) (hs : 1 + i < seeds.size) :
+    kemHopCt kem (path.extract 1 path.size) (seeds.extract 1 seeds.size) i
+      = kemHopCt kem path seeds (1 + i) := by
+  unfold kemHopCt
+  rw [getElem!_extract_from path 1 i hp, getElem!_extract_from seeds 1 i hs]
+
+theorem kemHopKeys_extract (path : Array PathHop) (seeds : Array (Vector UInt8 32)) (i : ℕ)
+    (hp : 1 + i < path.size) (hs : 1 + i < seeds.size) :
+    kemHopKeys kem kdfS (path.extract 1 path.size) (seeds.extract 1 seeds.size) i
+      = kemHopKeys kem kdfS path seeds (1 + i) := by
+  unfold kemHopKeys
+  rw [getElem!_extract_from path 1 i hp, getElem!_extract_from seeds 1 i hs]
+
 /-- The header keystream of a hop's keys. -/
 def ksOf (t : KeyTuple) : ByteArray :=
   streamS.keystream (ofVector t.2.2.2) (ofVector t.2.1)
@@ -215,6 +229,93 @@ theorem decapOf_encapOf (sk : kem.PrivateKey) (s : Vector UInt8 32)
   | error a b =>
     rw [hE] at h
     cases h
+
+/-- **A hop in front of the keyed one forwards the keyed packet on the rest of the path.** The
+keyed hop moves one place forward, and the filler gains one block, in which the keyed hop's part
+comes from the keystream of the keys given. -/
+theorem packetK_step (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (seeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop)
+    (payload pkt privKey : ByteArray) (j : ℕ) (c : ByteArray) (t : KeyTuple)
+    (hj : 1 ≤ j) (hjn : j < path.size) (hple : path.size ≤ geom.nrHops)
+    (hseeds : path.size ≤ seeds.size)
+    (hfsize : geom.nrHops > path.size →
+      filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hc : c.size = kem.ciphertextSize)
+    (henc : ∀ i, i < path.size → i ≠ j →
+      ∃ ct ss, kemEncap kem (path[i]!).publicKey (seeds[i]!) = .ok (ct, ss))
+    (hrel : kem.Reliable (kem.stateFromSeed seeds[0]!))
+    (hpp : kemSelfPublicKeyBytes kem privKey = (path[0]!).publicKey)
+    (hcmdnn : ∀ c ∈ (path[0]!).commands, c ≠ RoutingCommand.null)
+    (hcmdnh : ∀ c ∈ (path[0]!).commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
+    (hpk : packetK kem cipher macS kdfS streamS geom seeds filler path payload j c t = .ok pkt) :
+    ∃ (replayTag mac : Vector UInt8 32) (fwd : Vector UInt8 pkt.size),
+      unwrapKEM kem cipher macS kdfS streamS geom privKey pkt
+        = .ok (none, replayTag,
+            (path[0]!).commands ++ [RoutingCommand.nextNodeHop (path[1]!).id mac], some fwd) ∧
+      packetK kem cipher macS kdfS streamS geom (seeds.extract 1 seeds.size)
+          ((if geom.nrHops > path.size then filler else ByteArray.empty)
+            ++ tailPadOf geom (fun k => if k = j then ksOf streamS geom t
+              else headerKeystream streamS geom (kemHopKeys kem kdfS path seeds k))
+              (path.size - 1))
+          (path.extract 1 path.size) payload (j - 1) c t = .ok (ofVector fwd) := by
+  obtain ⟨ct0, ss0, henc0⟩ := henc 0 (by omega) (by omega)
+  have hget : ∀ {α : Type} [Inhabited α] (f : Fin path.size → α) (i : ℕ) (hi : i < path.size),
+      (Array.ofFn f)[i]! = f ⟨i, hi⟩ := fun f i hi => by
+    rw [getElem!_pos _ i (by simpa using hi)]
+    simp only [Array.getElem_ofFn]
+  unfold packetK at hpk
+  obtain ⟨h2, -⟩ := newKEMPacketFrom_unwrapKEM kem cipher macS kdfS streamS geom hvalid hmactag
+    h16 _ _ filler path payload pkt privKey hple hfsize (by simp) (by simp)
+    (fun i hi => by
+      have hi' : i < path.size := by simpa using hi
+      simp only [Array.getElem_ofFn]
+      split_ifs with hij
+      · exact hc
+      · obtain ⟨ct, ss, he⟩ := henc i hi' hij
+        unfold kemHopCt
+        rw [he]
+        exact kemEncap_size kem _ _ ct ss he)
+    hpp
+    ⟨seeds[0]!, ss0, hrel, by
+      rw [hget _ 0 (by omega)]
+      simp only [show ¬ (0 = j) by omega, ↓reduceIte]
+      unfold kemHopCt
+      rw [henc0], by
+      rw [hget _ 0 (by omega)]
+      simp only [show ¬ (0 = j) by omega, ↓reduceIte]
+      unfold kemHopKeys
+      rw [henc0]⟩
+    hcmdnn hcmdnh hpk
+  obtain ⟨replayTag, mac, fwd, hun, hfwd⟩ := h2 (by omega)
+  refine ⟨replayTag, mac, fwd, hun, ?_⟩
+  have hps : (path.extract 1 path.size).size = path.size - 1 := by simp
+  unfold packetK
+  rw [← hfwd]
+  congr 1
+  · apply Array.ext
+    · simp
+    · intro i h1 h2
+      have hi : 1 + i < path.size := by
+        simp only [Array.size_ofFn, hps] at h1
+        omega
+      simp only [Array.getElem_ofFn, Array.getElem_extract]
+      rw [kemHopCt_extract kem path seeds i hi (by omega)]
+      split_ifs <;> first | rfl | omega
+  · apply Array.ext
+    · simp
+    · intro i h1 h2
+      have hi : 1 + i < path.size := by
+        simp only [Array.size_ofFn, hps] at h1
+        omega
+      simp only [Array.getElem_ofFn, Array.getElem_extract]
+      rw [kemHopKeys_extract kem kdfS path seeds i hi (by omega)]
+      split_ifs <;> first | rfl | omega
+  · congr 1
+    refine tailPadOf_congr geom _ _ _ fun m hm => ?_
+    show (if m = j then _ else _) = headerKeystream streamS geom _
+    rw [hget _ m (by omega)]
+    split_ifs <;> rfl
 
 /-! ## The filler of a later layer, with one hop's keystream given
 
