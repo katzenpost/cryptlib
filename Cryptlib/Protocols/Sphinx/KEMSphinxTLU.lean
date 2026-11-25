@@ -125,6 +125,18 @@ theorem packetK_congr (seeds seeds' : Array (Vector UInt8 32)) (filler : ByteArr
       · rfl
       · simp only [kemHopCt, kemHopKeys, h i hi]
 
+/-- The header keystream of a hop's keys. -/
+def ksOf (t : KeyTuple) : ByteArray :=
+  streamS.keystream (ofVector t.2.2.2) (ofVector t.2.1)
+    (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+
+/-- The tagging function of a hop's keys. -/
+def tagOf (t : KeyTuple) (m : ByteArray) : ByteArray := ofVector (macS.mac (ofVector t.2.2.1) m)
+
+/-- The payload encryption of a hop's keys. -/
+def encOf (t : KeyTuple) (b : ByteArray) : ByteArray :=
+  cipher.encrypt t.1.toArray (ofVector t.2.1) b
+
 /-- `packetK`'s packet, with hop `j`'s header keystream `U`, tagging function `tagf` and payload
 encryption `encf` given in place of its keys. -/
 def packetF (seeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop)
@@ -146,10 +158,7 @@ theorem packetK_eq_packetF (seeds : Array (Vector UInt8 32)) (filler : ByteArray
     (path : Array PathHop) (payload : ByteArray) (j : Nat) (c : ByteArray) (t : KeyTuple) :
     (packetK kem cipher macS kdfS streamS geom seeds filler path payload j c t).toOption
       = packetF kem cipher macS kdfS streamS geom seeds filler path payload j c
-          (streamS.keystream (ofVector t.2.2.2) (ofVector t.2.1)
-            (geom.routingInfoLength + geom.perHopRoutingInfoLength))
-          (fun m => ofVector (macS.mac (ofVector t.2.2.1) m))
-          (fun b => cipher.encrypt t.1.toArray (ofVector t.2.1) b) := by
+          (ksOf streamS geom t) (tagOf macS t) (encOf cipher t) := by
   unfold packetK packetF
   rw [newKEMPacketFrom_pktFn]
   refine pktFn_congr kem geom _ _ _ _ _ _ _ _ _ _ fun i hi => ?_
@@ -159,9 +168,9 @@ theorem packetK_eq_packetF (seeds : Array (Vector UInt8 32)) (filler : ByteArray
   by_cases hij : i = j
   · subst hij
     refine ⟨?_, funext fun m => ?_, funext fun b => ?_⟩
-    · simp only [Function.update_self, keysKs, hget, ↓reduceIte, hopKeysOf]
-    · simp only [Function.update_self, keysTag, hget, ↓reduceIte, hopKeysOf]
-    · simp only [Function.update_self, keysEnc, hget, ↓reduceIte, hopKeysOf]
+    · simp only [Function.update_self, keysKs, hget, ↓reduceIte, hopKeysOf, ksOf]
+    · simp only [Function.update_self, keysTag, hget, ↓reduceIte, hopKeysOf, tagOf]
+    · simp only [Function.update_self, keysEnc, hget, ↓reduceIte, hopKeysOf, encOf]
   · refine ⟨?_, funext fun m => ?_, funext fun b => ?_⟩
     · simp only [Function.update_of_ne hij, keysKs, hget, hij, ↓reduceIte]
     · simp only [Function.update_of_ne hij, keysTag, hget, hij, ↓reduceIte]
@@ -207,62 +216,67 @@ theorem decapOf_encapOf (sk : kem.PrivateKey) (s : Vector UInt8 32)
     rw [hE] at h
     cases h
 
-/-! ## The filler of a later layer, with one hop's keys given
+/-! ## The filler of a later layer, with one hop's keystream given
 
 The filler of the layer for a position past the first is the sender's filler followed by blocks
-of every remaining hop's header keystream (`tailFiller`). So it depends on each hop's keys, and
-the layer with one hop's keys given needs its filler computed from those keys. -/
+of every remaining hop's header keystream (`tailFiller`). So the layer with one hop's keystream
+given needs its filler computed from that keystream. -/
 
-/-- `tailPad`, with each hop's keys given by `keys`. -/
-def tailPadOf (keys : ℕ → HopKeys) : ℕ → ByteArray
-  | 0 => tailPadBlock streamS geom (keys 0) 0
-  | i + 1 => xorBytes (tailPadBlock streamS geom (keys (i + 1)) (i + 1)) (tailPadOf keys i)
+/-- `tailPad`, from each hop's header keystream. -/
+def tailPadOf (ks : ℕ → ByteArray) : ℕ → ByteArray
+  | 0 => (ks 0).extract
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength
+        - (0 + 1) * geom.perHopRoutingInfoLength)
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength - 0 * geom.perHopRoutingInfoLength)
+  | i + 1 => xorBytes ((ks (i + 1)).extract
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength
+        - (i + 1 + 1) * geom.perHopRoutingInfoLength)
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength
+        - (i + 1) * geom.perHopRoutingInfoLength)) (tailPadOf ks i)
 
 theorem tailPadOf_kemHopKeys (path : Array PathHop) (seeds : Array (Vector UInt8 32)) (i : ℕ) :
-    tailPadOf streamS geom (kemHopKeys kem kdfS path seeds) i
+    tailPadOf geom (fun m => headerKeystream streamS geom (kemHopKeys kem kdfS path seeds m)) i
       = tailPad kem kdfS streamS geom path seeds i := by
   induction i with
   | zero => rfl
-  | succ i ih => rw [tailPadOf, tailPad, ih]
+  | succ i ih => simp only [tailPadOf, tailPad, ih, tailPadBlock]
 
-/-- `tailPadOf` uses a hop's keys only through its header encryption key and IV. -/
-theorem tailPadOf_congr (k₁ k₂ : ℕ → HopKeys) (i : ℕ)
-    (h : ∀ m ≤ i, (k₁ m).headerEncryption = (k₂ m).headerEncryption
-      ∧ (k₁ m).headerEncryptionIV = (k₂ m).headerEncryptionIV) :
-    tailPadOf streamS geom k₁ i = tailPadOf streamS geom k₂ i := by
+/-- `tailPadOf` reads the keystreams of the hops up to `i` only. -/
+theorem tailPadOf_congr (ks ks' : ℕ → ByteArray) (i : ℕ) (h : ∀ m ≤ i, ks m = ks' m) :
+    tailPadOf geom ks i = tailPadOf geom ks' i := by
   induction i with
-  | zero =>
-    simp only [tailPadOf, tailPadBlock, headerKeystream, (h 0 le_rfl).1, (h 0 le_rfl).2]
+  | zero => simp only [tailPadOf, h 0 le_rfl]
   | succ i ih =>
-    simp only [tailPadOf, tailPadBlock, headerKeystream, (h (i + 1) le_rfl).1,
-      (h (i + 1) le_rfl).2, ih fun m hm => h m (Nat.le_succ_of_le hm)]
+    simp only [tailPadOf, h (i + 1) le_rfl, ih fun m hm => h m (Nat.le_succ_of_le hm)]
 
-/-- `tailFiller` for a path of `size` hops, with each hop's keys given by `keys`. -/
-def tailFillerOf (keys : ℕ → HopKeys) (size : ℕ) (filler : ByteArray) : ByteArray :=
-  (if geom.nrHops > size then filler else ByteArray.empty)
-    ++ tailPadOf streamS geom keys (size - 1)
+/-- `tailFiller` for a path of `size` hops, from each hop's header keystream. -/
+def tailFillerOf (ks : ℕ → ByteArray) (size : ℕ) (filler : ByteArray) : ByteArray :=
+  (if geom.nrHops > size then filler else ByteArray.empty) ++ tailPadOf geom ks (size - 1)
 
-/-- The filler of the layer for position `i`, with hop `j`'s keys `t` given. -/
-def fillerAtK (hops : Array PathHop) (seeds : Array (Vector UInt8 32)) (filler : ByteArray)
-    (j : ℕ) (t : KeyTuple) : ℕ → ByteArray
+/-- The filler of the layer for position `i`, with hop `j`'s header keystream `U` given. -/
+def fillerAtF (hops : Array PathHop) (seeds : Array (Vector UInt8 32)) (filler : ByteArray)
+    (j : ℕ) (U : ByteArray) : ℕ → ByteArray
   | 0 => filler
-  | i + 1 => tailFillerOf streamS geom
-      (fun k => if i + k = j then hopKeysOf t else kemHopKeys kem kdfS hops seeds (i + k))
-      (hops.size - i) (fillerAtK hops seeds filler j t i)
+  | i + 1 => tailFillerOf geom
+      (fun k => if i + k = j then U
+        else headerKeystream streamS geom (kemHopKeys kem kdfS hops seeds (i + k)))
+      (hops.size - i) (fillerAtF hops seeds filler j U i)
 
-/-- With the keys that hop `j`'s seed gives, `fillerAtK` is the filler built from the seeds, for
-a layer up to hop `j`'s. The seeds may differ at `j`, which `fillerAtK` does not read. -/
-theorem fillerAtK_real (hops : Array PathHop) (seeds seeds' : Array (Vector UInt8 32))
+/-- With the keystream of the keys that hop `j`'s seed gives, `fillerAtF` is the filler built
+from the seeds, for a layer up to hop `j`'s. The seeds may differ at `j`, which `fillerAtF` does
+not read. -/
+theorem fillerAtF_real (hops : Array PathHop) (seeds seeds' : Array (Vector UInt8 32))
     (filler : ByteArray) (j : ℕ) (c ss : ByteArray) (hj : j < hops.size)
     (hsz : seeds'.size = hops.size)
     (henc : kemEncap kem (hops[j]!).publicKey (seeds'[j]!) = .ok (c, ss))
     (hagree : ∀ k, k ≠ j → seeds[k]! = seeds'[k]!) (i : ℕ) (hi : i ≤ j) :
-    fillerAtK kem kdfS streamS geom hops seeds filler j (keyTuple (deriveHopKeys kdfS ss)) i
+    fillerAtF kem kdfS streamS geom hops seeds filler j
+        (ksOf streamS geom (keyTuple (deriveHopKeys kdfS ss))) i
       = RSOR.fillerAt kem kdfS streamS geom hops seeds' filler i := by
   induction i with
   | zero => rfl
   | succ i ih =>
-    simp only [fillerAtK, RSOR.fillerAt]
+    simp only [fillerAtF, RSOR.fillerAt]
     rw [ih (by omega)]
     unfold tailFillerOf tailFiller
     rw [show (hops.extract i hops.size).size = hops.size - i by simp]
@@ -275,6 +289,8 @@ theorem fillerAtK_real (hops : Array PathHop) (seeds seeds' : Array (Vector UInt
         = kemHopKeys kem kdfS hops seeds' (i + m) := by
       unfold kemHopKeys
       rw [getElem!_extract_from _ _ _ hlt, getElem!_extract_from _ _ _ (by omega)]
+    show (if i + m = j then _ else _) = headerKeystream streamS geom
+      (kemHopKeys kem kdfS (hops.extract i hops.size) (seeds'.extract i seeds'.size) m)
     rw [hk]
     split_ifs with hij
     · have : kemHopKeys kem kdfS hops seeds' (i + m) = deriveHopKeys kdfS ss := by
@@ -282,12 +298,12 @@ theorem fillerAtK_real (hops : Array PathHop) (seeds seeds' : Array (Vector UInt
         unfold kemHopKeys
         rw [henc]
       rw [this]
-      exact ⟨rfl, rfl⟩
-    · have : kemHopKeys kem kdfS hops seeds (i + m) = kemHopKeys kem kdfS hops seeds' (i + m) := by
+      rfl
+    · have : kemHopKeys kem kdfS hops seeds (i + m)
+          = kemHopKeys kem kdfS hops seeds' (i + m) := by
         unfold kemHopKeys
         rw [hagree _ hij]
       rw [this]
-      exact ⟨rfl, rfl⟩
 
 theorem extract_getElem!_congr {α : Type} [Inhabited α] (a b : Array α) (i m : ℕ)
     (hsz : a.size = b.size) (h : a[i + m]? = b[i + m]?) :
@@ -295,26 +311,29 @@ theorem extract_getElem!_congr {α : Type} [Inhabited α] (a b : Array α) (i m 
   rw [Array.getElem!_eq_getD, Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
     Array.getD_eq_getD_getElem?, Array.getElem?_extract, Array.getElem?_extract, hsz, h]
 
-/-- `RSOR.layer` with hop `j`'s ciphertext `c` and keys `t` given: the layer for position
-`i`. -/
-def layerK (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
-    (c : ByteArray) (t : KeyTuple) (i : ℕ) : Except String ByteArray :=
+/-- `RSOR.layer` with hop `j`'s ciphertext `c`, header keystream `U`, tagging function `tagf`
+and payload encryption `encf` given: the layer for position `i`. -/
+def layerF (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (c U : ByteArray) (tagf encf : ByteArray → ByteArray) (i : ℕ) : Option ByteArray :=
   let seeds := d.1.toArray.extract 0 hops.size
-  packetK kem cipher macS kdfS streamS geom (seeds.extract i seeds.size)
-    (fillerAtK kem kdfS streamS geom hops seeds
-      ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength)) j t i)
-    (hops.extract i hops.size) payload (j - i) c t
+  packetF kem cipher macS kdfS streamS geom (seeds.extract i seeds.size)
+    (fillerAtF kem kdfS streamS geom hops seeds
+      ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength)) j U i)
+    (hops.extract i hops.size) payload (j - i) c U tagf encf
 
-/-- With the ciphertext and keys that the seed `s` gives at hop `j`, `layerK` is the layer built
-from the draw with `s` at position `j`, for a layer up to hop `j`'s. -/
-theorem layerK_real (hops : Array PathHop) (d : RSOR.Draw geom) (payload pkt : ByteArray)
+/-- With the ciphertext that the seed `s` gives at hop `j` and the keystream, tagging function
+and payload encryption of its keys, `layerF` is the layer built from the draw with `s` at
+position `j`, for a layer up to hop `j`'s. -/
+theorem layerF_real (hops : Array PathHop) (d : RSOR.Draw geom) (payload pkt : ByteArray)
     (j i : ℕ) (s : Vector UInt8 32) (c ss : ByteArray) (hi : i ≤ j) (hj : j < hops.size)
     (hlen : hops.size ≤ geom.nrHops)
     (henc : kemEncap kem (hops[j]!).publicKey s = .ok (c, ss))
     (hpkt : RSOR.layer kem cipher macS kdfS streamS geom hops (d.1.setIfInBounds j s, d.2)
       payload i = .ok pkt) :
-    layerK kem cipher macS kdfS streamS geom hops d payload j c
-      (keyTuple (deriveHopKeys kdfS ss)) i = .ok pkt := by
+    layerF kem cipher macS kdfS streamS geom hops d payload j c
+      (ksOf streamS geom (keyTuple (deriveHopKeys kdfS ss)))
+      (tagOf macS (keyTuple (deriveHopKeys kdfS ss)))
+      (encOf cipher (keyTuple (deriveHopKeys kdfS ss))) i = some pkt := by
   have hsz : ((d.1.setIfInBounds j s).toArray.extract 0 hops.size).size = hops.size := by
     simp; omega
   have hSS : (d.1.toArray.extract 0 hops.size).size
@@ -332,13 +351,16 @@ theorem layerK_real (hops : Array PathHop) (d : RSOR.Draw geom) (payload pkt : B
       rw [getElem!_extract_from _ _ _ (by omega), getElem!_extract_from _ _ _ (by omega),
         Nat.add_sub_cancel' hi, hs]
       exact henc) hpkt
-  unfold layerK
+  unfold layerF
   dsimp only
-  rw [fillerAtK_real kem kdfS streamS geom hops _ _ _ j c ss hj hsz (by rw [hs]; exact henc)
+  rw [fillerAtF_real kem kdfS streamS geom hops _ _ _ j c ss hj hsz (by rw [hs]; exact henc)
     (fun k hk => by
-      simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?, hget k hk]) i hi]
-  exact (packetK_congr kem cipher macS kdfS streamS geom _ _ _ _ _ _ _ _ fun m hm =>
-    extract_getElem!_congr _ _ i m hSS (hget (i + m) (by omega))).trans h1
+      simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?, hget k hk]) i hi,
+    ← packetK_eq_packetF,
+    packetK_congr kem cipher macS kdfS streamS geom _ _ _ _ _ _ _ _ fun m hm =>
+      extract_getElem!_congr _ _ i m hSS (hget (i + m) (by omega)),
+    h1]
+  rfl
 
 end PacketK
 
@@ -402,14 +424,21 @@ theorem evalDistEq_setSeed {δ : Type} (j : ℕ) (hj : j < geom.nrHops)
     (EvalDistEq.bind_right _ fun r =>
       OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 32)) (K r))
 
+/-- The layer of `q`'s onion for forward position `i`, with the KEM ciphertext, header
+keystream, tagging function and payload encryption of the hop at position `j` given. -/
+def onionF (q : RSOR.Request kem geom) (r : RSOR.Randomness geom) (j : ℕ) (c : kem.Ciphertext)
+    (U : ByteArray) (tagf encf : ByteArray → ByteArray) (i : ℕ) : RSOR.Onion geom :=
+  match layerF kem cipher macS kdfS streamS geom (RSOR.path kem q.fwd [.recipient q.receiver]) r.1
+      (RSOR.body kem macS kdfS streamS geom q r) j (ofVector (kem.encodeCiphertext c)) U tagf
+      encf i with
+  | some pkt => RSOR.split geom pkt
+  | none => default
+
 /-- The layer of `q`'s onion for forward position `i`, with the KEM ciphertext and keys of the
 hop at position `j` given. -/
 def onionK (q : RSOR.Request kem geom) (r : RSOR.Randomness geom) (j : ℕ) (c : kem.Ciphertext)
     (t : KeyTuple) (i : ℕ) : RSOR.Onion geom :=
-  match layerK kem cipher macS kdfS streamS geom (RSOR.path kem q.fwd [.recipient q.receiver]) r.1
-      (RSOR.body kem macS kdfS streamS geom q r) j (ofVector (kem.encodeCiphertext c)) t i with
-  | .ok pkt => RSOR.split geom pkt
-  | .error _ => default
+  onionF kem cipher macS kdfS streamS geom q r j c (ksOf streamS geom t) (tagOf macS t) (encOf cipher t) i
 
 /-- With the ciphertext and keys that the seed `s` gives at position `j`, the keyed layer is the
 layer of `q`'s onion built from the randomness with `s` at that position, for a layer up to
@@ -430,11 +459,13 @@ theorem onionK_real (q : RSOR.Request kem geom) (r : RSOR.Randomness geom)
       = ofVector (kem.encodePublicKey pk.1) := by
     rw [RSOR.path_getElem! kem _ _ _ j.isLt]
     exact congrArg (fun k : Key kem => ofVector (kem.encodePublicKey k.1)) hkey
-  have h : layerK kem cipher macS kdfS streamS geom
+  have h : layerF kem cipher macS kdfS streamS geom
       (RSOR.path kem q.fwd [.recipient q.receiver]) r.1
       (RSOR.body kem macS kdfS streamS geom q r) j (ofVector (kem.encodeCiphertext c))
-      (keyTuple (deriveHopKeys kdfS ss)) i = .ok pkt :=
-    layerK_real kem cipher macS kdfS streamS geom _ r.1 _ pkt j i s _ ss hi
+      (ksOf streamS geom (keyTuple (deriveHopKeys kdfS ss)))
+      (tagOf macS (keyTuple (deriveHopKeys kdfS ss)))
+      (encOf cipher (keyTuple (deriveHopKeys kdfS ss))) i = some pkt :=
+    layerF_real kem cipher macS kdfS streamS geom _ r.1 _ pkt j i s _ ss hi
       (by rw [hn]; exact j.isLt)
       (by rw [hn]; exact q.fwd.length_le) (by rw [hpub]; exact henc) hpkt
   have hform : RSOR.form kem cipher macS kdfS streamS geom q (setSeed geom r j s) i
@@ -442,7 +473,7 @@ theorem onionK_real (q : RSOR.Request kem geom) (r : RSOR.Randomness geom)
     unfold RSOR.form
     rw [hpkt]
   rw [hform]
-  unfold onionK
+  unfold onionK onionF
   rw [h]
 
 /-- A world of TLU→ around the honest relay's ciphertext and keys: what the challenger draws,
