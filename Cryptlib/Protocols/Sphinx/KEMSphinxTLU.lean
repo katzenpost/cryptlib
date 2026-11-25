@@ -4,6 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Cryptlib.Protocols.Sphinx.KEMSphinxKeyed
+import Cryptlib.Protocols.Sphinx.KEMSphinxLayerIn
 import Cryptlib.Protocols.Sphinx.KEMSphinxHeaderFn
 
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
@@ -529,6 +530,254 @@ theorem layerPK_step (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = m
     split_ifs <;> first | rfl | omega
   rw [hfill, show j - (i + 1) = j - i - 1 by omega]
   exact hfwd
+
+/-- The layer for a position past the keyed hop: built from the seeds, with the keyed filler. -/
+def layerPast (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (U : ByteArray) (i : ℕ) : Except String ByteArray :=
+  let seeds := d.1.toArray.extract 0 hops.size
+  newKEMPacket kem cipher macS kdfS streamS geom (seeds.extract i seeds.size)
+    (fillerAtF kem kdfS streamS geom hops seeds
+      ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength))
+      j U i)
+    (hops.extract i hops.size) payload
+
+set_option maxHeartbeats 2000000 in
+/-- **What the keyed hop does with its layer, before the end of the path.** With the keys `t`
+it accepts the layer, reads its commands and the next hop's name, and forwards the next layer,
+which is built from the seeds and depends on `t` through its filler only. Its own layer is, in
+closed form, its ciphertext, its routing info under its keystream, one tag over both, and the
+next layer's payload under its payload key. -/
+theorem layerPK_self (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (payload pkt privKey : ByteArray) (j : ℕ)
+    (c : ByteArray) (t : KeyTuple) (s : Vector UInt8 32) (ss : ByteArray)
+    (hj : j + 1 < hops.size) (hlen : hops.size ≤ geom.nrHops)
+    (hencj : kemEncap kem (hops[j]!).publicKey s = .ok (c, ss))
+    (hrel : kem.Reliable (kem.stateFromSeed s))
+    (henc : ∀ m, m < hops.size → m ≠ j →
+      ∃ ct ss, kemEncap kem (hops[m]!).publicKey (d.1.toArray[m]!) = .ok (ct, ss))
+    (hpp : kemSelfPublicKeyBytes kem privKey = (hops[j]!).publicKey)
+    (hcmdnn : ∀ x ∈ (hops[j]!).commands, x ≠ RoutingCommand.null)
+    (hcmdnh : ∀ x ∈ (hops[j]!).commands, ∀ id m, x ≠ RoutingCommand.nextNodeHop id m)
+    (hpk : layerPK kem cipher macS kdfS streamS geom hops d payload j c t j = .ok pkt) :
+    ∃ (replayTag mac : Vector UInt8 32) (fwd : Vector UInt8 pkt.size) (frag : ByteArray),
+      procKeys kem cipher macS streamS geom t pkt
+        = some (none, replayTag,
+            (hops[j]!).commands ++ [RoutingCommand.nextNodeHop (hops[j + 1]!).id mac],
+            some (ofVector fwd)) ∧
+      layerPast kem cipher macS kdfS streamS geom hops d payload j (ksOf streamS geom t) (j + 1)
+        = .ok (ofVector fwd) ∧
+      kemRiFragment kem geom (hops.extract j hops.size)
+          #[ByteArray.empty, (ofVector fwd).extract 2 (2 + kem.ciphertextSize)]
+          ((ofVector fwd).extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+            (2 + kem.ciphertextSize + geom.routingInfoLength + macLength))
+          (hops.extract j hops.size).size 0 = .ok frag ∧
+      pkt = layerIn cipher macS c t.1 t.2.1 t.2.2.1
+        ((ksOf streamS geom t).extract 0 geom.routingInfoLength)
+        (frag ++ (ofVector fwd).extract (2 + kem.ciphertextSize)
+          (2 + kem.ciphertextSize + geom.routingInfoLength - geom.perHopRoutingInfoLength))
+        ((ofVector fwd).extract (payloadOffset kem geom) pkt.size) := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hcsz : c.size = kem.ciphertextSize := kemEncap_size kem _ _ c ss hencj
+  have hkt := keyTuple_keysKDF t ss
+  unfold layerPK at hpk
+  unfold layerPast
+  dsimp only at hpk ⊢
+  obtain ⟨S, hSdef⟩ : ∃ S, S = d.1.toArray.extract 0 hops.size := ⟨_, rfl⟩
+  rw [← hSdef] at hpk ⊢
+  have hSsz : S.size = hops.size := by
+    rw [hSdef]
+    simp
+    omega
+  have hSget : ∀ m, m < hops.size → S[m]! = d.1.toArray[m]! := fun m hm => by
+    rw [hSdef, getElem!_extract_zero _ _ _ hm (by rw [Vector.size_toArray]; exact hlen)]
+  have hpi : (hops.extract j hops.size).size = hops.size - j := by simp
+  have hsi : (S.extract j S.size).size = hops.size - j := by simp [hSsz]
+  have hpget : ∀ m, j + m < hops.size → (hops.extract j hops.size)[m]! = hops[j + m]! :=
+    fun m hm => getElem!_extract_from hops j m hm
+  have hsget : ∀ m, j + m < hops.size → (S.extract j S.size)[m]! = S[j + m]! :=
+    fun m hm => getElem!_extract_from S j m (by omega)
+  have hF : ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) *
+      geom.perHopRoutingInfoLength)).size
+      = (geom.nrHops - hops.size) * geom.perHopRoutingInfoLength := by
+    have hle : (geom.nrHops - hops.size) * geom.perHopRoutingInfoLength
+        ≤ geom.perHopRoutingInfoLength * geom.nrHops := by
+      rw [Nat.mul_comm]
+      exact Nat.mul_le_mul_left _ (Nat.sub_le _ _)
+    rw [ByteArray.size_extract, Util.Bytes.size_ofVector, hrouting]
+    omega
+  have hget : ∀ {α : Type} [Inhabited α] (f : Fin (hops.extract j hops.size).size → α) (i : ℕ)
+      (hi : i < (hops.extract j hops.size).size), (Array.ofFn f)[i]! = f ⟨i, hi⟩ :=
+    fun f i hi => by
+      rw [getElem!_pos _ i (by simpa using hi)]
+      simp only [Array.getElem_ofFn]
+  rw [Nat.sub_self] at hpk
+  unfold packetK at hpk
+  obtain ⟨KE, hKE⟩ : ∃ KE : Array ByteArray, KE = Array.ofFn
+      (fun i : Fin (hops.extract j hops.size).size => if i.val = 0 then c
+        else kemHopCt kem (hops.extract j hops.size) (S.extract j S.size) i) := ⟨_, rfl⟩
+  rw [← hKE] at hpk
+  have hKE0 : KE[0]! = c := by
+    rw [hKE, hget _ 0 (by rw [hpi]; omega)]
+    rfl
+  -- The keyed hop's keys, as the output of the key derivation that returns `t`.
+  obtain ⟨KS', hKS'⟩ : ∃ KS' : Array HopKeys, KS' = Array.ofFn
+      (fun i : Fin (hops.extract j hops.size).size => if i.val = 0
+        then deriveHopKeys (keysKDF t) ss
+        else kemHopKeys kem kdfS (hops.extract j hops.size) (S.extract j S.size) i) := ⟨_, rfl⟩
+  have hfield : ∀ i : ℕ, keyTuple (KS'[i]!) = keyTuple ((Array.ofFn
+      (fun i : Fin (hops.extract j hops.size).size => if i.val = 0 then hopKeysOf t
+        else kemHopKeys kem kdfS (hops.extract j hops.size) (S.extract j S.size) i))[i]!) := by
+    intro i
+    by_cases hi : i < (hops.extract j hops.size).size
+    · rw [hKS', hget _ i hi, hget _ i hi]
+      dsimp only
+      split_ifs
+      · exact hkt
+      · rfl
+    · rw [hKS', getElem!_neg _ i (by simpa using hi), getElem!_neg _ i (by simpa using hi)]
+  have hswap := (newKEMPacketFrom_congr kem cipher macS streamS geom _ KS' _ _ _ payload
+    (fun i => congrArg (·.2.2.1) (hfield i)) (fun i => congrArg (·.2.2.2) (hfield i))
+    (fun i => congrArg (·.2.1) (hfield i)) (fun i => congrArg (·.1) (hfield i))).trans hpk
+  have hK0 : KS'[0]! = deriveHopKeys (keysKDF t) ss := by
+    rw [hKS', hget _ 0 (by rw [hpi]; omega)]
+    rfl
+  have hksize : ∀ i (hi : i < KE.size), (KE[i]'hi).size = kem.ciphertextSize := by
+    intro i hi
+    have hi' : i < hops.size - j := by
+      rw [hKE] at hi
+      simpa using hi
+    rw [← getElem!_pos KE i hi, hKE, hget _ i (by rw [hpi]; exact hi')]
+    dsimp only
+    split_ifs with hi0
+    · exact hcsz
+    · obtain ⟨ct, ss', he⟩ := henc (j + i) (by omega) (by omega)
+      unfold kemHopCt
+      rw [hpget i (by omega), hsget i (by omega), hSget _ (by omega), he]
+      exact kemEncap_size kem _ _ ct ss' he
+  have hfsz : geom.nrHops > (hops.extract j hops.size).size →
+      (fillerAtF kem kdfS streamS geom hops S
+        ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength))
+        j (ksOf streamS geom t) j).size
+        = (geom.nrHops - (hops.extract j hops.size).size) * geom.perHopRoutingInfoLength :=
+    fun _ => by
+      rw [fillerAtF_size kem kdfS streamS geom hrouting hops S _ j (ksOf streamS geom t) hlen hF
+        (show (ksOf streamS geom t).size = _ from streamS.keystream_size _ _ _) j (by omega),
+        hpi]
+      congr 1
+      omega
+  have hkey : ∃ seed ss', kem.Reliable (kem.stateFromSeed seed) ∧
+      kemEncap kem ((hops.extract j hops.size)[0]!).publicKey seed = Except.ok (KE[0]!, ss') ∧
+      KS'[0]! = deriveHopKeys (keysKDF t) ss' := by
+    refine ⟨s, ss, hrel, ?_, hK0⟩
+    rw [hKE0, hpget 0 (by omega), Nat.add_zero]
+    exact hencj
+  have hpp' : kemSelfPublicKeyBytes kem privKey = ((hops.extract j hops.size)[0]!).publicKey := by
+    rw [hpget 0 (by omega), Nat.add_zero]
+    exact hpp
+  have hnn' : ∀ x ∈ ((hops.extract j hops.size)[0]!).commands, x ≠ RoutingCommand.null := by
+    rw [hpget 0 (by omega), Nat.add_zero]
+    exact hcmdnn
+  have hnh' : ∀ x ∈ ((hops.extract j hops.size)[0]!).commands, ∀ id m,
+      x ≠ RoutingCommand.nextNodeHop id m := by
+    rw [hpget 0 (by omega), Nat.add_zero]
+    exact hcmdnh
+  obtain ⟨h2, -⟩ := newKEMPacketFrom_unwrapKEM kem cipher macS (keysKDF t) streamS geom hvalid
+    hmactag h16 KE KS' _ (hops.extract j hops.size) payload pkt privKey (by rw [hpi]; omega) hfsz
+    (by rw [hKE]; simp) (by rw [hKS']; simp) hksize hpp' hkey hnn' hnh' hswap
+  obtain ⟨replayTag, mac, fwd, hun, hfwd⟩ := h2 (by rw [hpi]; omega)
+  obtain ⟨replayTag', cmds', fwd', frag, hun', hfrag, hpkt⟩ := newKEMPacketFrom_layer kem cipher
+    macS (keysKDF t) streamS geom hvalid hmactag h16 KE KS' _ (hops.extract j hops.size) payload pkt
+    privKey (by rw [hpi]; omega) (by rw [hpi]; omega) hfsz (by rw [hKE]; simp) hksize hpp' hkey
+        hnn' hnh'
+    hswap
+  have hff : fwd' = fwd := by
+    have := hun'.symm.trans hun
+    injection this with this
+    injection this with _ this
+    injection this with _ this
+    injection this with _ this
+    injection this
+  rw [hff] at hfrag hpkt
+  rw [hpget 0 (by omega), hpget 1 (by omega), Nat.add_zero] at hun
+  refine ⟨replayTag, mac, fwd, frag, ?_, ?_, hfrag, ?_⟩
+  · refine procWith_keysKDF kem cipher macS streamS geom t (kemDecap kem privKey) pkt _ ?_
+    unfold procWith
+    rw [show unwrapKEMWith kem cipher macS (keysKDF t) streamS geom (kemDecap kem privKey) pkt
+      = _ from hun]
+    rfl
+  · rw [extract_extract_one, hpi] at hfwd
+    have hfill : fillerAtF kem kdfS streamS geom hops S
+          ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength))
+          j (ksOf streamS geom t) (j + 1)
+        = (if geom.nrHops > hops.size - j then fillerAtF kem kdfS streamS geom hops S
+              ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength))
+              j (ksOf streamS geom t) j else ByteArray.empty)
+          ++ tailPadOf geom (fun i => headerKeystream streamS geom (KS'[i]!))
+            (hops.size - j - 1) := by
+      rw [fillerAtF, tailFillerOf]
+      congr 1
+      refine tailPadOf_congr geom _ _ _ fun m hm => ?_
+      show (if j + m = j then _ else _) = headerKeystream streamS geom (KS'[m]!)
+      rw [hKS', hget _ m (by rw [hpi]; omega)]
+      dsimp only
+      have hk : kemHopKeys kem kdfS (hops.extract j hops.size) (S.extract j S.size) m
+          = kemHopKeys kem kdfS hops S (j + m) := by
+        unfold kemHopKeys
+        rw [hpget m (by omega), hsget m (by omega)]
+      by_cases hm0 : m = 0
+      · subst hm0
+        simp only [Nat.add_zero, ↓reduceIte]
+        unfold headerKeystream ksOf
+        rw [show (deriveHopKeys (keysKDF t) ss).headerEncryption = t.2.2.2 from
+            congrArg (·.2.2.2) hkt,
+          show (deriveHopKeys (keysKDF t) ss).headerEncryptionIV = t.2.1 from
+            congrArg (·.2.1) hkt]
+      · simp only [show ¬ (j + m = j) by omega, hm0, ↓reduceIte, hk]
+    rw [hfill, newKEMPacket_eq_newKEMPacketFrom kem cipher macS kdfS streamS geom
+      (S.extract (j + 1) S.size) _ (hops.extract (j + 1) hops.size) payload
+      (KE.extract 1 KE.size) (KS'.extract 1 KS'.size) (by simp; omega) (by simp; omega) (by
+          simp [hSsz])
+      (by
+        intro _
+        rw [← hfill, fillerAtF_size kem kdfS streamS geom hrouting hops S _ j
+          (ksOf streamS geom t) hlen hF
+          (show (ksOf streamS geom t).size = _ from streamS.keystream_size _ _ _) (j + 1) hj]
+        congr 1
+        simp
+        omega)
+      (by rw [hKE]; simp; omega) (by rw [hKS']; simp; omega)
+      (by
+        intro i hi
+        have hi' : j + 1 + i < hops.size := by
+          simp at hi
+          omega
+        obtain ⟨ct, ss', he⟩ := henc (j + 1 + i) hi' (by omega)
+        refine ⟨ct, ss', ?_, ?_, ?_⟩
+        · rw [getElem!_extract_from hops (j + 1) i hi',
+            getElem!_extract_from S (j + 1) i (by omega), hSget _ hi']
+          exact he
+        · rw [getElem!_extract_from KE 1 i (by rw [hKE]; simp; omega), hKE,
+            hget _ (1 + i) (by rw [hpi]; omega)]
+          simp only [show ¬ (1 + i = 0) by omega, ↓reduceIte]
+          unfold kemHopCt
+          rw [hpget _ (by omega), hsget _ (by omega), hSget _ (by omega),
+            show j + (1 + i) = j + 1 + i by omega, he]
+        · rw [getElem!_extract_from KS' 1 i (by rw [hKS']; simp; omega), hKS',
+            hget _ (1 + i) (by rw [hpi]; omega)]
+          simp only [show ¬ (1 + i = 0) by omega, ↓reduceIte]
+          unfold kemHopKeys
+          rw [hpget _ (by omega), hsget _ (by omega), hSget _ (by omega),
+            show j + (1 + i) = j + 1 + i by omega, he])]
+    exact hfwd
+  · refine hpkt.trans ?_
+    rw [hKE0, hK0]
+    unfold ksOf
+    rw [show (deriveHopKeys (keysKDF t) ss).headerEncryption = t.2.2.2 from
+        congrArg (·.2.2.2) hkt,
+      show (deriveHopKeys (keysKDF t) ss).headerEncryptionIV = t.2.1 from congrArg (·.2.1) hkt,
+      show (deriveHopKeys (keysKDF t) ss).payloadEncryption = t.1 from congrArg (·.1) hkt,
+      show (deriveHopKeys (keysKDF t) ss).headerMAC = t.2.2.1 from congrArg (·.2.2.1) hkt]
 
 /-- `RSOR.layer` with hop `j`'s ciphertext `c`, header keystream `U`, tagging function `tagf`
 and payload encryption `encf` given: the layer for position `i`. -/

@@ -535,6 +535,32 @@ theorem procKeys_mac (t : KeyTuple) (pkt : ByteArray)
   rwa [show (deriveHopKeys (keysKDF t) ByteArray.empty).headerMAC = t.2.2.1 from
     congrArg (·.2.2.1) (keyTuple_keysKDF t .empty)] at hm
 
+/-- Under the key derivation that returns the keys `t` whatever its input, a hop that accepts a
+packet does what `procKeys t` does. -/
+theorem procWith_keysKDF (t : KeyTuple) (dec : ByteArray → Except String ByteArray)
+    (pkt : ByteArray)
+    (res : Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option ByteArray)
+    (h : procWith kem cipher macS (keysKDF t) streamS geom dec pkt = some res) :
+    procKeys kem cipher macS streamS geom t pkt = some res := by
+  have h0 := h
+  unfold procWith unwrapKEMWith at h
+  dsimp only at h
+  by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
+  · rw [dif_pos h1] at h; cases h
+  rw [dif_neg h1] at h
+  by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
+  · rw [if_pos h2] at h; cases h
+  rw [if_neg h2] at h
+  cases hd : dec (pkt.extract 2 (2 + kem.ciphertextSize)) with
+  | error e =>
+    rw [hd] at h
+    dsimp only [Bind.bind, Except.bind] at h
+    cases h
+  | ok ss =>
+    rw [procWith_eq_procKeys kem cipher macS (keysKDF t) streamS geom dec pkt ss hd,
+      keyTuple_keysKDF] at h0
+    exact h0
+
 /-- The header of a one-hop packet in closed form. It does not use the payload key. -/
 def hdr1 (ct : ByteArray) (iv : Vector UInt8 16) (km ke : Vector UInt8 32) (filler : ByteArray)
     (hop : PathHop) : ByteArray :=
