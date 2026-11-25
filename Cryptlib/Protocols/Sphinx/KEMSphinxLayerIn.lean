@@ -51,20 +51,29 @@ theorem kemRiFragment_zero_congr (path : Array PathHop) (ke : Array ByteArray) (
   rfl
 
 set_option maxHeartbeats 1000000 in
-theorem newKEMPacket_layer (hvalid : geom.ValidForKEM kem)
+/-- **A layer in closed form, for any keys.** The first hop's layer of a packet
+`newKEMPacketFrom` built is `layerIn` on its own ciphertext and keys and on what it forwards.
+Only its own ciphertext and keys come from an encapsulation to it. -/
+theorem newKEMPacketFrom_layer (hvalid : geom.ValidForKEM kem)
     (hmactag : macS.tagSize = macLength)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
-    (seeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop)
-    (payload pkt privKey : ByteArray) (h2 : 2 ≤ path.size)
+    (kemElements : Array ByteArray) (keys : Array HopKeys) (filler : ByteArray)
+    (path : Array PathHop) (payload pkt privKey : ByteArray) (h2 : 2 ≤ path.size)
+    (hple : path.size ≤ geom.nrHops)
+    (hfsize : geom.nrHops > path.size →
+      filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hknsize : kemElements.size = path.size)
+    (hksize : ∀ j (hj : j < kemElements.size), (kemElements[j]'hj).size = kem.ciphertextSize)
     (hpp : kemSelfPublicKeyBytes kem privKey = (path[0]!).publicKey)
-    (hrel : ∀ j, j < path.size → kem.Reliable (kem.stateFromSeed seeds[j]!))
+    (hkey : ∃ seed ss, kem.Reliable (kem.stateFromSeed seed) ∧
+      kemEncap kem (path[0]!).publicKey seed = Except.ok (kemElements[0]!, ss) ∧
+      keys[0]! = deriveHopKeys kdfS ss)
     (hcmdnn : ∀ c ∈ (path[0]!).commands, c ≠ RoutingCommand.null)
     (hcmdnh : ∀ c ∈ (path[0]!).commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
-    (hnk : newKEMPacket kem cipher macS kdfS streamS geom seeds filler path payload
+    (hnk : newKEMPacketFrom kem cipher macS streamS geom kemElements keys filler path payload
       = Except.ok pkt) :
     ∃ (replayTag : Vector UInt8 32) (cmds : List RoutingCommand) (fwd : Vector UInt8 pkt.size)
-      (ct ss frag : ByteArray),
-      kemEncap kem (path[0]!).publicKey seeds[0]! = Except.ok (ct, ss) ∧
+      (frag : ByteArray),
       unwrapKEM kem cipher macS kdfS streamS geom privKey pkt
         = Except.ok (none, replayTag, cmds, some fwd) ∧
       kemRiFragment kem geom path
@@ -72,37 +81,26 @@ theorem newKEMPacket_layer (hvalid : geom.ValidForKEM kem)
           ((ofVector fwd).extract (2 + kem.ciphertextSize + geom.routingInfoLength)
             (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)) path.size 0
         = Except.ok frag ∧
-      pkt = layerIn cipher macS ct (deriveHopKeys kdfS ss).payloadEncryption
-        (deriveHopKeys kdfS ss).headerEncryptionIV (deriveHopKeys kdfS ss).headerMAC
-        ((streamS.keystream (ofVector (deriveHopKeys kdfS ss).headerEncryption)
-          (ofVector (deriveHopKeys kdfS ss).headerEncryptionIV)
+      pkt = layerIn cipher macS (kemElements[0]!) (keys[0]!).payloadEncryption
+        (keys[0]!).headerEncryptionIV (keys[0]!).headerMAC
+        ((streamS.keystream (ofVector (keys[0]!).headerEncryption)
+          (ofVector (keys[0]!).headerEncryptionIV)
           (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract 0
           geom.routingInfoLength)
         (frag ++ (ofVector fwd).extract (2 + kem.ciphertextSize)
           (2 + kem.ciphertextSize + geom.routingInfoLength - geom.perHopRoutingInfoLength))
         ((ofVector fwd).extract (payloadOffset kem geom) pkt.size) := by
   obtain ⟨hpaysize, hdr, sprpKeys, t, hcreate, ht0content, htstep, hpkteq⟩ :=
-    newKEMPacket_unfold kem cipher macS kdfS streamS geom seeds filler path payload pkt hnk
-  obtain ⟨hpne, hple, hesize, hfsize, kemElements, keys, riKeyStream, riPadding, s, hknsize,
-    hkeysArrSize, hriKSarrSize, hriPadArrSize, hkeyscontent0, hriContent, hs0eq, hstep, hhdreq,
-    hsprpeq⟩ :=
-    createKEMHeader_unfold kem macS kdfS streamS geom seeds filler path hdr sprpKeys hcreate
+    newKEMPacketFrom_unfold kem cipher macS streamS geom kemElements keys filler path payload pkt
+      hnk
+  obtain ⟨riKeyStream, riPadding, s, hriKSarrSize, hriPadArrSize, hriContent, hs0eq, hstep,
+    hhdreq, hsprpeq⟩ :=
+    createKEMHeaderFrom_unfold kem macS streamS geom kemElements keys filler path hdr sprpKeys
+      hcreate
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
   have hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength := by
     omega
   have hsprp : sprpKeys.size = path.size := by rw [hsprpeq]; simp
-  have hkeyscontent : ∀ i (_hi : i < path.size), ∃ seed ss,
-      kem.Reliable (kem.stateFromSeed seed) ∧
-      kemEncap kem (path[i]!).publicKey seed = Except.ok (kemElements[i]!, ss) ∧
-      keys[i]! = deriveHopKeys kdfS ss := by
-    intro i hi
-    obtain ⟨ct, ss, hkc, hcteq, hkeq⟩ := hkeyscontent0 i hi
-    exact ⟨seeds[i]!, ss, hrel i hi, hcteq ▸ hkc, hkeq⟩
-  have hksize : ∀ j (hj : j < kemElements.size), (kemElements[j]'hj).size = kem.ciphertextSize := by
-    intro j hj
-    obtain ⟨seed, ss, -, hkc, -⟩ := hkeyscontent j (by rwa [hknsize] at hj)
-    have := kemEncap_size kem _ seed kemElements[j]! ss hkc
-    rwa [getElem!_pos kemElements j hj] at this
   have hriKScontent : ∀ i (_hi : i < path.size), riKeyStream[i]! =
       (streamS.keystream (ofVector (keys[i]!).headerEncryption) (ofVector (keys[i]!).headerEncryptionIV)
           (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract 0
@@ -180,12 +178,11 @@ theorem newKEMPacket_layer (hvalid : geom.ValidForKEM kem)
     macS kdfS streamS geom path keys kemElements riKeyStream riPadding sprpKeys path.size s t
     hvalid hmactag hs0size hstep hknsize hksize hpadsize hriKScontent hriPadcontent
     htsize ht0size htstep hsprpkey hsprp hple h16 0 (by omega) hcmdnn hcmdnh privKey hpp
-    (hkeyscontent 0 (by omega))
+    hkey
   have hsl := hopPacket_slices kem macS geom path keys kemElements riKeyStream riPadding cipher
     sprpKeys path.size s t hvalid hmactag hs0size hstep hknsize hksize hpadsize htsize ht0size
     hsprp hple 1 (by omega)
   obtain ⟨-, hsl1, hsl2, hsl3, hsl4⟩ := hsl
-  obtain ⟨ct, ss, hkc, hcteq, hkeq⟩ := hkeyscontent0 0 (by omega)
   obtain ⟨frag, hfrag, hsn1, hsn2⟩ := hstep (path.size - 1) (by omega)
   have e0 : path.size - 1 - (path.size - 1) = 0 := by omega
   have e1 : path.size - 1 + 1 = path.size := by omega
@@ -217,11 +214,11 @@ theorem newKEMPacket_layer (hvalid : geom.ValidForKEM kem)
   unfold payloadEncryptStep at ht1
   dsimp only at ht1
   rw [show sprpKeys.size - 1 - (path.size - 1) = 0 from by omega,
-    getElem!_pos sprpKeys 0 (by omega), (hsprpkey 0 (by omega)).1, (hsprpkey 0 (by omega)).2, hkeq]
+    getElem!_pos sprpKeys 0 (by omega), (hsprpkey 0 (by omega)).1, (hsprpkey 0 (by omega)).2]
     at ht1
   have hrik0 := hriKScontent 0 (by omega)
   rw [show geom.routingInfoLength + geom.perHopRoutingInfoLength
-      - (0 + 1) * geom.perHopRoutingInfoLength = geom.routingInfoLength from by omega, hkeq]
+      - (0 + 1) * geom.perHopRoutingInfoLength = geom.routingInfoLength from by omega]
     at hrik0
   have hpkteq2 : pkt = hopPacket kemElements riPadding s t path.size 0 := by
     rw [hpkteq, hhdreq]
@@ -229,7 +226,7 @@ theorem newKEMPacket_layer (hvalid : geom.ValidForKEM kem)
     rw [Nat.sub_zero, if_neg (lt_irrefl 0), ByteArray.append_empty, hsprp]
   subst hpkteq2
   refine ⟨replayTag, cmds,
-    ⟨(hopPacket kemElements riPadding s t path.size (0 + 1)).data, hnewsize⟩, ct, ss, frag, hkc,
+    ⟨(hopPacket kemElements riPadding s t path.size (0 + 1)).data, hnewsize⟩, frag,
     hunwrap, ?_, ?_⟩
   · show kemRiFragment kem geom path
         #[ByteArray.empty, (hopPacket kemElements riPadding s t path.size 1).extract 2
@@ -239,7 +236,7 @@ theorem newKEMPacket_layer (hvalid : geom.ValidForKEM kem)
           (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)) path.size 0 = Except.ok frag
     rw [hsl1, hsl3, ← kemRiFragment_zero_congr]
     exact hfrag
-  · show hopPacket kemElements riPadding s t path.size 0 = layerIn cipher macS ct _ _ _ _
+  · show hopPacket kemElements riPadding s t path.size 0 = layerIn cipher macS _ _ _ _ _
       (frag ++ (hopPacket kemElements riPadding s t path.size 1).extract (2 + kem.ciphertextSize)
         (2 + kem.ciphertextSize + geom.routingInfoLength - geom.perHopRoutingInfoLength))
       ((hopPacket kemElements riPadding s t path.size 1).extract (payloadOffset kem geom)
@@ -250,9 +247,63 @@ theorem newKEMPacket_layer (hvalid : geom.ValidForKEM kem)
         = t (path.size - 1) := hsl4
     rw [hsl4']
     unfold layerIn
-    rw [← hrik0, ← hsn1, ← ht1, ← hcteq, ← hkeq, ← hsn2]
+    rw [← hrik0, ← hsn1, ← ht1, ← hsn2]
     unfold hopPacket
     rw [Nat.sub_zero, if_neg (lt_irrefl 0), ByteArray.append_empty]
+
+theorem newKEMPacket_layer (hvalid : geom.ValidForKEM kem)
+    (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (seeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop)
+    (payload pkt privKey : ByteArray) (h2 : 2 ≤ path.size)
+    (hpp : kemSelfPublicKeyBytes kem privKey = (path[0]!).publicKey)
+    (hrel : ∀ j, j < path.size → kem.Reliable (kem.stateFromSeed seeds[j]!))
+    (hcmdnn : ∀ c ∈ (path[0]!).commands, c ≠ RoutingCommand.null)
+    (hcmdnh : ∀ c ∈ (path[0]!).commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
+    (hnk : newKEMPacket kem cipher macS kdfS streamS geom seeds filler path payload
+      = Except.ok pkt) :
+    ∃ (replayTag : Vector UInt8 32) (cmds : List RoutingCommand) (fwd : Vector UInt8 pkt.size)
+      (ct ss frag : ByteArray),
+      kemEncap kem (path[0]!).publicKey seeds[0]! = Except.ok (ct, ss) ∧
+      unwrapKEM kem cipher macS kdfS streamS geom privKey pkt
+        = Except.ok (none, replayTag, cmds, some fwd) ∧
+      kemRiFragment kem geom path
+          #[ByteArray.empty, (ofVector fwd).extract 2 (2 + kem.ciphertextSize)]
+          ((ofVector fwd).extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+            (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)) path.size 0
+        = Except.ok frag ∧
+      pkt = layerIn cipher macS ct (deriveHopKeys kdfS ss).payloadEncryption
+        (deriveHopKeys kdfS ss).headerEncryptionIV (deriveHopKeys kdfS ss).headerMAC
+        ((streamS.keystream (ofVector (deriveHopKeys kdfS ss).headerEncryption)
+          (ofVector (deriveHopKeys kdfS ss).headerEncryptionIV)
+          (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract 0
+          geom.routingInfoLength)
+        (frag ++ (ofVector fwd).extract (2 + kem.ciphertextSize)
+          (2 + kem.ciphertextSize + geom.routingInfoLength - geom.perHopRoutingInfoLength))
+        ((ofVector fwd).extract (payloadOffset kem geom) pkt.size) := by
+  obtain ⟨-, hdr, sprpKeys, _t, hcreate, -⟩ :=
+    newKEMPacket_unfold kem cipher macS kdfS streamS geom seeds filler path payload pkt hnk
+  obtain ⟨hpne, hple, hesize, hfsize, kemElements, keys, _rks, _rp, _s, hknsize, hkeysArrSize,
+    -, -, hkc, -⟩ :=
+    createKEMHeader_unfold kem macS kdfS streamS geom seeds filler path hdr sprpKeys hcreate
+  have hfrom : newKEMPacketFrom kem cipher macS streamS geom kemElements keys filler path payload
+      = Except.ok pkt := by
+    rw [← newKEMPacket_eq_newKEMPacketFrom kem cipher macS kdfS streamS geom seeds filler path
+      payload kemElements keys hpne hple hesize hfsize hknsize hkeysArrSize hkc]
+    exact hnk
+  have hksize : ∀ j (hj : j < kemElements.size),
+      (kemElements[j]'hj).size = kem.ciphertextSize := by
+    intro j hj
+    obtain ⟨ct, ss, hk, hct, -⟩ := hkc j (by rwa [hknsize] at hj)
+    have := kemEncap_size kem _ _ ct ss hk
+    rwa [← hct, getElem!_pos kemElements j hj] at this
+  obtain ⟨ct, ss, hk, hct, hkeq⟩ := hkc 0 (by omega)
+  obtain ⟨replayTag, cmds, fwd, frag, hun, hfrag, hpkt⟩ := newKEMPacketFrom_layer kem cipher macS
+    kdfS streamS geom hvalid hmactag h16 kemElements keys filler path payload pkt privKey h2 hple
+    hfsize hknsize hksize hpp ⟨seeds[0]!, ss, hrel 0 (by omega), hct ▸ hk, hkeq⟩ hcmdnn hcmdnh
+    hfrom
+  rw [hct, hkeq] at hpkt
+  exact ⟨replayTag, cmds, fwd, ct, ss, frag, hk, hun, hfrag, hpkt⟩
 
 end LayerIn
 

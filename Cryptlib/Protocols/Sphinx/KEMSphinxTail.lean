@@ -1062,7 +1062,8 @@ theorem newKEMPacket_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MA
     rw [← newKEMPacket_eq_newKEMPacketFrom kem cipher macS kdfS streamS geom seeds filler path
       payload kemElements keys hpne hple hesize hfsize hknsize hkeysArrSize hkc]
     exact hnk
-  have hksize : ∀ j (hj : j < kemElements.size), (kemElements[j]'hj).size = kem.ciphertextSize := by
+  have hksize : ∀ j (hj : j < kemElements.size),
+      (kemElements[j]'hj).size = kem.ciphertextSize := by
     intro j hj
     obtain ⟨ct, ss, hk, hct, -⟩ := hkc j (by rwa [hknsize] at hj)
     have := kemEncap_size kem _ _ ct ss hk
