@@ -94,11 +94,11 @@ theorem procImplK_real (sk : kem.PrivateKey) (c : kem.Ciphertext) (K : kem.Plain
           have := congrArg kem.decodeCiphertext he
           rwa [kem.decode_encode_ct, kem.decode_encode_ct, Option.some.injEq] at this
         rw [h] at hk
-        rw [ite_cond_eq_true _ _ (eq_true he), simulateQ_pure]
+        rw [ite_eq_left_of_eq_true _ _ (eq_true he), simulateQ_pure]
         rw [procWith_eq_procKeys kem cipher macS kdfS streamS geom _ pkt
           (ofVector (kem.encodePlaintext K)) (hk.trans rfl)]
         rfl
-      · simp only [ite_cond_eq_false _ _ (eq_false he), simulateQ_bind, simulateQ_pure]
+      · simp only [ite_eq_right_of_eq_false _ _ (eq_false he), simulateQ_bind, simulateQ_pure]
         rw [QueryImpl.simulateQ_add_liftM_query_right]
         unfold procWith
         rw [unwrapKEMWith_const kem cipher macS kdfS streamS geom (kemDecap kem _), hk]

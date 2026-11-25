@@ -914,12 +914,15 @@ theorem createKEMHeaderFrom_unfold (kem : KEM) (macS : MAC) (streamS : StreamCip
   dsimp only at h
   simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
     Nat.add_sub_cancel, Nat.div_one] at h
-  obtain ⟨loop2Final, hLoop2, h⟩ := Cryptlib.Protocols.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
-  obtain ⟨loop3Final, hLoop3, h⟩ := Cryptlib.Protocols.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+  obtain ⟨loop2Final, hLoop2, h⟩ :=
+    Cryptlib.Protocols.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+  obtain ⟨loop3Final, hLoop3, h⟩ :=
+    Cryptlib.Protocols.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
   obtain ⟨s, hs0, hsl, hstep⟩ := createKEMHeader_loop3_trace kem macS geom path keys
     kemElements loop2Final.1 loop2Final.2 path.size _ loop3Final hLoop3
   refine ⟨loop2Final.1, loop2Final.2, s, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · have := Cryptlib.Protocols.Sphinx.Common.List.forIn_add_of_forall_mem (List.range' 0 path.size) _
+  · have := Cryptlib.Protocols.Sphinx.Common.List.forIn_add_of_forall_mem
+      (List.range' 0 path.size) _
       (fun (a : Array ByteArray × Array ByteArray) => a.1.size) 1
       (fun a a' i hi hgb => by
         split at hgb <;>
@@ -929,7 +932,8 @@ theorem createKEMHeaderFrom_unfold (kem : KEM) (macS : MAC) (streamS : StreamCip
         split at hgb <;> · simp_all [pure, Except.pure])
       (#[], #[]) loop2Final hLoop2
     simpa [List.length_range'] using this
-  · have := Cryptlib.Protocols.Sphinx.Common.List.forIn_add_of_forall_mem (List.range' 0 path.size) _
+  · have := Cryptlib.Protocols.Sphinx.Common.List.forIn_add_of_forall_mem
+      (List.range' 0 path.size) _
       (fun (a : Array ByteArray × Array ByteArray) => a.2.size) 1
       (fun a a' i hi hgb => by
         split at hgb <;>

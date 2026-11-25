@@ -205,6 +205,81 @@ theorem createKEMHeader_fold (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : St
               rw [← h1, ← h2]
             · rfl
 
+/-- The converse of `createKEMHeaderFrom_unfold`: arrays and a trace with the contents of its
+two loops make `createKEMHeaderFrom` succeed with the header they describe. -/
+theorem createKEMHeaderFrom_fold (kem : KEM) (macS : MAC) (streamS : StreamCipher)
+    (geom : Geometry) (kemElements : Array ByteArray) (keys : Array HopKeys) (filler : ByteArray)
+    (path : Array PathHop) (riKeyStream riPadding : Array ByteArray)
+    (s : Nat → ByteArray × ByteArray)
+    (hrks : riKeyStream.size = path.size) (hrp : riPadding.size = path.size)
+    (hri : ∀ i (_hi : i < path.size),
+      riKeyStream[i]! = (streamS.keystream (ofVector (keys[i]!).headerEncryption)
+          (ofVector (keys[i]!).headerEncryptionIV)
+          (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract 0
+        ((geom.routingInfoLength + geom.perHopRoutingInfoLength)
+          - (i + 1) * geom.perHopRoutingInfoLength) ∧
+      riPadding[i]! =
+        (let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
+         let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
+           (ofVector (keys[i]!).headerEncryptionIV) totalRiLen
+         let ksLen := totalRiLen - (i + 1) * geom.perHopRoutingInfoLength
+         let thisPad0 := ks.extract ksLen totalRiLen
+         if i > 0 then
+           xorBytes (thisPad0.extract 0 riPadding[i - 1]!.size) riPadding[i - 1]!
+             ++ thisPad0.extract riPadding[i - 1]!.size thisPad0.size
+         else thisPad0))
+    (hs0 : s 0 = (if geom.nrHops > path.size then filler else ByteArray.empty, ByteArray.empty))
+    (hstep : ∀ j (_hj : j < path.size), ∃ riFragment,
+      kemRiFragment kem geom path kemElements (s j).2 path.size (path.size - 1 - j)
+          = Except.ok riFragment ∧
+      (s (j + 1)).1 = xorBytes (riFragment ++ (s j).1) (riKeyStream[path.size - 1 - j]!) ∧
+      (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[path.size - 1 - j]!).headerMAC)
+        (v0AD ++ kemElements[path.size - 1 - j]! ++ (s (j + 1)).1
+          ++ (if path.size - 1 - j > 0 then riPadding[path.size - 1 - j - 1]!
+              else ByteArray.empty)))) :
+    createKEMHeaderFrom kem macS streamS geom kemElements keys filler path
+      = Except.ok (v0AD ++ kemElements[0]! ++ (s path.size).1 ++ (s path.size).2,
+          Array.ofFn (fun i : Fin path.size =>
+            ({ key := keys[i.val]!.payloadEncryption, iv := keys[i.val]!.headerEncryptionIV }
+              : SPRPKey))) := by
+  unfold createKEMHeaderFrom
+  dsimp only
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one]
+  refine Except.bind_eq_ok (a := (riKeyStream, riPadding)) ?_ ?_
+  · refine forIn_range'_ok' _ (fun j => (riKeyStream.extract 0 j, riPadding.extract 0 j))
+      path.size _ _ (by simp)
+      (by rw [← hrks, Array.extract_size, hrks, ← hrp, Array.extract_size]) ?_
+    intro j hj
+    obtain ⟨hks, hpad⟩ := hri j hj
+    dsimp only at hpad ⊢
+    have h1 : (riKeyStream.extract 0 j).push riKeyStream[j]!
+        = riKeyStream.extract 0 (j + 1) := by
+      rw [getElem!_pos riKeyStream j (by omega), Array.push_extract_getElem (by omega)]
+      simp
+    have h2 : (riPadding.extract 0 j).push riPadding[j]!
+        = riPadding.extract 0 (j + 1) := by
+      rw [getElem!_pos riPadding j (by omega), Array.push_extract_getElem (by omega)]
+      simp
+    rw [← h1, ← h2, hks]
+    by_cases hj0 : j > 0
+    · rw [if_pos hj0] at hpad
+      rw [if_pos hj0, getElem!_extract_zero riPadding (j - 1) j (by omega) (by omega),
+        hpad]
+      rfl
+    · rw [if_neg hj0] at hpad
+      rw [if_neg hj0, hpad]
+      rfl
+  · refine Except.bind_eq_ok (a := s path.size) ?_ ?_
+    · refine forIn_range'_ok' _ s path.size _ _ hs0 rfl ?_
+      intro j hj
+      obtain ⟨riFragment, hfrag, h1, h2⟩ := hstep j hj
+      dsimp only
+      rw [hfrag]
+      show Except.ok (ForInStep.yield (_, _)) = Except.ok (ForInStep.yield (s (j + 1)))
+      rw [← h1, ← h2]
+    · rfl
+
 /-- The converse of `newKEMPacket_unfold`. -/
 theorem newKEMPacket_fold (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
