@@ -102,6 +102,9 @@ name = "Cryptlib.Protocols.Sphinx.geometry_test"
 name = "Cryptlib.Protocols.Sphinx.nike_selftest"
 
 [[lean_exe]]
+name = "Cryptlib.Protocols.Sphinx.nike_rsor_selftest"
+
+[[lean_exe]]
 name = "Cryptlib.Protocols.Sphinx.kem_selftest"
 
 [[lean_exe]]

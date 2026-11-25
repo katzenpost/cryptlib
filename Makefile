@@ -32,6 +32,7 @@ TESTS := \
 	Cryptlib.Protocols.Sphinx.commands_test \
 	Cryptlib.Protocols.Sphinx.geometry_test \
 	Cryptlib.Protocols.Sphinx.nike_selftest \
+	Cryptlib.Protocols.Sphinx.nike_rsor_selftest \
 	Cryptlib.Protocols.Sphinx.kem_selftest \
 	Cryptlib.Protocols.Sphinx.nike_vectors_test \
 	Cryptlib.Protocols.Sphinx.kem_vectors_test \
