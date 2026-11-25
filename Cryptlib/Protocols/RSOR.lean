@@ -191,9 +191,9 @@ structure Log where
   seen : List (Role × S.Header) := []
   held : List (Role × S.Onion) := []
 
-/-- What the challenger does differently to an onion that an honest relay has accepted. -/
+/-- What the challenger answers in place of an honest relay's own answer. -/
 structure Patch where
-  proc : Role → S.Onion → S.Step → ProbComp (Option S.Step) := fun _ _ s => pure (some s)
+  proc : Role → S.Onion → Option S.Step → ProbComp (Option S.Step) := fun _ _ out => pure out
   reply : Role → S.Msg → S.Onion → Option (S.Name × S.Onion) → Option (S.Name × S.Onion) :=
     fun _ _ _ out => out
 
@@ -205,9 +205,7 @@ def process (hon : Honest S) (sk : Role → S.Secret) (patch : Patch S) :
   let log ← get
   if (h, o.1) ∈ log.seen then return none
   set ({ seen := (h, o.1) :: log.seen, held := (h, o) :: log.held } : Log S)
-  match S.proc (sk h) (hon h).name o with
-  | none => return none
-  | some s => patch.proc h o s
+  patch.proc h o (S.proc (sk h) (hon h).name o)
 
 /-- An honest relay replies once to an onion it has processed. -/
 def answer (hon : Honest S) (sk : Role → S.Secret) (patch : Patch S) :
@@ -280,8 +278,9 @@ structure ForwardChallenge (hon : Honest S) where
 that ends at the honest relay and carries a random message. In the second world the honest relay
 answers the replacement with what the original would have produced, and when its payload was
 changed on the way, with a random payload: the tag travels on. As the exit relay it replies to
-the unchanged replacement with the original's reply. The replacement has no backward path, so
-the relay's own reply to it would fail. -/
+the unchanged replacement with the original's reply. The replacement ends at the honest relay
+and has no backward path, so the relay's own answers to it would differ from its answers to the
+original: it would reject a changed payload where it should pass it on, and fail to reply. -/
 def forwardUnlinkable : Property S where
   Challenge := ForwardChallenge
   world c b := do
@@ -297,15 +296,15 @@ def forwardUnlinkable : Property S where
       return {
         onion := S.form q r' q.first
         patch :=
-          { proc := fun h o s =>
+          { proc := fun h o out =>
               if h = .relay ∧ o.1 = mine.1 then
                 if hn : c.pos + 1 < c.req.fwd.hops.length then
                   let next := S.form c.req r ⟨c.pos + 1, hn⟩
                   let name := c.req.fwd.hops[c.pos.val + 1].name
                   if o.2 = mine.2 then pure (some (.forward name next))
                   else do return some (.forward name (next.1, ← $ᵗ S.Payload))
-                else pure (some (.deliver c.req.msg c.req.receiver))
-              else pure (some s)
+                else pure (out.map fun _ => .deliver c.req.msg c.req.receiver)
+              else pure out
             reply := fun h m o out =>
               if h = .relay ∧ o = mine ∧ c.pos + 1 = c.req.fwd.hops.length then
                 some (c.req.back.hops[home].name, S.formBack c.req r m home)
@@ -346,10 +345,11 @@ def backwardUnlinkable : Property S where
       return {
         onion
         patch :=
-          { proc := fun h o s =>
+          { proc := fun h o out =>
               if h = .sender ∧ o.1 = (S.form q r' q.last).1 then pure none
-              else if h = .relay ∧ swapAt = some o.1 then pure (some (.forward swap.1 swap.2))
-              else pure (some s)
+              else if h = .relay ∧ swapAt = some o.1 then
+                pure (out.map fun _ => .forward swap.1 swap.2)
+              else pure out
             reply := fun h _ o out =>
               if h = .relay ∧ c.pos.val = 0 ∧ o.1 = (S.form c.req r c.req.last).1 then
                 out.map fun _ => swap
@@ -357,9 +357,9 @@ def backwardUnlinkable : Property S where
     else return {
       onion
       patch :=
-        { proc := fun h o s =>
+        { proc := fun h o out =>
             if h = .sender ∧ o.1 = (S.formBack c.req r c.req.msg last).1 then pure none
-            else pure (some s) } }
+            else pure out } }
 
 /-! ## Tail indistinguishability -/
 
@@ -380,8 +380,8 @@ def tailWorld (q : S.Request) (r : S.Randomness) (i : Fin q.fwd.hops.length)
     (k : Fin q.back.hops.length) : World S where
   onion := S.form q r i
   patch :=
-    { proc := fun h o s =>
-        if h = .back ∧ o.1 = (S.formBack q r q.msg k).1 then pure none else pure (some s) }
+    { proc := fun h o out =>
+        if h = .back ∧ o.1 = (S.formBack q r q.msg k).1 then pure none else pure out }
 
 /-- STI↔ (§A.3). The adversary is shown the layer of its onion that leaves an honest relay, or
 the first layer of an onion with the same message over the rest of the forward path and the
