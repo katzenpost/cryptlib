@@ -122,12 +122,11 @@ def form (q : Request kem geom) (r : Randomness geom) (i : Fin q.fwd.hops.length
   | .ok pkt => split geom pkt
   | .error _ => default
 
-/-- A relay unwraps the packet and reads its commands. A relay does not use its own name. -/
-def proc (sk : kem.PrivateKey) (o : Onion geom) :
+/-- What a relay learns from an unwrapped packet: it reads the commands. -/
+def stepOf (res : ProcResult) :
     Option (Protocols.RSOR.Step Name (Onion geom) (Msg geom) Name
       (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))) :=
-  match procWith kem cipher macS kdfS streamS geom
-      (kemDecap kem (ofVector (kem.encodePrivateKey sk))) (join o) with
+  match res with
   | some (none, _, cmds, some fwd) => cmds.findSome? fun
     | .nextNodeHop next _ => some (.forward next (split geom fwd))
     | _ => none
@@ -136,6 +135,13 @@ def proc (sk : kem.PrivateKey) (o : Onion geom) :
     | .surbReply _ => some (.reply (toVecN _ p))
     | _ => none
   | _ => none
+
+/-- A relay unwraps the packet and reads its commands. A relay does not use its own name. -/
+def proc (sk : kem.PrivateKey) (o : Onion geom) :
+    Option (Protocols.RSOR.Step Name (Onion geom) (Msg geom) Name
+      (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))) :=
+  stepOf geom (procWith kem cipher macS kdfS streamS geom
+    (kemDecap kem (ofVector (kem.encodePrivateKey sk))) (join o))
 
 /-- The draws from which the first layer on a path can be built and no KEM round trip fails.
 Every later layer can then be built too (`Builds.layer`). -/
@@ -175,10 +181,9 @@ def formBack (q : Request kem geom) (r : Randomness geom) (m : Msg geom)
       (r.2.1.1.toArray.extract 0 hops.size) (first.extract geom.headerLength first.size) j)
   | .error _ => default
 
-/-- The exit relay answers with the SURB it finds in the payload. -/
-def reply (sk : kem.PrivateKey) (m : Msg geom) (o : Onion geom) : Option (Name × Onion geom) :=
-  match procWith kem cipher macS kdfS streamS geom
-      (kemDecap kem (ofVector (kem.encodePrivateKey sk))) (join o) with
+/-- The reply to an unwrapped packet, built from the SURB in its payload. -/
+def replyOf (m : Msg geom) (res : ProcResult) : Option (Name × Onion geom) :=
+  match res with
   | some (some p, _, _, none) =>
     if p.get! 0 = 1 then
       match SURB.newPacketFromSURB cipher geom (p.extract 2 (2 + geom.surbLength)) (pad geom m) with
@@ -186,6 +191,11 @@ def reply (sk : kem.PrivateKey) (m : Msg geom) (o : Onion geom) : Option (Name �
       | .error _ => none
     else none
   | _ => none
+
+/-- The exit relay answers with the SURB it finds in the payload. -/
+def reply (sk : kem.PrivateKey) (m : Msg geom) (o : Onion geom) : Option (Name × Onion geom) :=
+  replyOf cipher geom m (procWith kem cipher macS kdfS streamS geom
+    (kemDecap kem (ofVector (kem.encodePrivateKey sk))) (join o))
 
 /-- The sender opens a reply with the keys it kept from the SURB. -/
 def recover (q : Request kem geom) (r : Randomness geom)
@@ -384,7 +394,7 @@ theorem proc_form (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macL
   obtain ⟨-, hmid, hlast⟩ := procWith_layer kem cipher macS kdfS streamS geom hvalid hmactag h16
     q.fwd [.recipient q.receiver] (by simp) (by simp) r.1 _ i i.isLt sk
     (key_of_keygen kem _ _ hk) hr.1 pkt hpkt
-  unfold proc form
+  unfold proc stepOf form
   rw [hpkt]
   dsimp only
   rw [(join_split_layer kem cipher macS kdfS streamS geom hvalid hmactag _ _ _ _ _ hpkt).2]
@@ -798,7 +808,7 @@ theorem reply_form (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = mac
     rw [Cryptlib.Util.Bytes.extract_append_of_le _ _ (by
       rw [ByteArray.size_append, hss]; exact Nat.le_refl _)]
     exact extract_append_tail _ _ _ _ rfl (by rw [hss])
-  unfold reply form formBack
+  unfold reply replyOf form formBack
   dsimp only
   rw [hpkt]
   dsimp only
@@ -837,7 +847,7 @@ theorem proc_formBack (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = 
       (r.2.1.1.toArray.extract 0 (path kem q.back [.surbReply r.2.2.2]).size) _ i)
     (by rw [peeled_size, hE])
   obtain ⟨tag, mac, fwd, hp, hnext⟩ := hmid h
-  unfold proc formBack
+  unfold proc stepOf formBack
   dsimp only
   rw [hpkt, hnext]
   dsimp only
@@ -877,7 +887,7 @@ theorem recover_formBack (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize
     (r.2.1.1.toArray.extract 0 (path kem q.back [.surbReply r.2.2.2]).size)
     (cipher.encrypt ((ofVector r.2.2.1).extract 0 48).data ((ofVector r.2.2.1).extract 48 64)
       ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ pad geom m)) (i + 1)), ?_, ?_⟩
-  · unfold proc formBack
+  · unfold proc stepOf formBack
     dsimp only
     rw [hpkt]
     dsimp only
