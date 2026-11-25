@@ -74,8 +74,12 @@ packets with the game's keys (`keyedChain_le`).
 
 - The MAC step, for any keyed game (`keyedIdeal_sub_tagged_le`). If the view uses the honest
   relay's MAC key for one tag, the relay may answer the challenge ciphertext under the challenge
-  header only, at the cost of a forgery against the MAC (`MAC.forgeExp`) and the bad draws. It
-  is not yet applied to the two worlds of TLU→.
+  header only, at the cost of a forgery against the MAC (`MAC.forgeExp`) and the bad draws.
+- For KEM Sphinx and TLU→ with that step applied to both worlds:
+  `forwardUnlinkable_le_tagged`. The advantage is at most the bad draws, the KEM and KDF
+  advantages, a MAC forgery in either world, and the distance between the two worlds once the
+  relay's keys are uniform and it answers the challenge ciphertext under the challenge header
+  only.
 
 Not proved yet: the rest of the bound on that last distance (the payload cipher, the stream
 cipher, and that the two ideal worlds agree); SLU← and STI↔ for KEM Sphinx; all three for NIKE
