@@ -307,6 +307,40 @@ structure ForwardChallenge (hon : Honest S) where
   relay : req.fwd.hops[pos] = hon .relay
   sender : req.back.hops.getLast? = some (hon .sender)
 
+namespace ForwardChallenge
+
+variable {hon : Honest S} (c : ForwardChallenge hon)
+
+/-- The replacement request: the forward path up to the honest relay, and no backward path. -/
+def short (msg : S.Msg) (receiver : S.Receiver) : S.Request :=
+  { msg, receiver, fwd := c.req.fwd.take (c.pos + 1), back := .nil,
+    fwd_ne := c.req.fwd.take_ne c.pos.isLt }
+
+/-- The honest relay's position on the replacement's path, where it is last. -/
+def shortPos {msg : S.Msg} {receiver : S.Receiver} : Fin (c.short msg receiver).fwd.hops.length :=
+  ⟨c.pos, by simp [short, Route.take]⟩
+
+/-- What the honest relay answers in the second world, where `mine` is the replacement's layer
+at the relay and `r` the randomness of the adversary's own onion. -/
+def patch (r : S.Randomness) (mine : S.Onion) : Patch S where
+  proc h o out :=
+    if h = .relay ∧ o.1 = mine.1 then
+      if hn : c.pos + 1 < c.req.fwd.hops.length then
+        let next := S.form c.req r ⟨c.pos + 1, hn⟩
+        let name := c.req.fwd.hops[c.pos.val + 1].name
+        if o.2 = mine.2 then pure (some (.forward name next))
+        else do return some (.forward name (next.1, ← $ᵗ S.Payload))
+      else pure (out.map fun _ => .deliver c.req.msg c.req.receiver)
+    else pure out
+  reply h m o out :=
+    if h = .relay ∧ o = mine ∧ c.pos + 1 = c.req.fwd.hops.length then
+      some (c.req.back.hops[(⟨0, List.length_pos_iff.2 fun h => by simpa [h] using c.sender⟩ :
+        Fin c.req.back.hops.length)].name,
+        S.formBack c.req r m ⟨0, List.length_pos_iff.2 fun h => by simpa [h] using c.sender⟩)
+    else out
+
+end ForwardChallenge
+
 /-- TLU→ (Definition 2). The adversary is shown the first layer of its onion, or of an onion
 that ends at the honest relay and carries a random message. In the second world the honest relay
 answers the replacement with what the original would have produced, and when its payload was
@@ -319,29 +353,9 @@ def forwardUnlinkable : Property S where
   world c b := do
     let r ← $ᵗ S.Randomness
     if b then
-      let q : S.Request :=
-        { msg := ← $ᵗ S.Msg, receiver := ← $ᵗ S.Receiver, fwd := c.req.fwd.take (c.pos + 1),
-          back := .nil, fwd_ne := c.req.fwd.take_ne c.pos.isLt }
+      let q := c.short (← $ᵗ S.Msg) (← $ᵗ S.Receiver)
       let r' ← $ᵗ S.Randomness
-      let mine := S.form q r' ⟨c.pos, by simp [q, Route.take]⟩
-      let home : Fin c.req.back.hops.length :=
-        ⟨0, List.length_pos_iff.2 fun h => by simpa [h] using c.sender⟩
-      return {
-        onion := S.form q r' q.first
-        patch :=
-          { proc := fun h o out =>
-              if h = .relay ∧ o.1 = mine.1 then
-                if hn : c.pos + 1 < c.req.fwd.hops.length then
-                  let next := S.form c.req r ⟨c.pos + 1, hn⟩
-                  let name := c.req.fwd.hops[c.pos.val + 1].name
-                  if o.2 = mine.2 then pure (some (.forward name next))
-                  else do return some (.forward name (next.1, ← $ᵗ S.Payload))
-                else pure (out.map fun _ => .deliver c.req.msg c.req.receiver)
-              else pure out
-            reply := fun h m o out =>
-              if h = .relay ∧ o = mine ∧ c.pos + 1 = c.req.fwd.hops.length then
-                some (c.req.back.hops[home].name, S.formBack c.req r m home)
-              else out } }
+      return { onion := S.form q r' q.first, patch := c.patch r (S.form q r' c.shortPos) }
     else return { onion := S.form c.req r c.req.first }
 
 /-! ## Backward layer unlinkability -/
