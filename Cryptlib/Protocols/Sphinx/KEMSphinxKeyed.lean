@@ -454,8 +454,8 @@ theorem keyedIdeal_sub_onlyHeader_le
   unfold otherHeader at hb
   unfold onlyHeader
   by_cases hH : pkt.extract 0 (payloadOffset kem geom) = H ch o c u
-  · rw [if_pos hH]
-  · rw [if_neg hH]
+  · simp only [hH, ↓reduceIte]
+  · simp only [hH, ↓reduceIte]
     simpa [hH] using hb
 
 end Keyed

@@ -561,6 +561,96 @@ theorem procWith_keysKDF (t : KeyTuple) (dec : ByteArray → Except String ByteA
       keyTuple_keysKDF] at h0
     exact h0
 
+/-- A hop uses the MAC and its MAC key to recompute one tag: it does the same with a packet
+under the "MAC" that gives that tag. -/
+theorem unwrapKEMKeys_const (K : HopKeys) (tag : Vector UInt8 32) (pkt : ByteArray)
+    (h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength) :
+    unwrapKEMKeys kem cipher macS streamS geom K tag pkt h1
+      = unwrapKEMKeys kem cipher (MAC.const (macS.mac (ofVector K.headerMAC)
+          (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength)))) streamS geom K
+              tag pkt h1 :=
+  rfl
+
+/-- Under a "MAC" that gives one fixed tag, a hop does not use its MAC key. -/
+theorem unwrapKEMKeys_const_key {n : Nat} (v : Vector UInt8 n) (K K' : HopKeys)
+    (he : K.headerEncryption = K'.headerEncryption)
+    (hiv : K.headerEncryptionIV = K'.headerEncryptionIV)
+    (hpay : K.payloadEncryption = K'.payloadEncryption) (tag : Vector UInt8 32)
+    (pkt : ByteArray)
+    (h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength) :
+    unwrapKEMKeys kem cipher (MAC.const v) streamS geom K tag pkt h1
+      = unwrapKEMKeys kem cipher (MAC.const v) streamS geom K' tag pkt h1 := by
+  obtain ⟨m1, e1, i1, p1, b1⟩ := K
+  obtain ⟨m2, e2, i2, p2, b2⟩ := K'
+  dsimp only at he hiv hpay
+  subst he hiv hpay
+  rfl
+
+/-- **A hop with its keys given uses its MAC key for one tag.** It does the same with a packet
+under the "MAC" that gives that tag, whatever MAC key it then holds. -/
+theorem procKeys_const (t t' : KeyTuple) (pkt : ByteArray) (hpay : t.1 = t'.1)
+    (hiv : t.2.1 = t'.2.1) (he : t.2.2.2 = t'.2.2.2) :
+    procKeys kem cipher macS streamS geom t pkt
+      = procKeys kem cipher (MAC.const (macS.mac (ofVector t.2.2.1)
+          (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength)))) streamS geom t'
+              pkt := by
+  have hk := keyTuple_keysKDF t ByteArray.empty
+  have hk' := keyTuple_keysKDF t' ByteArray.empty
+  unfold procKeys procWith unwrapKEMWith
+  dsimp only
+  by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
+  · rw [dif_pos h1, dif_pos h1]
+  rw [dif_neg h1, dif_neg h1]
+  by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
+  · rw [if_pos h2, if_pos h2]
+    rfl
+  rw [if_neg h2, if_neg h2]
+  dsimp only [Bind.bind, Except.bind]
+  rw [unwrapKEMKeys_const kem cipher macS streamS geom
+      (deriveHopKeys (keysKDF t) ByteArray.empty),
+    show (deriveHopKeys (keysKDF t) ByteArray.empty).headerMAC = t.2.2.1 from
+      congrArg (·.2.2.1) hk,
+    unwrapKEMKeys_const_key kem cipher streamS geom _
+      (deriveHopKeys (keysKDF t) ByteArray.empty) (deriveHopKeys (keysKDF t') ByteArray.empty)
+      ((congrArg (·.2.2.2) hk).trans (he.trans (congrArg (·.2.2.2) hk').symm))
+      ((congrArg (·.2.1) hk).trans (hiv.trans (congrArg (·.2.1) hk').symm))
+      ((congrArg (·.1) hk).trans (hpay.trans (congrArg (·.1) hk').symm))]
+
+/-- A packet a hop accepts is long enough to hold a header. -/
+theorem procKeys_size (t : KeyTuple) (pkt : ByteArray)
+    (res : Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option ByteArray)
+    (h : procKeys kem cipher macS streamS geom t pkt = some res) :
+    2 + kem.ciphertextSize + geom.routingInfoLength + macLength ≤ pkt.size := by
+  unfold procKeys procWith unwrapKEMWith at h
+  dsimp only at h
+  by_contra h1
+  rw [dif_pos (by omega)] at h
+  cases h
+
+/-- **A packet a hop accepts under another header is a forgery.** If the packet's header is not
+the message `M` followed by its tag, the packet carries the right tag on a message other than
+`M`. -/
+theorem procKeys_forgery (t : KeyTuple) (pkt M : ByteArray)
+    (res : Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option ByteArray)
+    (h : procKeys kem cipher macS streamS geom t pkt = some res)
+    (hne : pkt.extract 0 (payloadOffset kem geom)
+      ≠ M ++ ofVector (macS.mac (ofVector t.2.2.1) M)) :
+    pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength) ≠ M ∧
+      macS.mac (ofVector t.2.2.1)
+          (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength))
+        = Util.Bytes.toVecN macS.tagSize
+          (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength) (payloadOffset kem
+              geom)) := by
+  have hsz := procKeys_size kem cipher macS streamS geom t pkt res h
+  have hm : ofVector (macS.mac (ofVector t.2.2.1)
+        (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength)))
+      = pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength) (payloadOffset kem geom) :=
+    ByteArray.ext (procKeys_mac kem cipher macS streamS geom t pkt res h)
+  refine ⟨fun hp => hne ?_, (Util.Bytes.toVecN_ofVector _).symm.trans
+    (congrArg (Util.Bytes.toVecN macS.tagSize) hm)⟩
+  rw [extract_split pkt (2 + kem.ciphertextSize + geom.routingInfoLength) (payloadOffset kem geom)
+    (by unfold payloadOffset; omega) (by unfold payloadOffset; omega), ← hm, hp]
+
 /-- The header of a one-hop packet in closed form. It does not use the payload key. -/
 def hdr1 (ct : ByteArray) (iv : Vector UInt8 16) (km ke : Vector UInt8 32) (filler : ByteArray)
     (hop : PathHop) : ByteArray :=
