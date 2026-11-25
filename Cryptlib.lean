@@ -102,6 +102,7 @@ import Cryptlib.Protocols.Sphinx.KEMSphinxLU
 import Cryptlib.Protocols.RSOR
 import Cryptlib.Protocols.Sphinx.KEMSphinxRSOR
 import Cryptlib.Protocols.Sphinx.KEMSphinxKeyed
+import Cryptlib.Protocols.Sphinx.KEMSphinxKeyedMac
 import Cryptlib.Protocols.Sphinx.KEMSphinxTLU
 import Cryptlib.Protocols.Sphinx.NIKESphinxRSOR
 import Cryptlib.Protocols.Sphinx.Schemes
