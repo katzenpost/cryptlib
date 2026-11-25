@@ -246,6 +246,57 @@ theorem fillerAtK_real (hops : Array PathHop) (seeds seeds' : Array (Vector UInt
       rw [this]
       exact ⟨rfl, rfl⟩
 
+theorem extract_getElem!_congr {α : Type} [Inhabited α] (a b : Array α) (i m : ℕ)
+    (hsz : a.size = b.size) (h : a[i + m]? = b[i + m]?) :
+    (a.extract i a.size)[m]! = (b.extract i b.size)[m]! := by
+  rw [Array.getElem!_eq_getD, Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
+    Array.getD_eq_getD_getElem?, Array.getElem?_extract, Array.getElem?_extract, hsz, h]
+
+/-- `RSOR.layer` with hop `j`'s ciphertext `c` and keys `t` given: the layer for position
+`i`. -/
+def layerK (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (c : ByteArray) (t : KeyTuple) (i : ℕ) : Except String ByteArray :=
+  let seeds := d.1.toArray.extract 0 hops.size
+  packetK kem cipher macS kdfS streamS geom (seeds.extract i seeds.size)
+    (fillerAtK kem kdfS streamS geom hops seeds
+      ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength)) j t i)
+    (hops.extract i hops.size) payload (j - i) c t
+
+/-- With the ciphertext and keys that the seed `s` gives at hop `j`, `layerK` is the layer built
+from the draw with `s` at position `j`, for a layer up to hop `j`'s. -/
+theorem layerK_real (hops : Array PathHop) (d : RSOR.Draw geom) (payload pkt : ByteArray)
+    (j i : ℕ) (s : Vector UInt8 32) (c ss : ByteArray) (hi : i ≤ j) (hj : j < hops.size)
+    (hlen : hops.size ≤ geom.nrHops)
+    (henc : kemEncap kem (hops[j]!).publicKey s = .ok (c, ss))
+    (hpkt : RSOR.layer kem cipher macS kdfS streamS geom hops (d.1.setIfInBounds j s, d.2)
+      payload i = .ok pkt) :
+    layerK kem cipher macS kdfS streamS geom hops d payload j c
+      (keyTuple (deriveHopKeys kdfS ss)) i = .ok pkt := by
+  have hsz : ((d.1.setIfInBounds j s).toArray.extract 0 hops.size).size = hops.size := by
+    simp; omega
+  have hSS : (d.1.toArray.extract 0 hops.size).size
+      = ((d.1.setIfInBounds j s).toArray.extract 0 hops.size).size := by simp
+  have hget : ∀ k, k ≠ j → (d.1.toArray.extract 0 hops.size)[k]?
+      = ((d.1.setIfInBounds j s).toArray.extract 0 hops.size)[k]? := fun k hk => by
+    simp [Array.getElem?_extract, Ne.symm hk]
+  have hs : ((d.1.setIfInBounds j s).toArray.extract 0 hops.size)[j]! = s := by
+    rw [getElem!_extract_zero _ _ _ hj (by rw [Vector.size_toArray]; exact hlen)]
+    simp [lt_of_lt_of_le hj hlen]
+  unfold RSOR.layer at hpkt
+  dsimp only at hpkt
+  have h1 := packetK_real kem cipher macS kdfS streamS geom _ _ _ _ pkt (j - i) c ss
+    (by
+      rw [getElem!_extract_from _ _ _ (by omega), getElem!_extract_from _ _ _ (by omega),
+        Nat.add_sub_cancel' hi, hs]
+      exact henc) hpkt
+  unfold layerK
+  dsimp only
+  rw [fillerAtK_real kem kdfS streamS geom hops _ _ _ j c ss hj hsz (by rw [hs]; exact henc)
+    (fun k hk => by
+      simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?, hget k hk]) i hi]
+  exact (packetK_congr kem cipher macS kdfS streamS geom _ _ _ _ _ _ _ _ fun m hm =>
+    extract_getElem!_congr _ _ i m hSS (hget (i + m) (by omega))).trans h1
+
 end PacketK
 
 /-! # Tagging-forward layer unlinkability: the worlds as keyed games -/
@@ -506,27 +557,27 @@ theorem forwardAdv_post (names : Role → RSOR.Name) (Oth : Type) (draw : ProbCo
   simp only [StateT.run', simulateQ_map]
   exact congrArg (fun x => (·.1) <$> x) hv
 
-/-- The draws of world 0 of TLU→: the honest relays' key pairs, the adversary's first phase, the
-challenger's randomness, and the seed of the encapsulation to the honest relay. -/
-structure ForwardDraw (names : Role → RSOR.Name)
+/-- The draws of a world of TLU→: the honest relays' key pairs, the adversary's first phase, the
+challenger's draws, and the seed of the encapsulation to the honest relay. -/
+structure ForwardDraw (names : Role → RSOR.Name) (Oth : Type)
     (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) where
   k : Key kem × kem.PrivateKey
   ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1
   st : A.State
   log : Protocols.RSOR.Log 𝒮
-  r : RSOR.Randomness geom
+  o : Oth
   s : Vector UInt8 32
 
 /-- The secret keys of the honest relays in a draw. -/
-def ForwardDraw.sk {names : Role → RSOR.Name}
+def ForwardDraw.sk {names : Role → RSOR.Name} {Oth : Type}
     {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
-    (d : ForwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) :
+    (d : ForwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth A) :
     Role → kem.PrivateKey :=
   fun | .relay => d.k.2 | .back => d.ch.kb.2 | .sender => d.ch.ks.2
 
-def forwardDraw (names : Role → RSOR.Name)
+def forwardDrawOf (names : Role → RSOR.Name) (Oth : Type) (draw : ProbComp Oth)
     (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
-    ProbComp (ForwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) := do
+    ProbComp (ForwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth A) := do
   let k ← keygen kem
   let kb ← keygen kem
   let ks ← keygen kem
@@ -535,9 +586,17 @@ def forwardDraw (names : Role → RSOR.Name)
       (fun | .relay => k.2 | .back => kb.2 | .sender => ks.2) {})
     (A.choose (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1 kb.1
       ks.1))).run {}
-  let r ← $ᵗ (RSOR.Randomness geom)
+  let o ← draw
   let s ← $ᵗ (Vector UInt8 32)
-  return ⟨k, ⟨kb, ks, out.1.1⟩, out.1.2, out.2, r, s⟩
+  return ⟨k, ⟨kb, ks, out.1.1⟩, out.1.2, out.2, o, s⟩
+
+/-- The draws of world 0: the challenger draws its randomness. -/
+abbrev forwardDraw (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    ProbComp (ForwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+      (RSOR.Randomness geom) A) :=
+  forwardDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names _
+    ($ᵗ RSOR.Randomness geom) A
 
 /-- World 0 of TLU→ as its draws, then the adversary's guess on the first layer of its own
 onion, built with the seed drawn apart at the honest relay's position. -/
@@ -549,8 +608,8 @@ theorem play_false_evalDistEq (names : Role → RSOR.Name)
             (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.k.1 d.ch.kb.1
               d.ch.ks.1) d.sk {})
           (A.guess d.st (RSOR.form kem cipher macS kdfS streamS geom d.ch.c.req
-            (setSeed geom d.r d.ch.c.pos d.s) d.ch.c.req.first))).run' d.log := by
-  unfold Protocols.RSOR.Property.play Protocols.RSOR.Property.playFrom forwardDraw
+            (setSeed geom d.o d.ch.c.pos d.s) d.ch.c.req.first))).run' d.log := by
+  unfold Protocols.RSOR.Property.play Protocols.RSOR.Property.playFrom forwardDraw forwardDrawOf
   simp only [bind_assoc, pure_bind]
   refine EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun kb =>
     EvalDistEq.bind_right _ fun ks => EvalDistEq.bind_right _ fun out => ?_
@@ -574,25 +633,29 @@ theorem play_false_evalDistEq (names : Role → RSOR.Name)
 
 variable [SampleableType kem.Plaintext]
 
-/-- The keyed game of `forwardAdv` with the real keys, as the draws of world 0 and then the
-second phase on the keyed first layer. -/
-theorem keyedReal_forwardAdv_evalDistEq (names : Role → RSOR.Name)
+/-- The keyed game of `forwardAdvOf` with the real keys, as the draws of its world and then the
+second phase on the world it shows. -/
+theorem keyedReal_forwardAdvOf_evalDistEq (names : Role → RSOR.Name) (Oth : Type)
+    (draw : ProbComp Oth)
+    (view : {pk : Key kem} → ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      → Oth → kem.Ciphertext → KeyTuple → Protocols.RSOR.World 𝒮)
     (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
     keyedReal cipher macS kdfS streamS geom
-        (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
-      =ᵈ forwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun d =>
+        (forwardAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth draw view A)
+      =ᵈ forwardDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth draw
+          A >>= fun d =>
         simulateQ (procImplK kem cipher macS kdfS streamS geom d.k.2 (encapOf kem d.k.1.1 d.s).1
             ((hopKeysPRG kem kdfS).gen (encapOf kem d.k.1.1 d.s).2))
-          ((forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).post
+          ((forwardAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth draw
+            view A).post
             (d.st, d.log, fun | .relay => d.ch.kb.2 | .back => d.ch.kb.2 | .sender => d.ch.ks.2)
-            { onion := (forwardOnionK kem cipher macS kdfS streamS geom hvalid hmactag h16 names
-                d.ch d.r (encapOf kem d.k.1.1 d.s).1
-                ((hopKeysPRG kem kdfS).gen (encapOf kem d.k.1.1 d.s).2)) }) := by
-  unfold keyedReal keyedGame forwardDraw
+            (view d.ch d.o (encapOf kem d.k.1.1 d.s).1
+              ((hopKeysPRG kem kdfS).gen (encapOf kem d.k.1.1 d.s).2))) := by
+  unfold keyedReal keyedGame forwardDrawOf
   refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
   refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
-  simp only [forwardAdv, forwardAdv_pre]
-  simp only [forwardSetup, forwardSetupOf, bind_assoc, pure_bind, bind_pure]
+  simp only [forwardAdv_pre]
+  simp only [forwardSetupOf, bind_assoc, pure_bind, bind_pure]
   refine EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun kb =>
     EvalDistEq.bind_right _ fun ks => EvalDistEq.bind_right _ fun out => ?_
   exact OracleComp.EvalDistEq.bind_bind_swap _ _ _
@@ -624,12 +687,14 @@ theorem layer_zero_encap (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key ke
 its private key gives, its seed may make the KEM fail, or the first layer cannot be built. -/
 def forwardBad {names : Role → RSOR.Name}
     {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
-    (d : ForwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) : Prop :=
+    (d : ForwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+      (RSOR.Randomness geom) A) :
+    Prop :=
   ¬ (d.k.1.1 = kem.derivePublicKey d.k.2 ∧ kem.Reliable (kem.stateFromSeed d.s) ∧
     ∃ pkt, RSOR.layer kem cipher macS kdfS streamS geom
       (RSOR.path kem d.ch.c.req.fwd [.recipient d.ch.c.req.receiver])
-      (setSeed geom d.r d.ch.c.pos d.s).1
-      (RSOR.body kem macS kdfS streamS geom d.ch.c.req (setSeed geom d.r d.ch.c.pos d.s)) 0
+      (setSeed geom d.o d.ch.c.pos d.s).1
+      (RSOR.body kem macS kdfS streamS geom d.ch.c.req (setSeed geom d.o d.ch.c.pos d.s)) 0
         = .ok pkt)
 
 /-- **World 0 of TLU→ is the keyed game with the real keys, off the bad draws.** -/
@@ -643,8 +708,8 @@ theorem play_false_sub_keyedReal_le (names : Role → RSOR.Name)
         A)}[forwardBad kem cipher macS kdfS streamS geom hvalid hmactag h16 d]).toReal := by
   rw [(play_false_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16 names
       A).prEvent_eq (fun x => x = true),
-    (keyedReal_forwardAdv_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16 names
-      A).prEvent_eq (fun x => x = true)]
+    (keyedReal_forwardAdvOf_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+      _ _ _ A).prEvent_eq (fun x => x = true)]
   refine prEvent_bind_toReal_sub_le_of_bad _ _ _
     (forwardBad kem cipher macS kdfS streamS geom hvalid hmactag h16) (fun d hd => ?_)
     (fun x => x = true)
@@ -658,7 +723,7 @@ theorem play_false_sub_keyedReal_le (names : Role → RSOR.Name)
   have hpub : ofVector (kem.encodePublicKey (d.ch.c.req.fwd.hops[(d.ch.c.pos : ℕ)]'hpos).key.1)
       = ofVector (kem.encodePublicKey d.k.1.1) :=
     congrArg (fun k : Key kem => ofVector (kem.encodePublicKey k.1)) hkey
-  have hs : (setSeed geom d.r d.ch.c.pos d.s).1.1.toArray[(d.ch.c.pos : ℕ)]! = d.s := by
+  have hs : (setSeed geom d.o d.ch.c.pos d.s).1.1.toArray[(d.ch.c.pos : ℕ)]! = d.s := by
     simp [setSeed, lt_of_lt_of_le hpos hle]
   rw [hs] at henc
   replace henc : kemEncap kem (ofVector (kem.encodePublicKey d.k.1.1)) d.s = .ok (ct, ss) :=
@@ -667,11 +732,11 @@ theorem play_false_sub_keyedReal_le (names : Role → RSOR.Name)
   have hdec : decapOf kem d.k.2 (encapOf kem d.k.1.1 d.s).1 = some (encapOf kem d.k.1.1 d.s).2 := by
     have h := decapOf_encapOf kem d.k.2 d.s hrel _ _ (hpk ▸ henc)
     rwa [← hpk] at h
-  have honion : forwardOnionK kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.ch d.r
+  have honion : forwardOnionK kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.ch d.o
       (encapOf kem d.k.1.1 d.s).1 ((hopKeysPRG kem kdfS).gen (encapOf kem d.k.1.1 d.s).2)
-      = RSOR.form kem cipher macS kdfS streamS geom d.ch.c.req (setSeed geom d.r d.ch.c.pos d.s)
+      = RSOR.form kem cipher macS kdfS streamS geom d.ch.c.req (setSeed geom d.o d.ch.c.pos d.s)
           d.ch.c.req.first :=
-    forwardOnionK_real kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.ch d.r d.s _ _
+    forwardOnionK_real kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.ch d.o d.s _ _
       pkt henc hpkt
   rw [forwardAdv_post kem cipher macS kdfS streamS geom hvalid hmactag h16 names _ _ _ A d.k
     d.ch.kb d.ch.ks _ _ hdec d.st d.log _]
