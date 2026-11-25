@@ -136,7 +136,7 @@ theorem createKEMHeader_fold (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : St
           Array.ofFn (fun i : Fin path.size =>
             ({ key := keys[i.val]!.payloadEncryption, iv := keys[i.val]!.headerEncryptionIV }
               : SPRPKey))) := by
-  unfold createKEMHeader
+  unfold createKEMHeader createKEMHeaderFrom
   dsimp only
   split
   case isTrue hc =>
@@ -224,6 +224,108 @@ theorem newKEMPacket_fold (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (k
       Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind]
     rw [hcreate]
     rfl
+
+theorem Except.bind_eq_of_ok {ε α β : Type} {e : Except ε α} {a : α} (f : α → Except ε β)
+    (h : e = Except.ok a) : (e >>= f) = f a := by
+  subst h; rfl
+
+/-- `createKEMHeader` is `createKEMHeaderFrom` on the ciphertexts and keys its first loop
+produces: `kemElements[i]!` and `keys[i]!` come from hop `i`'s encapsulation. -/
+theorem createKEMHeader_eq_createKEMHeaderFrom (kem : KEM) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
+    (filler : ByteArray) (path : Array PathHop)
+    (kemElements : Array ByteArray) (keys : Array HopKeys)
+    (hpos : path.size ≠ 0) (hgen : path.size ≤ geom.nrHops)
+    (hseeds : ephemeralSeeds.size = path.size)
+    (hfsize : geom.nrHops > path.size →
+      filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hkn : kemElements.size = path.size) (hkeys : keys.size = path.size)
+    (hkc : ∀ i (_hi : i < path.size), ∃ ct ss,
+      kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) = Except.ok (ct, ss) ∧
+      kemElements[i]! = ct ∧ keys[i]! = deriveHopKeys kdfS ss) :
+    createKEMHeader kem macS kdfS streamS geom ephemeralSeeds filler path
+      = createKEMHeaderFrom kem macS streamS geom kemElements keys filler path := by
+  unfold createKEMHeader
+  dsimp only
+  split
+  case isTrue hc =>
+    exfalso
+    simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq] at hc
+    omega
+  case isFalse =>
+    split
+    case isTrue hc => exact absurd hseeds hc
+    case isFalse =>
+      split
+      case isTrue hc =>
+        exfalso
+        simp only [Bool.and_eq_true, decide_eq_true_eq] at hc
+        exact hc.2 (hfsize hc.1)
+      case isFalse =>
+        simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+          Nat.add_sub_cancel, Nat.div_one]
+        refine (Except.bind_eq_of_ok (a := (kemElements, keys)) _ ?_).trans rfl
+        refine forIn_range'_ok' _ (fun j => (kemElements.extract 0 j, keys.extract 0 j))
+          path.size _ _ (by simp)
+          (by rw [← hkn, Array.extract_size, hkn, ← hkeys, Array.extract_size]) ?_
+        intro j hj
+        obtain ⟨ct, ss, hkenc, hct, hkey⟩ := hkc j hj
+        dsimp only
+        rw [hkenc]
+        have h1 : (kemElements.extract 0 j).push ct = kemElements.extract 0 (j + 1) := by
+          rw [← hct, getElem!_pos kemElements j (by omega),
+            Array.push_extract_getElem (by omega)]
+          simp
+        have h2 : (keys.extract 0 j).push (deriveHopKeys kdfS ss) = keys.extract 0 (j + 1) := by
+          rw [← hkey, getElem!_pos keys j (by omega), Array.push_extract_getElem (by omega)]
+          simp
+        show Except.ok (ForInStep.yield ((kemElements.extract 0 j).push ct,
+          (keys.extract 0 j).push (deriveHopKeys kdfS ss))) = _
+        rw [h1, h2]
+
+/-- `newKEMPacket` is `newKEMPacketFrom` on the ciphertexts and keys the header's first loop
+produces. -/
+theorem newKEMPacket_eq_newKEMPacketFrom (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
+    (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
+    (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop)
+    (payload : ByteArray) (kemElements : Array ByteArray) (keys : Array HopKeys)
+    (hpos : path.size ≠ 0) (hgen : path.size ≤ geom.nrHops)
+    (hseeds : ephemeralSeeds.size = path.size)
+    (hfsize : geom.nrHops > path.size →
+      filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hkn : kemElements.size = path.size) (hkeys : keys.size = path.size)
+    (hkc : ∀ i (_hi : i < path.size), ∃ ct ss,
+      kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) = Except.ok (ct, ss) ∧
+      kemElements[i]! = ct ∧ keys[i]! = deriveHopKeys kdfS ss) :
+    newKEMPacket kem cipher macS kdfS streamS geom ephemeralSeeds filler path payload
+      = newKEMPacketFrom kem cipher macS streamS geom kemElements keys filler path payload := by
+  unfold newKEMPacket newKEMPacketFrom
+  rw [createKEMHeader_eq_createKEMHeaderFrom kem macS kdfS streamS geom ephemeralSeeds filler
+    path kemElements keys hpos hgen hseeds hfsize hkn hkeys hkc]
+
+/-- A packet `newKEMPacket` built is the packet `newKEMPacketFrom` builds from the ciphertexts
+and keys of the hops' encapsulations. -/
+theorem newKEMPacket_ok_newKEMPacketFrom (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
+    (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
+    (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop)
+    (payload pkt : ByteArray)
+    (h : newKEMPacket kem cipher macS kdfS streamS geom ephemeralSeeds filler path payload
+      = Except.ok pkt) :
+    ∃ (kemElements : Array ByteArray) (keys : Array HopKeys),
+      kemElements.size = path.size ∧ keys.size = path.size ∧
+      (∀ i (_hi : i < path.size), ∃ ct ss,
+        kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) = Except.ok (ct, ss) ∧
+        kemElements[i]! = ct ∧ keys[i]! = deriveHopKeys kdfS ss) ∧
+      newKEMPacketFrom kem cipher macS streamS geom kemElements keys filler path payload
+        = Except.ok pkt := by
+  obtain ⟨-, hdr, sprpKeys, _t, hcreate, -⟩ :=
+    newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ _ _ h
+  obtain ⟨hpos, hgen, hseeds, hfsize, kemElements, keys, _rks, _rp, _s, hkn, hkeys, -, -, hkc,
+    -⟩ := createKEMHeader_unfold kem macS kdfS streamS geom _ _ _ _ _ hcreate
+  refine ⟨kemElements, keys, hkn, hkeys, hkc, ?_⟩
+  rw [← newKEMPacket_eq_newKEMPacketFrom kem cipher macS kdfS streamS geom ephemeralSeeds filler
+    path payload kemElements keys hpos hgen hseeds hfsize hkn hkeys hkc]
+  exact h
 
 /-- An index reads the same from a suffix as from the whole array, shifted. -/
 theorem getElem!_extract_from {α : Type} [Inhabited α] (a : Array α) (lo i : Nat)

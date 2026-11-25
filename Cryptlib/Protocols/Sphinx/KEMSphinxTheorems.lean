@@ -95,25 +95,12 @@ def kemRiFragment (kem : KEM) (geom : Geometry) (path : Array PathHop)
       ++ kemElements[i + 1]!
   pure riFragment
 
-/-- Build a KEM-Sphinx header. `ephemeralSeeds` seeds one encapsulation per hop. -/
-def createKEMHeader (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
-    (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop) :
-    Except String (ByteArray × Array SPRPKey) := do
+/-- Build a KEM-Sphinx header from each hop's ciphertext and keys: all of `createKEMHeader` after
+the encapsulations. -/
+def createKEMHeaderFrom (kem : KEM) (macS : MAC) (streamS : StreamCipher) (geom : Geometry)
+    (kemElements : Array ByteArray) (keys : Array HopKeys) (filler : ByteArray)
+    (path : Array PathHop) : Except String (ByteArray × Array SPRPKey) := do
   let nrHops := path.size
-  if nrHops == 0 || nrHops > geom.nrHops then throw "sphinx: invalid path"
-  if ephemeralSeeds.size ≠ nrHops then throw "sphinx: wrong number of ephemeral seeds"
-  if geom.nrHops > nrHops && filler.size ≠ (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength
-  then throw "sphinx: invalid filler length"
-
-  -- One independent encapsulation per hop.
-  let mut kemElements : Array ByteArray := #[]
-  let mut keys : Array HopKeys := #[]
-  for i in [0:nrHops] do
-    match kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) with
-    | .error e => throw e
-    | .ok (ct, ss) =>
-      kemElements := kemElements.push ct
-      keys := keys.push (deriveHopKeys kdfS ss)
 
   -- Per-hop routing-info keystream and encrypted padding.
   let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
@@ -148,6 +135,28 @@ def createKEMHeader (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCiphe
   let sprpKeys : Array SPRPKey := Array.ofFn fun i : Fin nrHops =>
     { key := (keys[i.val]!).payloadEncryption, iv := (keys[i.val]!).headerEncryptionIV }
   pure (hdr, sprpKeys)
+
+/-- Build a KEM-Sphinx header. `ephemeralSeeds` seeds one encapsulation per hop. -/
+def createKEMHeader (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
+    (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop) :
+    Except String (ByteArray × Array SPRPKey) := do
+  let nrHops := path.size
+  if nrHops == 0 || nrHops > geom.nrHops then throw "sphinx: invalid path"
+  if ephemeralSeeds.size ≠ nrHops then throw "sphinx: wrong number of ephemeral seeds"
+  if geom.nrHops > nrHops && filler.size ≠ (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength
+  then throw "sphinx: invalid filler length"
+
+  -- One independent encapsulation per hop.
+  let mut kemElements : Array ByteArray := #[]
+  let mut keys : Array HopKeys := #[]
+  for i in [0:nrHops] do
+    match kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) with
+    | .error e => throw e
+    | .ok (ct, ss) =>
+      kemElements := kemElements.push ct
+      keys := keys.push (deriveHopKeys kdfS ss)
+
+  createKEMHeaderFrom kem macS streamS geom kemElements keys filler path
 
 @[simp] private theorem byteArray_empty_size : (ByteArray.empty : ByteArray).size = 0 := rfl
 
@@ -759,7 +768,7 @@ theorem createKEMHeader_unfold (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : 
       hdr = v0AD ++ kemElements[0]! ++ (s path.size).1 ++ (s path.size).2 ∧
       sprpKeys = Array.ofFn (fun i : Fin path.size =>
         { key := keys[i.val]!.payloadEncryption, iv := keys[i.val]!.headerEncryptionIV }) := by
-  unfold createKEMHeader at h
+  unfold createKEMHeader createKEMHeaderFrom at h
   dsimp only at h
   split at h
   case isTrue =>
@@ -874,7 +883,7 @@ theorem createKEMHeader_hdr_size (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS 
     hdr.size = geom.headerLength := by
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, -, -⟩ := id hvalid
   have hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength := by omega
-  unfold createKEMHeader at h
+  unfold createKEMHeader createKEMHeaderFrom at h
   dsimp only at h
   split at h
   case isTrue =>
@@ -998,6 +1007,50 @@ def newKEMPacket (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF
     let k := sprpKeys[sprpKeys.size - 1 - iRev]!
     b := cipher.encrypt k.key.toArray (ofVector k.iv) b
   pure (hdr ++ b)
+
+/-- Build a KEM-Sphinx packet from each hop's ciphertext and keys: `newKEMPacket` with
+`createKEMHeaderFrom` in place of `createKEMHeader`. -/
+def newKEMPacketFrom (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
+    (streamS : StreamCipher) (geom : Geometry) (kemElements : Array ByteArray)
+    (keys : Array HopKeys) (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) :
+    Except String ByteArray := do
+  if payload.size ≠ geom.forwardPayloadLength then
+    throw s!"sphinx: invalid payload length: {payload.size}, expected {geom.forwardPayloadLength}"
+  let (hdr, sprpKeys) ← createKEMHeaderFrom kem macS streamS geom kemElements keys filler path
+  let mut b := (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload
+  for iRev in [0:sprpKeys.size] do
+    let k := sprpKeys[sprpKeys.size - 1 - iRev]!
+    b := cipher.encrypt k.key.toArray (ofVector k.iv) b
+  pure (hdr ++ b)
+
+/-- `createKEMHeaderFrom` uses each hop's keys only through the four KEM Sphinx uses: header MAC
+key, header encryption key, IV and payload key. -/
+theorem createKEMHeaderFrom_congr (kem : KEM) (macS : MAC) (streamS : StreamCipher)
+    (geom : Geometry) (kemElements : Array ByteArray) (keys₁ keys₂ : Array HopKeys)
+    (filler : ByteArray) (path : Array PathHop)
+    (hmac : ∀ i : Nat, (keys₁[i]!).headerMAC = (keys₂[i]!).headerMAC)
+    (henc : ∀ i : Nat, (keys₁[i]!).headerEncryption = (keys₂[i]!).headerEncryption)
+    (hiv : ∀ i : Nat, (keys₁[i]!).headerEncryptionIV = (keys₂[i]!).headerEncryptionIV)
+    (hpay : ∀ i : Nat, (keys₁[i]!).payloadEncryption = (keys₂[i]!).payloadEncryption) :
+    createKEMHeaderFrom kem macS streamS geom kemElements keys₁ filler path
+      = createKEMHeaderFrom kem macS streamS geom kemElements keys₂ filler path := by
+  unfold createKEMHeaderFrom
+  simp only [hmac, henc, hiv, hpay]
+
+/-- `newKEMPacketFrom` uses each hop's keys only through the same four. -/
+theorem newKEMPacketFrom_congr (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
+    (streamS : StreamCipher) (geom : Geometry) (kemElements : Array ByteArray)
+    (keys₁ keys₂ : Array HopKeys) (filler : ByteArray) (path : Array PathHop)
+    (payload : ByteArray)
+    (hmac : ∀ i : Nat, (keys₁[i]!).headerMAC = (keys₂[i]!).headerMAC)
+    (henc : ∀ i : Nat, (keys₁[i]!).headerEncryption = (keys₂[i]!).headerEncryption)
+    (hiv : ∀ i : Nat, (keys₁[i]!).headerEncryptionIV = (keys₂[i]!).headerEncryptionIV)
+    (hpay : ∀ i : Nat, (keys₁[i]!).payloadEncryption = (keys₂[i]!).payloadEncryption) :
+    newKEMPacketFrom kem cipher macS streamS geom kemElements keys₁ filler path payload
+      = newKEMPacketFrom kem cipher macS streamS geom kemElements keys₂ filler path payload := by
+  unfold newKEMPacketFrom
+  rw [createKEMHeaderFrom_congr kem macS streamS geom kemElements keys₁ keys₂ filler path
+    hmac henc hiv hpay]
 
 /-- One step of `newKEMPacket`'s payload-encryption loop. -/
 def payloadEncryptStep (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
