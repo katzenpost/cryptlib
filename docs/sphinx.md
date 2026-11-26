@@ -141,9 +141,36 @@ far:
   original's request is reliable, and the ideal cipher's second block does not begin with the
   zero tag.
 
-Not proved yet: that the relabelled draws are uniform, and from it the bound on the distance
-of the two games; a bound on the bad draws and on the zero-tag event;
-SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx.
+- The relabelled draws are uniform (`evalDistEq_mixSeeds`, `evalDistEq_headTail`,
+  `evalDistEq_shiftStream`, `evalDistEq_lastShift`), so the two games differ by at most the
+  chance of a draw of world 1 that is not good (`final_fixed_le`, `next_final_le`).
+
+**The TLU→ bound** is `forwardUnlinkable_le` in `KEMSphinxTLUFinal.lean`. The advantage is at
+most the sum of:
+
+- the chance of a draw on which a layer does not build or a KEM round trip fails, for each
+  world and each replacement of keys;
+- the cost of replacing the relay's keys, for each world and for the original's hidden layer
+  (`keyedCost`: KEM and KDF);
+- a forgery against the MAC, for each of the three;
+- the one-block advantage against the payload cipher, for each world;
+- the keystream generator's advantage, for each of the three keystreams;
+- the chance that the adversary sends the hidden ciphertext (`nextHidden`);
+- the chance of a draw of world 1 that is not good for the last comparison (`finalGood`): the
+  original's next layer does not build, a sender's payload has not a payload's length, the
+  original's request is not reliable at the exit, or the ideal cipher's second block begins
+  with the zero tag.
+
+No term is a distance between two games. The last two groups and the first are probabilities
+of events on draws, not yet bounded by numbers:
+
+- that a KEM ciphertext is hard to guess is not a law of the KEM type yet, so `nextHidden`
+  has no bound;
+- the zero-tag event has chance 2^(-8 * payloadTagLength), not proved;
+- that a payload has a payload's length should follow from the geometry, not proved;
+- the chance that a layer does not build is the chance of a KEM failure, not proved.
+
+Not proved yet: those four; SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx.
 
 ## How the bounds are built
 
