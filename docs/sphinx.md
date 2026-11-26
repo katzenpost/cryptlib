@@ -201,8 +201,21 @@ only, at the cost of a forgery. The bytes its MAC covers are the same in both wo
 since both show the adversary's own onion. The closed form of a keyed layer that this needs is
 stated for any route (`routeK_parts`), so one lemma serves the forward path and the reply.
 
-Not proved yet: the payload cipher and keystream steps; the sender's keys; the last
-comparison.
+A header does not use the payload cipher (`pktFn_header`, `layerF_header`). On the backward
+path the relay's payload key never encrypts anything the adversary sees: the sender builds the
+reply header over a dummy payload and drops that payload. So the keyed view builds the reply
+header with the identity in place of the cipher, and does not depend on the relay's payload key
+at all.
+
+The payload cipher step is proved for both worlds (`backward0_payload_le`,
+`backward1_payload_le`). At the exit the sender's block is the body of the last forward layer,
+as in TLU→. On the backward path there is no sender's block; the relay only decrypts.
+
+The machinery that puts a relay behind an oracle, and the payload cipher and keystream steps,
+are stated once for any property and any of the three roles (`KEMSphinxProp.lean`,
+`propPayloadGame`, `propStreamAdv`). TLU→ uses the same ones.
+
+Not proved yet: the keystream step; the sender's keys; the last comparison.
 
 ## How the bounds are built
 
