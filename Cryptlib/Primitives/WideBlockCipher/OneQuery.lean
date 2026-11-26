@@ -84,4 +84,15 @@ def oneQueryExp (cipher : WideBlockCipher) (L : Nat) (B : OneQueryAdversary L) (
       else if x = c then ms.1 else v)
     (B.guess ms.2 c)).run' none
 
+/-- The experiment for one encryption asked during the game. The adversary's one query is
+answered by the cipher under a uniform key and IV for `b = true`, and by a uniform block
+otherwise. -/
+def oneEncExp (cipher : WideBlockCipher) (L : Nat) (B : OracleComp (decSpec L) Bool) (b : Bool) :
+    ProbComp Bool := do
+  let k ← $ᵗ (Vector UInt8 48)
+  let iv ← $ᵗ (Vector UInt8 16)
+  let g ← $ᵗ (Vector UInt8 L)
+  (simulateQ (decOnce fun x =>
+      if b then toVecN L (cipher.encrypt k.toArray (ofVector iv) (ofVector x)) else g) B).run' none
+
 end Cryptlib.Primitives.WideBlockCipher

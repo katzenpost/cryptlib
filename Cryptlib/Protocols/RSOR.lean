@@ -291,6 +291,36 @@ theorem oracle_wf {ι' : Type} {spec' : OracleSpec ι'} [MonadLiftT ProbComp (Or
       subst hy
       exact hw
 
+/-- The honest relays hold no onion twice, whatever they answer. -/
+theorem oracle_held_nodup {ι' : Type} {spec' : OracleSpec ι'}
+    [MonadLiftT ProbComp (OracleComp spec')]
+    (proc : Role → S.Onion → OracleComp spec' (Option S.Step))
+    (reply : Role → S.Msg → S.Onion → OracleComp spec' (Option (S.Name × S.Onion)))
+    (patch : Patch S) (t : (oracleSpec S).Domain) (log : Log S) (hw : log.WF)
+    (hn : log.held.Nodup) :
+    ∀ y ∈ support ((oracle proc reply patch t).run log), y.2.held.Nodup := by
+  intro y hy
+  rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
+  · simp [oracle] at hy
+    obtain ⟨x, -, rfl⟩ := hy
+    exact hn
+  · simp [oracle, process] at hy
+    by_cases hs : (h, o.1) ∈ log.seen
+    · simp [hs] at hy
+      subst hy
+      exact hn
+    · simp [hs] at hy
+      obtain ⟨-, -, -, -, rfl⟩ := hy
+      exact List.nodup_cons.2 ⟨fun hm => hs (hw.1 _ _ hm), hn⟩
+  · simp [oracle, answer] at hy
+    by_cases hs : (h, o) ∈ log.held
+    · simp [hs] at hy
+      obtain ⟨-, -, rfl⟩ := hy
+      exact hn.erase (h, o)
+    · simp [hs] at hy
+      subst hy
+      exact hn
+
 /-- The honest relays running the scheme with their secret keys. -/
 def honest (hon : Honest S) (sk : Role → S.Secret) (patch : Patch S) :
     QueryImpl (oracleSpec S) (StateT (Log S) ProbComp) :=

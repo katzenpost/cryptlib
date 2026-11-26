@@ -173,6 +173,130 @@ theorem viaDec_decOnce (dec : Vector UInt8 L → Vector UInt8 L) (patch : Patch 
   rw [hc, ← hp]
   simp [Functor.map_map]
 
+/-! ## A reply that asks an oracle once
+
+An honest relay replies once to an onion it has processed, and holds at most one onion per
+header. So if the relay asks an oracle only for its reply under one header, it asks once. -/
+
+section Enc
+
+variable (inp : S.Msg → S.Onion → Vector UInt8 L)
+  (fin : S.Msg → S.Onion → Vector UInt8 L → Option (S.Name × S.Onion))
+
+/-- The honest relays, with the relay `ρ` asking an oracle for its reply under the header `H`:
+it asks for the block `inp` names and replies as `fin` says. -/
+def viaEnc (patch : Patch S) :
+    QueryImpl (oracleSpec S) (StateT (Log S) (OracleComp (decSpec L))) :=
+  oracle
+    (fun h o => pure (proc h o))
+    (fun h msg o => if h = ρ ∧ o.1 = H then
+        fin msg o <$> (liftM ((Vector UInt8 L →ₒ Vector UInt8 L).query (inp msg o)) :
+          OracleComp (decSpec L) _)
+      else pure (reply h msg o))
+    patch
+
+/-- The honest relays, with the relay `ρ` replying under the header `H` from `enc`. -/
+def withEnc (enc : Vector UInt8 L → Vector UInt8 L) (patch : Patch S) :
+    QueryImpl (oracleSpec S) (StateT (Log S) ProbComp) :=
+  oracle
+    (fun h o => pure (proc h o))
+    (fun h msg o => pure (if h = ρ ∧ o.1 = H then fin msg o (enc (inp msg o))
+      else reply h msg o))
+    patch
+
+/-- **An honest relay replies once under a header.** A relay that asks, for its reply under one
+header, an oracle which answers for one block only is a relay that computes the answer by
+itself. -/
+theorem viaEnc_once (enc : Vector UInt8 L → Vector UInt8 L) (patch : Patch S) {α : Type}
+    (oa : OracleComp (oracleSpec S) α) (log : Log S) (hw : log.WF) (hn : log.held.Nodup) :
+    (simulateQ (decOnce enc)
+        ((simulateQ (viaEnc ρ H proc reply inp fin patch) oa).run' log)).run' none
+      = (simulateQ (withEnc ρ H proc reply inp fin enc patch) oa).run' log := by
+  let inv : Log S × Option (Vector UInt8 L) → Prop := fun s =>
+    s.1.WF ∧ s.1.held.Nodup ∧ ∀ x, s.2 = some x →
+      (ρ, H) ∈ s.1.seen ∧ ∀ o, (ρ, o) ∈ s.1.held → o.1 ≠ H
+  let combined : QueryImpl (oracleSpec S) (StateT (Log S × Option (Vector UInt8 L)) ProbComp) :=
+    fun q => StateT.mk fun s =>
+      (fun r : (_ × Log S) × Option (Vector UInt8 L) => (r.1.1, r.1.2, r.2)) <$>
+        (simulateQ (decOnce enc) ((viaEnc ρ H proc reply inp fin patch q).run s.1)).run s.2
+  have hc := simulateQ_StateT_StateT_compose (viaEnc ρ H proc reply inp fin patch)
+    (decOnce enc) combined (fun q s c => by
+      simp only [combined, StateT.run, StateT.mk, Functor.map_map]
+      exact (id_map _).symm) oa log none
+  have hinv : ∀ t s, inv s → ∀ y ∈ support ((combined t).run s), inv y.2 := by
+    intro t s hs y hy
+    obtain ⟨log, memo⟩ := s
+    have herase : ∀ x, inv ({ seen := log.seen, held := log.held.erase x }, memo) := fun x =>
+      ⟨hs.1.erase x, hs.2.1.erase x, fun x' hx' => ⟨(hs.2.2 x' hx').1, fun o' hm =>
+        (hs.2.2 x' hx').2 o' (List.mem_of_mem_erase hm)⟩⟩
+    rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
+    · simp [combined, viaEnc, oracle, simulateQ_decOnce_liftM] at hy
+      obtain ⟨_, rfl⟩ := hy
+      exact hs
+    · by_cases hseen : (h, o.1) ∈ log.seen
+      · simp [combined, viaEnc, oracle, process, hseen] at hy
+        subst hy
+        exact hs
+      · simp [combined, viaEnc, oracle, process, hseen, simulateQ_decOnce_liftM] at hy
+        obtain ⟨_, -, rfl⟩ := hy
+        refine ⟨hs.1.cons h o hseen, List.nodup_cons.2 ⟨fun hm => hseen (hs.1.1 _ _ hm),
+          hs.2.1⟩, fun x hx => ?_⟩
+        obtain ⟨h1, h2⟩ := hs.2.2 x hx
+        refine ⟨List.mem_cons_of_mem _ h1, fun o' hm he => ?_⟩
+        rcases List.mem_cons.1 hm with heq | hm
+        · cases heq
+          exact hseen (he ▸ h1)
+        · exact h2 o' hm he
+    · by_cases hheld : (h, o) ∈ log.held
+      · by_cases hr : h = ρ ∧ o.1 = H
+        · cases memo with
+          | some x =>
+            obtain ⟨rfl, rfl⟩ := hr
+            exact absurd rfl ((hs.2.2 x rfl).2 o hheld)
+          | none =>
+            obtain ⟨rfl, rfl⟩ := hr
+            simp [combined, viaEnc, oracle, answer, hheld,
+              simulateQ_decOnce_query, decFirst] at hy
+            subst hy
+            refine ⟨hs.1.erase _, hs.2.1.erase _, fun x _ => ⟨hs.1.1 _ _ hheld, fun o' hm he => ?_⟩⟩
+            have hm' := (hs.2.1.mem_erase_iff).1 hm
+            exact hm'.1 (congrArg (Prod.mk h) (hs.1.2 _ o' o hm'.2 hheld he))
+        · simp [combined, viaEnc, oracle, answer, hheld, hr] at hy
+          subst hy
+          exact herase _
+      · simp [combined, viaEnc, oracle, answer, hheld] at hy
+        subst hy
+        exact hs
+  have hproj : ∀ t s, inv s → Prod.map id Prod.fst <$> (combined t).run s
+      = (withEnc ρ H proc reply inp fin enc patch t).run (Prod.fst s) := by
+    intro t s hs
+    obtain ⟨log, memo⟩ := s
+    rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
+    · simp [combined, viaEnc, withEnc, oracle, simulateQ_decOnce_liftM]
+    · by_cases hseen : (h, o.1) ∈ log.seen
+      · simp [combined, viaEnc, withEnc, oracle, process, hseen]
+      · simp [combined, viaEnc, withEnc, oracle, process, hseen, simulateQ_decOnce_liftM]
+    · by_cases hheld : (h, o) ∈ log.held
+      · by_cases hr : h = ρ ∧ o.1 = H
+        · cases memo with
+          | some x =>
+            obtain ⟨rfl, rfl⟩ := hr
+            exact absurd rfl ((hs.2.2 x rfl).2 o hheld)
+          | none =>
+            obtain ⟨rfl, rfl⟩ := hr
+            simp [combined, viaEnc, withEnc, oracle, answer, hheld,
+              simulateQ_decOnce_query, decFirst]
+        · simp [combined, viaEnc, withEnc, oracle, answer, hheld, hr]
+      · simp [combined, viaEnc, withEnc, oracle, answer, hheld]
+  have hp := map_run_simulateQ_eq_of_query_map_eq_inv' combined
+    (withEnc ρ H proc reply inp fin enc patch) inv Prod.fst hinv hproj oa (log, none)
+    ⟨hw, hn, fun x hx => by cases hx⟩
+  simp only [StateT.run'_eq, simulateQ_map, StateT.run_map, Functor.map_map]
+  rw [hc, ← hp]
+  simp [Functor.map_map]
+
+end Enc
+
 /-! ## A patch that draws once
 
 A relay processes a header once. So a patch that draws only under one header at the relay `ρ` may
