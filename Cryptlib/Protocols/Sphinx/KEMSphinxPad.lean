@@ -1339,6 +1339,119 @@ theorem procKeysD_relayFront (hvalid : geom.ValidForKEM kem) (hmactag : macS.tag
       extract_split fwd 2 (2 + kem.ciphertextSize) (by omega) (by omega)]
     simp only [ByteArray.append_assoc]
 
+set_option maxHeartbeats 1000000 in
+/-- **The keyed hop at the end of the path, for any keystream.** Given its MAC key, any
+keystream `U` and any decrypted payload `x`, the last hop on its own header with a valid tag
+delivers `x` behind the zero tag when `x` begins with it, and rejects the packet otherwise. -/
+theorem procKeysD_relayFrontLast (hvalid : geom.ValidForKEM kem)
+    (hmactag : macS.tagSize = macLength) (hops : Array PathHop) (d : RSOR.Draw geom) (j : ℕ)
+    (c U : ByteArray) (km : Vector UInt8 32) (x y : ByteArray)
+    (hj : j + 1 = hops.size) (hlen : hops.size ≤ geom.nrHops) (hU : U.size = 𝓃)
+    (hc : c.size = kem.ciphertextSize)
+    (hs : (relayFrontLast kem kdfS streamS geom hops d j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength)
+    (hx : 0 < x.size) (hxt : geom.payloadTagLength ≤ x.size) (hxy : y.size = x.size)
+    (hcmdnn : ∀ k ∈ (hops[j]!).commands, k ≠ RoutingCommand.null)
+    (hnext : (hops[j]!).commands.findSome? (fun
+      | .nextNodeHop id m => some (id, m)
+      | _ => none) = none)
+    (hsurb : (hops[j]!).commands.any (fun
+      | .surbReply _ => true
+      | _ => false) = false) :
+    procKeysD kem macS geom km U x
+        (relayFrontLast kem kdfS streamS geom hops d j c U
+          ++ ofVector (macS.mac (ofVector km) (relayFrontLast kem kdfS streamS geom hops d j c U))
+          ++ y)
+      = if (x.extract 0 geom.payloadTagLength).data.all (· == 0) then
+          some (some (x.extract geom.payloadTagLength x.size),
+            Cryptlib.Primitives.Hash.Sha512.sha512_256 c, (hops[j]!).commands, none)
+        else none := by
+  obtain ⟨hnnh, hperhopEq, hrouting, -⟩ := id hvalid
+  have hnnpos : 0 < Constants.nextNodeHopLength := by decide
+  have hv0 : v0AD.size = 2 := rfl
+  have hpR : 𝓅 ≤ geom.routingInfoLength := by
+    rw [hrouting]
+    exact Nat.le_mul_of_pos_right _ (by omega)
+  obtain ⟨M, hM⟩ : ∃ M, M = relayFrontLast kem kdfS streamS geom hops d j c U := ⟨_, rfl⟩
+  rw [← hM] at hs ⊢
+  unfold relayFrontLast at hM
+  rw [show 𝓃 - (0 + 1) * 𝓅 = geom.routingInfoLength by omega] at hM
+  obtain ⟨F, hF⟩ : ∃ F, F = (if geom.nrHops > 1 then fillerAtF kem kdfS streamS geom hops
+      (d.1.toArray.extract 0 hops.size)
+      ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * 𝓅)) j U j
+    else ByteArray.empty) := ⟨_, rfl⟩
+  rw [← hF] at hM
+  cases hfr : kemRiFragment kem geom #[hops[j]!] #[c] ByteArray.empty 1 0 with
+  | error e =>
+    rw [hfr] at hM
+    exfalso
+    have hFsz : F.size + 𝓅 ≤ geom.routingInfoLength := by
+      rw [hF]
+      split_ifs with hn
+      · have hap : (geom.nrHops - hops.size) * 𝓅 ≤ geom.routingInfoLength := by
+          rw [hrouting, Nat.mul_comm 𝓅]
+          exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+        rw [fillerAtF_size kem kdfS streamS geom hrouting hops _ _ j U hlen (by
+            rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+            omega) hU j (by omega), hrouting, Nat.mul_comm 𝓅, ← Nat.succ_mul]
+        exact Nat.mul_le_mul_right _ (by omega)
+      · simpa using hpR
+    rw [hM] at hs
+    simp only [ByteArray.size_append, size_xorBytes, hc, hv0] at hs
+    have : ByteArray.empty.size = 0 := rfl
+    omega
+  | ok frag =>
+    rw [hfr] at hM
+    dsimp only at hM
+    have hksz : ∀ i (hi : i < (#[c] : Array ByteArray).size),
+        ((#[c] : Array ByteArray)[i]'hi).size = kem.ciphertextSize := fun i hi => by
+      obtain rfl : i = 0 := by simpa using hi
+      exact hc
+    have hfsz' := kemRiFragment_size kem geom #[hops[j]!] #[c] ByteArray.empty 1 0
+      Nat.one_pos (by omega) hnnh rfl hksz frag hfr
+    obtain ⟨hpar, -⟩ := kemRiFragment_content_terminal kem geom #[hops[j]!] #[c]
+      ByteArray.empty 1 0 Nat.one_pos rfl (by omega) hcmdnn frag hfr
+    obtain ⟨X, hX⟩ : ∃ X, X = frag ++ F := ⟨_, rfl⟩
+    rw [← hX] at hM
+    have hXsz : X.size = geom.routingInfoLength := by
+      rw [hM] at hs
+      simp only [ByteArray.size_append, size_xorBytes, hc, hv0] at hs
+      omega
+    obtain ⟨T, hT⟩ : ∃ T, T = ofVector (macS.mac (ofVector km) M) := ⟨_, rfl⟩
+    rw [← hT]
+    have hTsz : T.size = macLength := by
+      rw [hT, Util.Bytes.size_ofVector, hmactag]
+    obtain ⟨p1, p2, -⟩ := three_parts M T y
+    rw [hs] at p1 p2
+    rw [hTsz] at p2
+    have hpre : ∀ a b, b ≤ 2 + kem.ciphertextSize + geom.routingInfoLength →
+        (M ++ T ++ y).extract a b = M.extract a b := fun a b hb => by
+      rw [Util.Bytes.extract_append_of_le _ _ (by rw [ByteArray.size_append]; omega),
+        Util.Bytes.extract_append_of_le _ _ (by omega)]
+    have hMc : M.extract 2 (2 + kem.ciphertextSize) = c := by
+      rw [hM, Util.Bytes.extract_append_of_le _ _ (by rw [ByteArray.size_append]; omega)]
+      have := Util.Bytes.extract_append_right v0AD c
+      rwa [hc] at this
+    have hMr : M.extract (2 + kem.ciphertextSize) (2 + kem.ciphertextSize + geom.routingInfoLength)
+        = xorBytes X (U.extract 0 geom.routingInfoLength) := by
+      rw [hM, Util.Bytes.extract_append_of_ge _ _ (by rw [ByteArray.size_append]; omega),
+        ByteArray.size_append, hc, hv0, Nat.sub_self,
+        show 2 + kem.ciphertextSize + geom.routingInfoLength - (2 + kem.ciphertextSize)
+          = geom.routingInfoLength by omega]
+      exact extract_all _ _ (by rw [size_xorBytes, hXsz])
+    have hMv : M.extract 0 2 = v0AD := by
+      rw [hM, ByteArray.append_assoc]
+      exact Util.Bytes.extract_append_left v0AD _
+    rw [procKeysD_last geom kem macS km U x (M ++ T ++ y) X
+      (by simp only [ByteArray.size_append, hs, hTsz, hxy])
+      hx hxt ((hpre 0 2 (by omega)).trans hMv)
+      (by rw [p2, p1, hT])
+      ((hpre _ _ le_rfl).trans hMr) hXsz hU hpR (by omega) _
+      (by
+        rw [hX, Util.Bytes.extract_append_of_le _ _ (by omega)]
+        exact hpar)
+      hnext hsurb, hpre 2 _ (by omega), hMc]
+
 end Pad
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
