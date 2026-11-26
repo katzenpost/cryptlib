@@ -92,6 +92,15 @@ packets with the game's keys (`keyedChain_le`).
   KEM Sphinx is at most the bad draws, the KEM and KDF advantages, a MAC forgery, the one-block
   cipher advantage and the keystream generator's advantage, each in either world, and the
   distance between the two worlds played from a uniform keystream.
+- The same again for the layer the adversary's original onion has at the honest relay, in
+  world 1 (`short_next_le`). There the relay answers the replacement with the original's next
+  layer, which depends on the keys of the original's own layer at the relay through one
+  keystream (`next_setSeed`). Those keys are replaced as the first were: world 1 is a keyed game
+  around that layer's ciphertext (`shortIdeal_sub_nextReal_le`), no tag under its MAC key is
+  shown so the relay may reject the ciphertext (`nextIdeal_sub_reject_le`), and the keystream
+  becomes uniform (`nextReject_eq_prg`).
+- All of that in one statement: `forwardUnlinkable_le_next`. What is left is the distance between
+  world 0 from a uniform keystream and world 1 with both keystreams uniform.
 
 The cipher game gives the adversary a decryption oracle that answers for one block, the first
 it is asked about. The relay asks it twice about the same block when it replies to an onion it
@@ -107,8 +116,9 @@ has processed, which is why the oracle remembers its block instead of answering 
 For this step a draw is good only if the sender's block at the relay has a payload's length.
 That it always has, when the onion can be built, is not proved yet.
 
-Not proved yet: that the two worlds played from a uniform keystream agree, which needs the keys
-of the original onion's own layer at the relay replaced in world 1; a bound on the bad draws;
+Not proved yet: that those two games agree, up to the chance that the adversary sends the
+original's ciphertext, which it is never shown, and the chance that a uniform block passes the
+payload's tag check; a bound on the bad draws;
 SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx.
 
 ## How the bounds are built

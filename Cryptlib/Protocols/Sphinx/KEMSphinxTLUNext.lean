@@ -110,12 +110,11 @@ def nextLayer {pk : Key kem}
   shortLayerU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x.2.2.2.1
     (encapOf kem pk.1 x.2.2.1).1 x.2.1 (ofVector x.1) x.2.2.2.2.1
 
-/-- World 1 from those draws and the keys `t` of the original's layer at the relay: the world
-shown, the replacement's ciphertext, and the relay's answers to it. The world uses `t` through
-its keystream in the original's next layer only. -/
-def nextView {pk : Key kem}
+/-- World 1 from those draws and the header keystream `U'` of the original's layer at the
+relay: the world shown, the replacement's ciphertext, and the relay's answers to it. -/
+def nextViewU {pk : Key kem}
     (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk)
-    (x : NextOth geom) (_c : kem.Ciphertext) (t : KeyTuple) :
+    (x : NextOth geom) (U' : ByteArray) :
     Protocols.RSOR.World 𝒮 × kem.Ciphertext × (ByteArray → ProcResult) :=
   ({ onion := RSOR.split geom (wrapUp kem cipher macS kdfS streamS geom
         (RSOR.path kem (ch.c.short x.2.2.2.1.2.1 x.2.2.2.1.2.2.1).fwd
@@ -126,7 +125,7 @@ def nextView {pk : Key kem}
         (nextU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x.2.2.2.1.1
           (RSOR.split geom
             (nextLayer kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x))
-          (ksOf streamS geom t))
+          U')
         x.2.2.2.1.1
         (RSOR.split geom
           (nextLayer kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x)) },
@@ -142,6 +141,14 @@ def nextView {pk : Key kem}
           shortBlockU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x.2.2.2.1
             (ofVector x.1)
         else x.2.2.2.2.2))
+
+/-- World 1 from those draws and the keys `t` of the original's layer at the relay, which it
+uses through their keystream only. -/
+def nextView {pk : Key kem}
+    (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk)
+    (x : NextOth geom) (_c : kem.Ciphertext) (t : KeyTuple) :
+    Protocols.RSOR.World 𝒮 × kem.Ciphertext × (ByteArray → ProcResult) :=
+  nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x (ksOf streamS geom t)
 
 /-- World 1 around the ciphertext of the original's layer at the honest relay. -/
 def nextSetup : KeyedSetup kem
@@ -574,6 +581,247 @@ theorem nextIdeal_sub_reject_le
     exact onlyHeader_nextM0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o c u pkt
   rw [e] at h
   simpa using h
+
+/-! ## The keystream of the original's layer at the relay -/
+
+/-- The adversary against the keystream generator that plays world 1 from the header keystream
+of the original's layer at the relay, with the relay rejecting that layer's ciphertext. -/
+def nextStreamAdv (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    PRGScheme.PRGAdversary (Keystream geom) := fun U' => do
+  let k ← keygen kem
+  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
+    ((nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).pre k.1)
+  let s' ← $ᵗ (Vector UInt8 32)
+  let x ← nextDraw geom
+  simulateQ (procImplF kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s').1
+      (fun _ => none))
+    ((nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).post cs.2
+      (nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names cs.1 x (ofVector U')))
+
+omit [SampleableType kem.Plaintext] in
+/-- **The stream cipher step for the original's layer.** Once the relay rejects that layer's
+ciphertext, the game with uniform keys is the real experiment of the keystream generator for
+`nextStreamAdv`. -/
+theorem nextReject_eq_prg (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    Pr{let x ← (keyedGameH cipher macS kdfS streamS geom
+        (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+        (fun _ _ _ _ _ => none))}[x = true]
+      = Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+        (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+          A))}[x = true] := by
+  refine EvalDistEq.prEvent_eq ?_ _
+  have hb : ∀ {α β : Type},
+      Function.Bijective (Function.uncurry fun (a : α) (b : β) => (a, b)) :=
+    fun {_ _} => Function.bijective_id
+  let K : Vector UInt8 16 → Vector UInt8 32 → ProbComp Bool := fun iv ke =>
+    nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+      ((keystreamPRG streamS geom).gen (ke, iv))
+  have h0 : keyedGameH cipher macS kdfS streamS geom
+        (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+        (fun _ _ _ _ _ => none)
+      = $ᵗ KeyTuple >>= fun u => K u.2.1 u.2.2.2 := by
+    unfold keyedGameH
+    simp only [K, nextStreamAdv, nextSetup, nextView, ksOf, keystreamPRG, id_map',
+      Cryptlib.Util.Bytes.ofVector_toVecN _ (streamS.keystream_size _ _ _)]
+  have hR : PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+        (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+      = $ᵗ (Vector UInt8 32 × Vector UInt8 16) >>= fun s => K s.2 s.1 := rfl
+  rw [h0, hR]
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective
+    (g := fun (kp : Vector UInt8 48)
+      (t : Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32) => (kp, t)) hb
+    (fun u => K u.2.1 u.2.2.2)).symm ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 48))
+    ($ᵗ (Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32) >>= fun t => K t.1 t.2.2)) ?_
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective
+    (g := fun (iv : Vector UInt8 16) (r : Vector UInt8 32 × Vector UInt8 32) => (iv, r)) hb
+    (fun t => K t.1 t.2.2)).symm ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun iv =>
+    (evalDistEq_pair_of_bijective
+      (g := fun (km ke : Vector UInt8 32) => (km, ke)) hb (fun r => K iv r.2)).symm) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun iv =>
+    OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 32))
+      ($ᵗ (Vector UInt8 32) >>= fun ke => K iv ke)) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ fun iv ke => K iv ke) ?_
+  exact evalDistEq_pair_of_bijective
+    (g := fun (ke : Vector UInt8 32) (iv : Vector UInt8 16) => (ke, iv)) hb
+    (fun s => K s.2 s.1)
+
+/-! ## World 1 with both keystreams uniform -/
+
+/-- **The original's next layer from a uniform keystream.** World 1 from a uniform keystream
+differs from world 1 with the keystream of the original's layer at the relay uniform too, and
+that layer's ciphertext rejected, by at most: the chance of a draw that is not good; the cost
+of replacing that layer's keys; a forgery against the MAC; and the keystream generator's
+advantage. -/
+theorem short_next_le (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    |(Pr{let x ← (PRGScheme.prgIdealExperiment
+          (shortStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+            A))}[x = true]).toReal
+      - (Pr{let x ← (PRGScheme.prgIdealExperiment
+          (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+            A))}[x = true]).toReal|
+    ≤ (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom
+        (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+          A))}[¬ nextGood kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+            d]).toReal
+      + keyedCost cipher macS kdfS streamS geom
+        (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+      + (Pr{let x ← (Primitives.MAC.forgeExp macS (forgeAdv cipher macS kdfS streamS geom
+        (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+        (fun _ _ _ _ => nextM0 kem geom)
+        (fun ch o c rest _ => nextView kem cipher macS kdfS streamS geom hvalid hmactag h16
+          names ch o c
+          (withMAC rest default))))}[x = true]).toReal
+      + |(Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+            (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[x = true]).toReal
+        - (Pr{let x ← (PRGScheme.prgIdealExperiment
+            (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[x = true]).toReal| := by
+  have h1 := shortIdeal_sub_nextReal_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  have h2 := keyedChain_le cipher macS kdfS streamS geom
+    (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+  have h3 := nextIdeal_sub_reject_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  rw [congrArg ENNReal.toReal
+    (nextReject_eq_prg kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)] at h3
+  have t1 := abs_sub_le
+    (Pr{let x ← (PRGScheme.prgIdealExperiment
+      (shortStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A))}[x = true]).toReal
+    (Pr{let x ← (keyedReal cipher macS kdfS streamS geom
+      (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A))}[x = true]).toReal
+    (Pr{let x ← (PRGScheme.prgIdealExperiment
+      (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A))}[x = true]).toReal
+  have t2 := abs_sub_le
+    (Pr{let x ← (keyedReal cipher macS kdfS streamS geom
+      (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A))}[x = true]).toReal
+    (Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+      (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A))}[x = true]).toReal
+    (Pr{let x ← (PRGScheme.prgIdealExperiment
+      (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A))}[x = true]).toReal
+  have t3 := abs_sub_le
+    (Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+      (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A))}[x = true]).toReal
+    (Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+      (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A))}[x = true]).toReal
+    (Pr{let x ← (PRGScheme.prgIdealExperiment
+      (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A))}[x = true]).toReal
+  linarith
+
+/-! ## The bound so far -/
+
+/-- **TLU→ for KEM Sphinx, down to two games with every keystream uniform.** As
+`forwardUnlinkable_le_uniform`, with the keys of the original's layer at the honest relay
+replaced in world 1 too: the cost of replacing them, a forgery against the MAC, the keystream
+generator's advantage and the bad draws are added, and the distance left is between world 0
+from a uniform keystream and world 1 with both keystreams uniform. -/
+theorem forwardUnlinkable_le_next
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    ((Protocols.RSOR.forwardUnlinkable (S := 𝒮)).advantage names A).toReal
+      ≤ (Pr{let d ← (forwardDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+          A)}[forwardBad kem cipher macS kdfS streamS geom hvalid hmactag h16 d]).toReal
+        + (Pr{let d ← (forwardDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names _
+          (shortDraw geom)
+          A)}[shortBad kem cipher macS kdfS streamS geom hvalid hmactag h16 d]).toReal
+        + keyedCost cipher macS kdfS streamS geom
+          (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+        + keyedCost cipher macS kdfS streamS geom
+          (shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+        + (Pr{let x ← (Primitives.MAC.forgeExp macS (forgeAdv cipher macS kdfS streamS geom
+            (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+            (forwardM kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+            (forwardViewT kem cipher macS kdfS streamS geom hvalid hmactag h16
+              names)))}[x = true]).toReal
+        + (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom
+            (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[¬ forwardGood kem cipher macS kdfS streamS geom hvalid hmactag h16 d]).toReal
+        + (Pr{let x ← (Primitives.MAC.forgeExp macS (forgeAdv cipher macS kdfS streamS geom
+            (shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+            (shortM kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+            (shortViewT kem cipher macS kdfS streamS geom hvalid hmactag h16
+              names)))}[x = true]).toReal
+        + (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom
+            (shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[¬ shortGood kem cipher macS kdfS streamS geom hvalid hmactag h16 d]).toReal
+        + |(Pr{let x ← (Primitives.WideBlockCipher.oneQueryExp cipher _
+            (forwardGameP kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).adv
+            true)}[x = true]).toReal
+          - (Pr{let x ← (Primitives.WideBlockCipher.oneQueryExp cipher _
+            (forwardGameP kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).adv
+            false)}[x = true]).toReal|
+        + |(Pr{let x ← (Primitives.WideBlockCipher.oneQueryExp cipher _
+            (shortGameP kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).adv
+            true)}[x = true]).toReal
+          - (Pr{let x ← (Primitives.WideBlockCipher.oneQueryExp cipher _
+            (shortGameP kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).adv
+            false)}[x = true]).toReal|
+        + |(Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+            (forwardStreamAdv0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[x = true]).toReal
+          - (Pr{let x ← (PRGScheme.prgIdealExperiment
+            (forwardStreamAdv0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[x = true]).toReal|
+        + |(Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+            (shortStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[x = true]).toReal
+          - (Pr{let x ← (PRGScheme.prgIdealExperiment
+            (shortStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[x = true]).toReal|
+        + (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom
+            (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[¬ forwardGoodP kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+                d]).toReal
+        + (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom
+            (shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[¬ shortGoodP kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+                d]).toReal
+        + (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom
+            (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+              A))}[¬ nextGood kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+                d]).toReal
+        + keyedCost cipher macS kdfS streamS geom
+          (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+        + (Pr{let x ← (Primitives.MAC.forgeExp macS (forgeAdv cipher macS kdfS streamS geom
+          (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+          (fun _ _ _ _ => nextM0 kem geom)
+          (fun ch o c rest _ => nextView kem cipher macS kdfS streamS geom hvalid hmactag h16
+            names ch o c
+            (withMAC rest default))))}[x = true]).toReal
+        + |(Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+              (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+                A))}[x = true]).toReal
+          - (Pr{let x ← (PRGScheme.prgIdealExperiment
+              (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+                A))}[x = true]).toReal|
+        + |(Pr{let x ← (PRGScheme.prgIdealExperiment
+              (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+                A))}[x = true]).toReal
+          - (Pr{let x ← (PRGScheme.prgIdealExperiment
+              (forwardStreamAdv0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+                A))}[x = true]).toReal| := by
+  have h := forwardUnlinkable_le_uniform kem cipher macS kdfS streamS geom hvalid hmactag h16
+    names A
+  have s1 := short_next_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  have t1 := abs_sub_le
+    (Pr{let x ← (PRGScheme.prgIdealExperiment
+      (shortStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A))}[x = true]).toReal
+    (Pr{let x ← (PRGScheme.prgIdealExperiment
+      (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A))}[x = true]).toReal
+    (Pr{let x ← (PRGScheme.prgIdealExperiment
+      (forwardStreamAdv0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A))}[x = true]).toReal
+  linarith
 
 end ForwardNext
 
