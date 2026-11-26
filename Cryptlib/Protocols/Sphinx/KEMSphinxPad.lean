@@ -1855,6 +1855,43 @@ theorem stepOf_relayFrontLast (hvalid : geom.ValidForKEM kem)
       (by rw [hcmd]; simp) (by rw [hcmd]; rfl) (by rw [hcmd]; rfl), hcmd]
   split_ifs <;> rfl
 
+/-- At the end of the path the keyed hop replies from what is behind the zero tag of the
+decrypted payload, and does not reply when there is no zero tag. -/
+theorem replyOf_relayFrontLast (hvalid : geom.ValidForKEM kem)
+    (hmactag : macS.tagSize = macLength) (hops : Array PathHop) (d : RSOR.Draw geom) (j : ℕ)
+    (c U : ByteArray) (km : Vector UInt8 32)
+    (x y : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (hj : j + 1 = hops.size) (hlen : hops.size ≤ geom.nrHops) (hU : U.size = 𝓃)
+    (hc : c.size = kem.ciphertextSize)
+    (hs : (relayFrontLast kem kdfS streamS geom hops d j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength)
+    (hx : 0 < geom.payloadTagLength + geom.forwardPayloadLength)
+    (rc : Vector UInt8 32) (hcmd : (hops[j]!).commands = [.recipient rc]) (m : RSOR.Msg geom) :
+    RSOR.replyOf cipher geom m (procKeysD kem macS geom km U (ofVector x)
+        (RSOR.join (Util.Bytes.toVecN geom.headerLength
+          (relayFrontLast kem kdfS streamS geom hops d j c U
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFrontLast kem kdfS streamS geom hops d j c U))), y)))
+      = if ((ofVector x).extract 0 geom.payloadTagLength).data.all (· == 0) then
+          RSOR.replyOf cipher geom m (some (some
+            ((ofVector x).extract geom.payloadTagLength (ofVector x).size),
+            Cryptlib.Primitives.Hash.Sha512.sha512_256 c, [.recipient rc], none))
+        else none := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have had : adLength = 2 := rfl
+  unfold RSOR.join
+  dsimp only
+  rw [Util.Bytes.ofVector_toVecN _ (by
+      rw [ByteArray.size_append, hs, Util.Bytes.size_ofVector, hmactag, hhdr, had]),
+    procKeysD_relayFrontLast geom kem kdfS streamS macS hvalid hmactag hops d j c U km
+      (ofVector x) (ofVector y) hj hlen hU hc hs
+      (by rw [Util.Bytes.size_ofVector]; exact hx)
+      (by rw [Util.Bytes.size_ofVector]; omega)
+      (by rw [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector])
+      (by rw [hcmd]; simp) (by rw [hcmd]; rfl) (by rw [hcmd]; rfl), hcmd]
+  split_ifs <;> rfl
+
+
 end Pad
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
