@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Cryptlib.Protocols.Sphinx.KEMSphinxTLUNext
 import Cryptlib.Protocols.Sphinx.KEMSphinxPad
+import Cryptlib.Protocols.Sphinx.KEMSphinxLU
 
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
 
@@ -27,6 +28,65 @@ open Cryptlib.Util.Bytes (ofVector)
 
 Both worlds have been brought to games where the honest relay's keystreams are uniform. Here
 they are compared. -/
+
+/-! ## A pad on the head of one keystream and the tail of another -/
+
+/-- **Two keystreams read through one pad are one keystream.** A game that reads the head of
+one uniform string masked by a function of the tail of another, followed by that tail masked by
+a constant, reads one uniform string. -/
+theorem evalDistEq_headTail {δ : Type} {h t n : ℕ} (hn : h + t = n) (A : ByteArray → ByteArray)
+    (B : ByteArray) (K : Vector UInt8 n → ProbComp δ) :
+    (do
+      let U ← $ᵗ (Vector UInt8 n)
+      let U' ← $ᵗ (Vector UInt8 n)
+      K (Util.Bytes.toVecN n
+        (xorBytes ((ofVector U).extract 0 h) (A ((ofVector U').extract h n))
+          ++ xorBytes ((ofVector U').extract h n) B)))
+      =ᵈ ($ᵗ (Vector UInt8 n) >>= K) := by
+  have hcat := padFiller_bijective (a := h) (b := t) hn (zeroBytes 0)
+  have e0 : ∀ (x : Vector UInt8 h) (y : Vector UInt8 t),
+      (ofVector (padFiller hn (zeroBytes 0) x y)).extract 0 h = ofVector x
+        ∧ (ofVector (padFiller hn (zeroBytes 0) x y)).extract h n = ofVector y := by
+    intro x y
+    rw [ofVector_padFiller, xorBytes_zeroBytes]
+    constructor
+    · have h1 := Util.Bytes.extract_append_left (ofVector x) (ofVector y)
+      rwa [Util.Bytes.size_ofVector] at h1
+    · have h1 := Util.Bytes.extract_append_right (ofVector x) (ofVector y)
+      rwa [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector, hn] at h1
+  let G : Vector UInt8 h → Vector UInt8 t → ProbComp δ := fun x y' =>
+    K (Util.Bytes.toVecN n
+      (xorBytes (ofVector x) (A (ofVector y')) ++ xorBytes (ofVector y') B))
+  have t1 := (evalDistEq_pair_of_bijective hcat (fun U => $ᵗ (Vector UInt8 n) >>= fun U' =>
+    K (Util.Bytes.toVecN n
+      (xorBytes ((ofVector U).extract 0 h) (A ((ofVector U').extract h n))
+        ++ xorBytes ((ofVector U').extract h n) B)))).symm
+  refine EvalDistEq.trans t1 ?_
+  have t2 : ∀ (x : Vector UInt8 h) (y : Vector UInt8 t),
+      ($ᵗ (Vector UInt8 n) >>= fun U' => K (Util.Bytes.toVecN n
+        (xorBytes ((ofVector (padFiller hn (zeroBytes 0) x y)).extract 0 h)
+            (A ((ofVector U').extract h n))
+          ++ xorBytes ((ofVector U').extract h n) B)))
+        =ᵈ ($ᵗ (Vector UInt8 t) >>= fun y' => G x y') := fun x y => by
+    refine EvalDistEq.trans (evalDistEq_pair_of_bijective hcat _).symm ?_
+    simp only [(e0 _ _).1, (e0 _ _).2]
+    exact OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 h))
+      ($ᵗ (Vector UInt8 t) >>= fun y' => G x y')
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun x => EvalDistEq.bind_right _ fun y =>
+    t2 x y) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun x =>
+    OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 t))
+      ($ᵗ (Vector UInt8 t) >>= fun y' => G x y')) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ fun x y' => G x y') ?_
+  have t5 : ∀ y' : Vector UInt8 t, ($ᵗ (Vector UInt8 h) >>= fun x => G x y')
+      =ᵈ ($ᵗ (Vector UInt8 h) >>= fun x => K (padFiller hn B x y')) := fun y' => by
+    have h5 := evalDistEq_otp h (A (ofVector y')) (fun z => K (padFiller hn B z y'))
+    simpa only [G, padFiller, Util.Bytes.ofVector_toVecN _
+      ((size_xorBytes _ _).trans (Util.Bytes.size_ofVector _))] using h5
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ t5) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _
+    fun y' x => K (padFiller hn B x y')) ?_
+  exact evalDistEq_pair_of_bijective (padFiller_bijective hn B) K
 
 section ForwardFinal
 
@@ -373,6 +433,34 @@ theorem mixSeeds_getElem! (r r' : Randomness geom) (j k : ℕ) (hk : k < geom.nr
       = if k < j then r'.1.1.toArray[k]! else r.1.1.toArray[k]! := by
   rw [getElem!_pos _ _ (by simpa using hk)]
   split_ifs <;> simp [mixSeeds, getElem!_pos, *]
+
+omit hvalid hmactag h16 in
+/-- Mixing twice gives the original back. -/
+theorem mixSeeds_mixSeeds (r r' : Randomness geom) (j : ℕ) :
+    mixSeeds geom (mixSeeds geom r r' j) (mixSeeds geom r' r j) j = r := by
+  obtain ⟨⟨a, f⟩, b⟩ := r
+  obtain ⟨⟨a', f'⟩, b'⟩ := r'
+  unfold mixSeeds
+  refine Prod.ext (Prod.ext (Vector.ext fun i hi => ?_) rfl) rfl
+  by_cases h : i < j <;> simp [h]
+
+omit hvalid hmactag h16 in
+/-- **The mixed randomness is uniform.** A game that reads two uniform draws through their
+mix reads one uniform draw. -/
+theorem evalDistEq_mixSeeds {δ : Type} (j : ℕ) (K : Randomness geom → ProbComp δ) :
+    (do let r ← $ᵗ (Randomness geom); let r' ← $ᵗ (Randomness geom); K (mixSeeds geom r r' j))
+      =ᵈ ($ᵗ (Randomness geom) >>= K) := by
+  have hb : Function.Bijective (Function.uncurry fun (r r' : Randomness geom) =>
+      (mixSeeds geom r r' j, mixSeeds geom r' r j)) :=
+    Function.Involutive.bijective fun p => by
+      obtain ⟨r, r'⟩ := p
+      exact Prod.ext (mixSeeds_mixSeeds geom r r' j) (mixSeeds_mixSeeds geom r' r j)
+  have hid : Function.Bijective (Function.uncurry fun (a b : Randomness geom) => (a, b)) :=
+    Function.bijective_id
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective hb fun p => K p.1) ?_
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective hid fun p => K p.1).symm ?_
+  exact EvalDistEq.bind_right _ fun r =>
+    OracleComp.EvalDistEq.bind_const ($ᵗ (Randomness geom)) (K r)
 
 omit hvalid hmactag h16 in
 /-- After position `j` the mixed randomness has the original's seeds. -/
