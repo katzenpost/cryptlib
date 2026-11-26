@@ -1440,6 +1440,26 @@ theorem world1With_reply (h : Protocols.RSOR.Role) (m : S.Msg) (o : S.Onion)
     (c.world1With onion own none swap refuse).patch.reply h m o out = out := by
   simp [Protocols.RSOR.BackwardChallenge.world1With]
 
+/-- With no header of its own given, the relay of the world where an onion is sent on processes
+as it would. -/
+theorem world1With_proc_noown (h : Protocols.RSOR.Role) (o : S.Onion) (out : Option S.Step) :
+    (c.world1With onion none exit swap refuse).patch.proc h o out
+      = if h = .sender ∧ o.1 = refuse then pure none else pure out :=
+  world1With_proc_other c onion none exit swap refuse h o out fun hx => by cases hx.2
+
+/-- Under the exit header it is told, the relay of the world where an onion is sent on replies
+with that onion, when it replies. -/
+theorem world1With_reply_exit (m : S.Msg) (o : S.Onion) (out : Option (S.Name × S.Onion)) :
+    (c.world1With onion own (some o.1) swap refuse).patch.reply .relay m o out
+      = out.map fun _ => (c.req.back.hops[c.pos].name, swap) := by
+  simp [Protocols.RSOR.BackwardChallenge.world1With]
+
+/-- Elsewhere the world where an onion is sent on changes no reply. -/
+theorem world1With_reply_other (h : Protocols.RSOR.Role) (m : S.Msg) (o : S.Onion)
+    (out : Option (S.Name × S.Onion)) (hne : ¬ (h = .relay ∧ exit = some o.1)) :
+    (c.world1With onion own exit swap refuse).patch.reply h m o out = out := by
+  simp [Protocols.RSOR.BackwardChallenge.world1With, hne]
+
 end SentOn
 
 section BackRelay
@@ -2087,6 +2107,89 @@ theorem world0_patch {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.Back
   exact congrArg (fun H : Vector UInt8 geom.headerLength =>
     ({ proc := fun (h : Role) (o : RSOR.Onion geom) out =>
         if h = .sender ∧ o.1 = H then pure none else pure out } : Protocols.RSOR.Patch 𝒮)) e
+
+/-- **The onion sent on at the exit**: the header of the first layer over the backward path
+and the drawn block, when that layer can be built. -/
+theorem replySwap_fst_exit {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.BackwardChallenge hon) (x : RSOR.Randomness geom × Block geom)
+    (hp : c.pos.val = 0) (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem))
+    (hR : c.req.back = R) (pkt : ByteArray)
+    (hpk : RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem R [.surbReply x.1.2.2.2])
+        x.1.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) 0 = .ok pkt) :
+    ((replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16).of c x).1 = ((RSOR.split geom
+        pkt).1, x.2) := by
+  subst hR
+  unfold replySwap
+  dsimp only
+  rw [hp]
+  exact congrArg (fun e : Except String ByteArray => match e with
+    | .ok pkt => ((RSOR.split geom pkt).1, x.2)
+    | .error _ => (default : RSOR.Onion geom)) hpk
+
+/-- **The header the sender refuses at the exit**: that of the last layer over the backward
+path. -/
+theorem replySwap_snd_exit {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.BackwardChallenge hon) (x : RSOR.Randomness geom × Block geom)
+    (hp : c.pos.val = 0) (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem))
+    (hR : c.req.back = R) :
+    ((replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16).of c x).2
+      = (match RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem R [.surbReply
+          x.1.2.2.2]) x.1.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray)
+          (R.hops.length - 1) with
+        | .ok pkt => (RSOR.split geom pkt).1
+        | .error _ => (default : RSOR.Onion geom).1) := by
+  subst hR
+  unfold replySwap
+  dsimp only
+  rw [hp]
+  rfl
+
+/-- **At the exit, the world where an onion is sent on is a relay replying with that onion.**
+A relay whose reply under the exit header is patched to the onion `(hdr', g)` is a relay that
+replies with the header `hdr'` and the block `g`, whatever it would have encrypted. -/
+theorem withEnc_exit_swap {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.BackwardChallenge hon) (onion : RSOR.Onion geom)
+    (H hdr hdr' refuse : Vector UInt8 geom.headerLength) (name : RSOR.Name) (u g : Block geom)
+    (proc : Role → RSOR.Onion geom → Option (Protocols.RSOR.Scheme.Step 𝒮))
+    (reply : Role → RSOR.Msg geom → RSOR.Onion geom → Option (RSOR.Name × RSOR.Onion geom))
+    (inp : RSOR.Msg geom → RSOR.Onion geom → Block geom) (enc : Block geom → Block geom)
+    (hname : c.req.back.hops[c.pos].name = name) :
+    Protocols.RSOR.withEnc (S := 𝒮) Role.relay H proc reply inp
+        (fun (_ : RSOR.Msg geom) (o : RSOR.Onion geom) (y : Block geom) =>
+          if o.2 = u then some (name, (hdr, y)) else none) enc
+        (Protocols.RSOR.BackwardChallenge.world1With (S := 𝒮) c onion none (some H) (hdr', g)
+        refuse).patch
+      = Protocols.RSOR.withEnc (S := 𝒮) Role.relay H proc reply inp
+        (fun (_ : RSOR.Msg geom) (o : RSOR.Onion geom) (y : Block geom) =>
+          if o.2 = u then some (name, (hdr', y)) else none) (fun _ => g)
+        ({ proc := fun (h : Role) (o : RSOR.Onion geom) out =>
+          if h = .sender ∧ o.1 = refuse then pure none else pure out } :
+        Protocols.RSOR.Patch 𝒮) := by
+  refine Protocols.RSOR.oracle_patch_congr (S := 𝒮) _ _ _ _ _ _ (fun h o => ?_)
+    (fun h m o => ?_)
+  · exact world1With_proc_noown (S := 𝒮) c onion (some H) (hdr', g) refuse h o _
+  · obtain ⟨o1, o2⟩ := o
+    by_cases hc : h = Role.relay ∧ o1 = H
+    · obtain ⟨rfl, rfl⟩ := hc
+      have h4 : Role.relay = Role.relay ∧ o1 = o1 := ⟨rfl, rfl⟩
+      refine (congrArg ((Protocols.RSOR.BackwardChallenge.world1With (S := 𝒮) c onion none (some
+          o1) (hdr', g)
+        refuse).patch.reply Role.relay m (o1, o2)) (ite_eq_left h4)).trans
+        ((world1With_reply_exit (S := 𝒮) c onion none (hdr', g) refuse m (o1, o2) _).trans
+          (Eq.trans ?_ (ite_eq_left h4).symm))
+      by_cases hy : o2 = u
+      · exact (congrArg (Option.map fun _ => (c.req.back.hops[c.pos].name, (hdr', g)))
+          (ite_eq_left hy)).trans ((congrArg (fun n => some (n, (hdr', g))) hname).trans
+            (ite_eq_left hy).symm)
+      · exact (congrArg (Option.map fun _ => (c.req.back.hops[c.pos].name, (hdr', g)))
+          (ite_eq_right hy)).trans (ite_eq_right hy).symm
+    · have hne : ¬ (h = Role.relay ∧ some H = some o1) :=
+        fun hx => hc ⟨hx.1, (Option.some.inj hx.2).symm⟩
+      exact (congrArg ((Protocols.RSOR.BackwardChallenge.world1With (S := 𝒮) c onion none (some H)
+          (hdr', g)
+        refuse).patch.reply h m (o1, o2)) (ite_eq_right hc)).trans
+        ((world1With_reply_other (S := 𝒮) c onion none (some H) (hdr', g) refuse h m (o1, o2) _
+          hne).trans (ite_eq_right hc).symm)
 
 section Canon
 
