@@ -234,7 +234,13 @@ built like a reply layer, a header over the rest of the backward path with a uni
   the relay's keystream, as in the last comparison of TLU→. At the exit this also needs the
   cipher under the reply's payload key.
 
-Not proved yet: both of those.
+Proved so far for the first: the triangle inequality through world 1′
+(`backwardWith_advantage_le`), and in `KEMSphinxSLUSender.lean` both onions around the sender's
+ciphertext with the sender's keys replaced by uniform ones (`swapPair_le_keyedIdeal`). World 1′
+is `replySwap`.
+
+Not proved yet: the MAC, cipher and keystream steps at the sender and the comparison of the two
+onions; and the second point.
 
 ## How the bounds are built
 

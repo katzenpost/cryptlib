@@ -485,14 +485,49 @@ theorem formBack_fst_real (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSiz
     (by rw [RSOR.path_size]; exact q.back.length_le) henc]
   rfl
 
+/-- The header of the layer for position `i` of a packet with no payload of its own, with hop
+`j`'s KEM ciphertext, header keystream and tagging function given. A header does not use the
+payload cipher, so the layer is built with the identity in its place. -/
+def headerF (hops : Array PathHop) (d : RSOR.Draw geom) (j : ℕ) (c U : ByteArray)
+    (tagf : ByteArray → ByteArray) (i : ℕ) : Vector UInt8 geom.headerLength :=
+  match layerF kem default macS kdfS streamS geom hops d ⟨Array.replicate geom.forwardPayloadLength
+      0⟩ j c U tagf id i with
+  | some pkt => (RSOR.split geom pkt).1
+  | none => (default : RSOR.Onion geom).1
+
+/-- **With the keys that the seed `s` gives at hop `j`, `headerF` is the header of the layer**
+built from the draw with `s` at position `j`, for a layer up to `j`'s. -/
+theorem headerF_real (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (j i : ℕ) (hi : i ≤ j) (hj : j < hops.size)
+    (hlen : hops.size ≤ geom.nrHops) (s : Vector UInt8 32) (c ss pkt : ByteArray)
+    (henc : kemEncap kem (hops[j]!).publicKey s = .ok (c, ss))
+    (hpkt : RSOR.layer kem cipher macS kdfS streamS geom hops (d.1.setIfInBounds j s, d.2)
+        ⟨Array.replicate geom.forwardPayloadLength 0⟩ i = .ok pkt) :
+    (RSOR.split geom pkt).1
+      = headerF kem macS kdfS streamS geom hops d j c (ksOf streamS geom (keyTuple (deriveHopKeys
+          kdfS ss)))
+        (tagOf macS (keyTuple (deriveHopKeys kdfS ss))) i := by
+  have hF := layerF_real kem cipher macS kdfS streamS geom hops d ⟨Array.replicate
+      geom.forwardPayloadLength 0⟩ pkt j i s c ss hi hj hlen henc hpkt
+  obtain ⟨x', hx', hext⟩ := layerF_header kem cipher macS kdfS streamS geom default hops d
+      ⟨Array.replicate geom.forwardPayloadLength 0⟩ j c
+    (ksOf streamS geom (keyTuple (deriveHopKeys kdfS ss))) (tagOf macS (keyTuple (deriveHopKeys
+        kdfS ss))) (encOf cipher (keyTuple (deriveHopKeys kdfS ss))) id i pkt hF
+    (fun b => cipher.encrypt_size _ _ _)
+  rw [(RSOR.join_split_layer kem cipher macS kdfS streamS geom hvalid hmactag _ _ _ _ _ hpkt).1,
+      Nat.add_sub_cancel] at hext
+  unfold headerF
+  rw [hx']
+  show (RSOR.split geom pkt).1 = (RSOR.split geom x').1
+  unfold RSOR.split
+  dsimp only
+  rw [hext]
+
 /-- The header of the reply's layer at backward position `i`, up to the relay at position `k`,
 with that relay's KEM ciphertext, header keystream and tagging function given. -/
 def backHeaderF (q : RSOR.Request kem geom) (r : RSOR.Randomness geom) (k : ℕ) (c U : ByteArray)
     (tagf : ByteArray → ByteArray) (i : ℕ) : Vector UInt8 geom.headerLength :=
-  match layerF kem default macS kdfS streamS geom (RSOR.path kem q.back [.surbReply r.2.2.2]) r.2.1
-      ⟨Array.replicate geom.forwardPayloadLength 0⟩ k c U tagf id i with
-  | some pkt => (RSOR.split geom pkt).1
-  | none => (default : RSOR.Onion geom).1
+  headerF kem macS kdfS streamS geom (RSOR.path kem q.back [.surbReply r.2.2.2]) r.2.1 k c U tagf i
 
 /-- **A reply layer up to the relay, with the relay's real keys.** With the ciphertext and keys
 that the seed `s` gives at backward position `k`, `backHeaderF` is the header of the reply's
@@ -507,30 +542,18 @@ theorem formBack_fst_realF (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSi
         r.2.2.2]) (setSeedBack geom r k s).2.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩ i =
         .ok pkt) :
     (RSOR.formBack kem cipher macS kdfS streamS geom q (setSeedBack geom r k s) m i).1
-      = backHeaderF kem macS kdfS streamS geom q r k c (ksOf streamS geom (keyTuple
-          (deriveHopKeys kdfS ss))) (tagOf macS (keyTuple (deriveHopKeys kdfS ss))) i := by
-  have hF := layerF_real kem cipher macS kdfS streamS geom (RSOR.path kem q.back [.surbReply
-      r.2.2.2]) r.2.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩ pkt k i s c ss hik
-    (by rw [RSOR.path_size]; exact hk)
-    (by rw [RSOR.path_size]; exact q.back.length_le) henc hpkt
-  obtain ⟨x', hx', hext⟩ := layerF_header kem cipher macS kdfS streamS geom default (RSOR.path kem
-      q.back [.surbReply r.2.2.2]) r.2.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩ k c
-    (ksOf streamS geom (keyTuple (deriveHopKeys kdfS ss))) (tagOf macS (keyTuple (deriveHopKeys
-        kdfS ss))) (encOf cipher (keyTuple (deriveHopKeys kdfS ss))) id i pkt hF
-    (fun b => cipher.encrypt_size _ _ _)
-  rw [(RSOR.join_split_layer kem cipher macS kdfS streamS geom hvalid hmactag _ _ _ _ _ hpkt).1,
-      Nat.add_sub_cancel] at hext
+      = backHeaderF kem macS kdfS streamS geom q r k c (ksOf streamS geom (keyTuple (deriveHopKeys
+          kdfS ss)))
+        (tagOf macS (keyTuple (deriveHopKeys kdfS ss))) i := by
   have hL : RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem q.back [.surbReply
       (setSeedBack geom r k s).2.2.2])
       (setSeedBack geom r k s).2.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩ i = .ok pkt :=
     hpkt
   rw [RSOR.formBack_fst kem cipher macS kdfS streamS geom hvalid hmactag, hL]
-  unfold backHeaderF
-  rw [hx']
-  show (RSOR.split geom pkt).1 = (RSOR.split geom x').1
-  unfold RSOR.split
-  dsimp only
-  rw [hext]
+  exact headerF_real kem cipher macS kdfS streamS geom hvalid hmactag (RSOR.path kem q.back
+      [.surbReply r.2.2.2]) r.2.1 k i hik
+    (by rw [RSOR.path_size]; exact hk)
+    (by rw [RSOR.path_size]; exact q.back.length_le) s c ss pkt henc hpkt
 
 /-- The challenger's randomness with the seed of the honest relay's layer replaced. The relay
 is the one before backward position `pos`: its layer is the last of the forward path when `pos`
@@ -1904,7 +1927,7 @@ theorem backGood1_view (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwar
     obtain ⟨hz, hsize, hkk⟩ := backGoodAt_back kem cipher macS kdfS streamS geom hvalid hmactag h16
         W
         names ch d.k.2 o.1 d.s hg k hp u
-    unfold backView1 backViewT1 backM1 backM0 backOnionF backHeaderF
+    unfold backView1 backViewT1 backM1 backM0 backOnionF backHeaderF headerF
     rw [hp]
     dsimp only
     rw [layerF_id, layerF_id,
