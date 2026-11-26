@@ -641,6 +641,143 @@ theorem shiftStream_path (R : Protocols.RSOR.Route geom.nrHops Name (Key kem))
     (kemHopKeys_mixSeeds kem kdfS geom R last last' r r' j (by omega)) ?_ hfwd hs'
   rw [path_getElem! kem R last j (by omega), ite_eq_right (by omega)]
 
+omit h16 in
+include hvalid in
+set_option maxHeartbeats 1000000 in
+/-- **The relabelled draws are uniform, before the end of the path.** A game that reads the
+two randomness draws through their mix, and the two keystreams through the shifted keystream,
+reads one randomness draw and one keystream. -/
+theorem evalDistEq_shiftStream {δ : Type} (R : Protocols.RSOR.Route geom.nrHops Name (Key kem))
+    (last last' : List RoutingCommand) (payload : Randomness geom → ByteArray) (j : ℕ)
+    (hn : j + 1 < R.hops.length) (c : ByteArray)
+    (K : Keystream geom → Randomness geom → ProbComp δ) :
+    (do
+      let r ← $ᵗ (Randomness geom)
+      let r' ← $ᵗ (Randomness geom)
+      let U ← $ᵗ (Keystream geom)
+      let U' ← $ᵗ (Keystream geom)
+      K (Util.Bytes.toVecN _ (shiftStream geom kem kdfS streamS (path kem R last)
+          (path kem (R.take (j + 1)) last') r.1 (mixSeeds geom r r' j).1 r'.1 j c (ofVector U)
+          (ofVector U')
+          (match layerPast kem cipher macS kdfS streamS geom (path kem R last) r.1 (payload r) j
+              (ofVector U') (j + 1) with
+            | .ok f => f
+            | .error _ => ByteArray.empty)))
+        (mixSeeds geom r r' j))
+      =ᵈ (do
+        let r ← $ᵗ (Randomness geom)
+        let U ← $ᵗ (Keystream geom)
+        K U r) := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hle := R.length_le
+  have hjp : (j + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
+    exact Nat.mul_le_mul_right _ (by omega)
+  obtain ⟨h, hh⟩ : ∃ h, h = geom.routingInfoLength + geom.perHopRoutingInfoLength
+      - (j + 1) * geom.perHopRoutingInfoLength := ⟨_, rfl⟩
+  have hht : h + (j + 1) * geom.perHopRoutingInfoLength
+      = geom.routingInfoLength + geom.perHopRoutingInfoLength := by omega
+  have hh' : geom.routingInfoLength - j * geom.perHopRoutingInfoLength = h := by
+    rw [Nat.succ_mul] at hh hjp
+    omega
+  have step : ∀ r r' : Randomness geom,
+      (do
+        let U ← $ᵗ (Keystream geom)
+        let U' ← $ᵗ (Keystream geom)
+        K (Util.Bytes.toVecN _ (shiftStream geom kem kdfS streamS (path kem R last)
+            (path kem (R.take (j + 1)) last') r.1 (mixSeeds geom r r' j).1 r'.1 j c (ofVector U)
+            (ofVector U')
+            (match layerPast kem cipher macS kdfS streamS geom (path kem R last) r.1 (payload r) j
+                (ofVector U')
+                (j + 1) with
+              | .ok f => f
+              | .error _ => ByteArray.empty)))
+          (mixSeeds geom r r' j))
+        =ᵈ ($ᵗ (Keystream geom) >>= fun U₀ => K U₀ (mixSeeds geom r r' j)) := fun r r' => by
+    obtain ⟨F, hF⟩ : ∃ F : ByteArray → ByteArray, F = fun T =>
+        match layerPast kem cipher macS kdfS streamS geom (path kem R last) r.1 (payload r) j
+            (zeroBytes h ++ T)
+            (j + 1) with
+          | .ok f => f
+          | .error _ => ByteArray.empty := ⟨_, rfl⟩
+    obtain ⟨A, hA⟩ : ∃ A : ByteArray → ByteArray, A = (fun T => xorBytes
+              (lastFrag geom kem (path kem (R.take (j + 1)) last') j c
+                ++ (zeroFiller geom kem kdfS streamS (path kem (R.take (j + 1)) last') r'.1
+                  j).extract 0
+                  ((geom.nrHops - (path kem (R.take (j + 1)) last').size)
+                    * geom.perHopRoutingInfoLength))
+              (midFrag geom kem (path kem R last) j (F T)
+                ++ (F T).extract (2 + kem.ciphertextSize)
+                  (2 + kem.ciphertextSize
+                    + ((path kem R last).size - (j + 1)) * geom.perHopRoutingInfoLength)
+                ++ (midPad geom kem kdfS streamS (path kem R last) (mixSeeds geom r r' j).1
+                  j).extract 0
+                  ((geom.nrHops - (path kem R last).size) * geom.perHopRoutingInfoLength))) := ⟨_,
+                      rfl⟩
+    obtain ⟨B, hB⟩ : ∃ B : ByteArray, B = (xorBytes
+              ((fillerAtF kem kdfS streamS geom (path kem R last)
+                (r.1.1.toArray.extract 0 (path kem R last).size)
+                ((ofVector r.1.2).extract 0
+                  ((geom.nrHops - (path kem R last).size) * geom.perHopRoutingInfoLength)) j
+                (zeroBytes (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+                (j + 1)).extract
+                  ((geom.nrHops - (path kem R last).size) * geom.perHopRoutingInfoLength)
+                  ((geom.nrHops - (path kem R last).size) * geom.perHopRoutingInfoLength
+                    + (j + 1) * geom.perHopRoutingInfoLength))
+              ((fillerAtF kem kdfS streamS geom (path kem R last)
+                ((mixSeeds geom r r' j).1.1.toArray.extract 0 (path kem R last).size)
+                ((ofVector r.1.2).extract 0
+                  ((geom.nrHops - (path kem R last).size) * geom.perHopRoutingInfoLength)) j
+                (zeroBytes (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+                (j + 1)).extract
+                  ((geom.nrHops - (path kem R last).size) * geom.perHopRoutingInfoLength)
+                  ((geom.nrHops - (path kem R last).size) * geom.perHopRoutingInfoLength
+                    + (j + 1) * geom.perHopRoutingInfoLength))) := ⟨_, rfl⟩
+    have hform : ∀ U U' : Keystream geom,
+        shiftStream geom kem kdfS streamS (path kem R last) (path kem (R.take (j + 1)) last')
+          r.1 (mixSeeds geom r r' j).1 r'.1 j c (ofVector U) (ofVector U')
+          (match layerPast kem cipher macS kdfS streamS geom (path kem R last) r.1 (payload r) j
+              (ofVector U') (j + 1) with
+            | .ok f => f
+            | .error _ => ByteArray.empty)
+        = xorBytes ((ofVector U).extract 0 h)
+            (A ((ofVector U').extract h
+              (geom.routingInfoLength + geom.perHopRoutingInfoLength)))
+          ++ xorBytes ((ofVector U').extract h
+              (geom.routingInfoLength + geom.perHopRoutingInfoLength)) B := by
+      intro U U'
+      have hT : ((ofVector U').extract h
+          (geom.routingInfoLength + geom.perHopRoutingInfoLength)).size
+          = (j + 1) * geom.perHopRoutingInfoLength := by
+        rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+        omega
+      have hL := layerPast_tail geom kem kdfS streamS cipher macS hrouting (path kem R last) r.1
+        (payload r) j (ofVector U')
+        (zeroBytes h ++ (ofVector U').extract h
+          (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+        (Util.Bytes.size_ofVector _)
+        (by rw [ByteArray.size_append, zeroBytes_size, hT]; exact hht)
+        (by rw [path_size]; exact hle) (by rw [path_size]; exact hn)
+        (by
+          rw [← hh]
+          have h1 := Util.Bytes.extract_append_right (zeroBytes h) ((ofVector U').extract h
+            (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+          rw [zeroBytes_size, hT, hht] at h1
+          exact h1.symm)
+      unfold shiftStream
+      rw [hL, hh', ← hh, hA, hB, hF]
+    simp only [hform]
+    exact evalDistEq_headTail hht A B (fun U₀ => K U₀ (mixSeeds geom r r' j))
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun r => EvalDistEq.bind_right _ fun r' =>
+    step r r') ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun r =>
+    OracleComp.EvalDistEq.bind_bind_swap _ _ fun r' U₀ => K U₀ (mixSeeds geom r r' j)) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _
+    fun r U₀ => $ᵗ (Randomness geom) >>= fun r' => K U₀ (mixSeeds geom r r' j)) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun U₀ =>
+    evalDistEq_mixSeeds geom j (K U₀)) ?_
+  exact OracleComp.EvalDistEq.bind_bind_swap _ _ fun U₀ r => K U₀ r
+
 end RSOR
 
 /-! ## The exit relay's reply -/
