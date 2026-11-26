@@ -243,6 +243,83 @@ theorem nextOwn_run (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversar
   rw [hvo]
   rw [hskf, hDd, hHv]
 
+/-! ## World 1 with its random payload drawn first -/
+
+/-- **World 1's relay may draw its random payload first.** The game where the relay answers
+one header and the challenger patches its answers as in world 1 is the game that draws the
+random payload `g` first and patches with it. -/
+theorem headerRelays_patchWith_draw {pk kb ks : Key kem} (names : Role → RSOR.Name)
+    (c : Protocols.RSOR.ForwardChallenge (S := 𝒮)
+      (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk kb ks))
+    (next : RSOR.Onion geom) (r : RSOR.Randomness geom) (mine : RSOR.Onion geom)
+    (sk : Role → kem.PrivateKey) (ct : kem.Ciphertext) (km : Vector UInt8 32) (U : ByteArray)
+    (Hv : Vector UInt8 geom.headerLength) (D : Block geom → Block geom)
+    {α : Type} (oa : OracleComp (Protocols.RSOR.oracleSpec 𝒮) α)
+    (log : Protocols.RSOR.Log 𝒮) :
+    (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U Hv D
+        (c.patchWith next r mine)) oa).run' log
+      =ᵈ $ᵗ (Block geom) >>= fun g =>
+        (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U Hv D
+          (c.patchDrawn next r mine g)) oa).run' log := by
+  have h := c.patchWith_draw next r mine
+    (fun (h : Role) (o : RSOR.Onion geom) => pure (if h = Role.relay ∧ o.1 = Hv then
+        RSOR.stepOf geom (procKeysD kem macS geom km U (ofVector (D o.2)) (RSOR.join o))
+      else if h = .relay then
+        RSOR.stepOf geom
+          (relayAns kem cipher macS kdfS streamS geom (sk .relay) ct (fun _ => none) (RSOR.join o))
+      else RSOR.proc kem cipher macS kdfS streamS geom (sk h) o))
+    (fun (h : Role) (msg : RSOR.Msg geom) (o : RSOR.Onion geom) =>
+      pure (if h = Role.relay ∧ o.1 = Hv then
+        RSOR.replyOf cipher geom msg
+          (procKeysD kem macS geom km U (ofVector (D o.2)) (RSOR.join o))
+      else if h = .relay then
+        RSOR.replyOf cipher geom msg
+          (relayAns kem cipher macS kdfS streamS geom (sk .relay) ct (fun _ => none) (RSOR.join o))
+      else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o))
+    oa log
+  have h2 := h.map Prod.fst
+  rw [map_bind] at h2
+  exact h2
+
+/-! ## Two relays that answer one header alike -/
+
+/-- **A patched relay that answers one header is an unpatched one.** If the patch changes
+answers under the header `Hv` at `.relay` only, and there takes the answers from the keystream
+`U₁` and the decryption `D₁` to the answers from `U₀` and `D₀`, the two games are the same. -/
+theorem headerRelays_patch_eq (sk : Role → kem.PrivateKey) (ct : kem.Ciphertext)
+    (km : Vector UInt8 32) (U₀ U₁ : ByteArray) (Hv : Vector UInt8 geom.headerLength)
+    (D₀ D₁ : Block geom → Block geom) (patch : Protocols.RSOR.Patch 𝒮)
+    (hstep : ∀ o : RSOR.Onion geom, o.1 = Hv →
+      patch.proc .relay o (RSOR.stepOf geom
+          (procKeysD kem macS geom km U₁ (ofVector (D₁ o.2)) (RSOR.join o)))
+        = pure (RSOR.stepOf geom
+          (procKeysD kem macS geom km U₀ (ofVector (D₀ o.2)) (RSOR.join o))))
+    (hrep : ∀ (m : RSOR.Msg geom) (o : RSOR.Onion geom), o.1 = Hv →
+      patch.reply .relay m o (RSOR.replyOf cipher geom m
+          (procKeysD kem macS geom km U₁ (ofVector (D₁ o.2)) (RSOR.join o)))
+        = RSOR.replyOf cipher geom m
+          (procKeysD kem macS geom km U₀ (ofVector (D₀ o.2)) (RSOR.join o)))
+    (hproc : ∀ (h : Role) (o : RSOR.Onion geom) out, ¬ (h = .relay ∧ o.1 = Hv) →
+      patch.proc h o out = pure out)
+    (hreply : ∀ (h : Role) (m : RSOR.Msg geom) (o : RSOR.Onion geom) out,
+      ¬ (h = .relay ∧ o.1 = Hv) → patch.reply h m o out = out) :
+    headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U₁ Hv D₁ patch
+      = headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U₀ Hv D₀ {} := by
+  refine Protocols.RSOR.oracle_pure_patch (S := 𝒮) patch _ _ _ _ (fun h o => ?_)
+    (fun h m o => ?_)
+  · by_cases hc : h = Role.relay ∧ o.1 = Hv
+    · obtain ⟨rfl, ho⟩ := hc
+      exact (congrArg (patch.proc Role.relay o) (if_pos ⟨rfl, ho⟩)).trans
+        ((hstep o ho).trans (congrArg pure (if_pos ⟨rfl, ho⟩).symm))
+    · exact (congrArg (patch.proc h o) (if_neg hc)).trans
+        ((hproc h o _ hc).trans (congrArg pure (if_neg hc).symm))
+  · by_cases hc : h = Role.relay ∧ o.1 = Hv
+    · obtain ⟨rfl, ho⟩ := hc
+      exact (congrArg (patch.reply Role.relay m o) (if_pos ⟨rfl, ho⟩)).trans
+        ((hrep m o ho).trans (if_pos ⟨rfl, ho⟩).symm)
+    · exact (congrArg (patch.reply h m o) (if_neg hc)).trans
+        ((hreply h m o _ hc).trans (if_neg hc).symm)
+
 end ForwardFinal
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
