@@ -71,6 +71,60 @@ theorem backwardUnlinkable_world_true (c : BackwardChallenge hon) :
         return c.world1 r msg rcv r') := by
   rfl
 
+/-- World 1 of SLU← from the three things it reads off the adversary's onion: its first layer,
+the header of the reply's layer at the honest relay (when the relay is on the backward path),
+and the header of its last forward layer (when the relay is the exit relay). -/
+def BackwardChallenge.world1With (c : BackwardChallenge hon) (onion : S.Onion)
+    (own exit : Option S.Header) (msg : S.Msg) (rcv : S.Receiver) (r' : S.Randomness) :
+    World S :=
+  { onion := onion
+    patch :=
+      { proc := fun h o out =>
+          if h = .sender ∧ o.1 = (S.form (c.swapReq msg rcv) r' (c.swapReq msg rcv).last).1 then
+            pure none
+          else if h = .relay ∧ own = some o.1 then
+            pure (out.map fun _ => .forward (c.req.back.hops[c.pos].name)
+              (S.form (c.swapReq msg rcv) r' (c.swapReq msg rcv).first))
+          else pure out
+        reply := fun h _ o out =>
+          if h = .relay ∧ exit = some o.1 then
+            out.map fun _ => (c.req.back.hops[c.pos].name,
+              S.form (c.swapReq msg rcv) r' (c.swapReq msg rcv).first)
+          else out } }
+
+/-- The header of the reply's layer at the honest relay, when the relay is on the backward
+path. -/
+def BackwardChallenge.ownAt (c : BackwardChallenge hon) (r : S.Randomness) : Option S.Header :=
+  match c.pos.val with
+  | 0 => none
+  | k + 1 => if h : k < c.req.back.hops.length then some (S.formBack c.req r c.req.msg ⟨k, h⟩).1
+    else none
+
+/-- The header of the onion's last forward layer, when the honest relay is the exit relay. -/
+def BackwardChallenge.exitAt (c : BackwardChallenge hon) (r : S.Randomness) : Option S.Header :=
+  if c.pos.val = 0 then some (S.form c.req r c.req.last).1 else none
+
+/-- **World 1 of SLU← reads the adversary's onion through three things.** -/
+theorem BackwardChallenge.world1_eq (c : BackwardChallenge hon) (r : S.Randomness) (msg : S.Msg)
+    (rcv : S.Receiver) (r' : S.Randomness) :
+    c.world1 r msg rcv r'
+      = c.world1With (S.form c.req r c.req.first) (c.ownAt r) (c.exitAt r) msg rcv r' := by
+  have hlt := c.pos.isLt
+  unfold world1 world1With ownAt exitAt
+  dsimp only
+  congr 2
+  · funext h o out
+    congr 3
+    split <;> rename_i hk
+    · simp [hk]
+    · rename_i k
+      have hkl : k < c.req.back.hops.length := by omega
+      simp [hk, hkl]
+  · funext h m o out
+    by_cases hp : c.pos.val = 0
+    · simp [hp, eq_comm]
+    · simp [hp]
+
 end Cryptlib.Protocols.RSOR
 
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
