@@ -1032,13 +1032,14 @@ theorem fillerAtF_head (hrouting : geom.routingInfoLength = 𝓅 * geom.nrHops)
 /-- **Other hops in front shift the keyed hop's keystream.** The filler of the layer after the
 keyed hop, built with other seeds, is the filler built with the given seeds once the tail of
 the keyed hop's keystream is shifted by the difference of the two fillers at a zero
-keystream. -/
+keystream. The head of the keystream is not read. -/
 theorem fillerAtF_shift (hrouting : geom.routingInfoLength = 𝓅 * geom.nrHops)
     (hops : Array PathHop) (seeds seeds' : Array (Vector UInt8 32)) (filler : ByteArray) (j : ℕ)
-    (U : ByteArray) (hU : U.size = 𝓃) (hlen : hops.size ≤ geom.nrHops) (hj : j + 1 < hops.size)
+    (U H : ByteArray) (hU : U.size = 𝓃) (hH : H.size = 𝓃 - (j + 1) * 𝓅)
+    (hlen : hops.size ≤ geom.nrHops) (hj : j + 1 < hops.size)
     (hf : filler.size = (geom.nrHops - hops.size) * 𝓅) :
     fillerAtF kem kdfS streamS geom hops seeds' filler j
-        (U.extract 0 (𝓃 - (j + 1) * 𝓅) ++ xorBytes (U.extract (𝓃 - (j + 1) * 𝓅) 𝓃)
+        (H ++ xorBytes (U.extract (𝓃 - (j + 1) * 𝓅) 𝓃)
           (xorBytes
             ((fillerAtF kem kdfS streamS geom hops seeds filler j (zeroBytes 𝓃) (j + 1)).extract
               filler.size (filler.size + (j + 1) * 𝓅))
@@ -1075,19 +1076,16 @@ theorem fillerAtF_shift (hrouting : geom.routingInfoLength = 𝓅 * geom.nrHops)
   have hUt : (U.extract (𝓃 - (j + 1) * 𝓅) 𝓃).size = (j + 1) * 𝓅 := by
     rw [ByteArray.size_extract, hU]
     omega
-  have hUh : (U.extract 0 (𝓃 - (j + 1) * 𝓅)).size = 𝓃 - (j + 1) * 𝓅 := by
-    rw [ByteArray.size_extract, hU]
-    omega
   rw [← hZt, ← hZt']
-  have hV : (U.extract 0 (𝓃 - (j + 1) * 𝓅)
+  have hV : (H
       ++ xorBytes (U.extract (𝓃 - (j + 1) * 𝓅) 𝓃) (xorBytes Zt Zt')).size = 𝓃 := by
-    rw [ByteArray.size_append, size_xorBytes, hUh, hUt]
+    rw [ByteArray.size_append, size_xorBytes, hH, hUt]
     omega
   rw [fillerAtF_affine geom kem kdfS streamS hrouting hops seeds' filler j _ hV hlen (by omega)
       hf (j + 1) le_rfl,
     fillerAtF_affine geom kem kdfS streamS hrouting hops seeds filler j U hU hlen (by omega)
       hf (j + 1) le_rfl, Nat.sub_self, Nat.zero_mul, Nat.sub_zero,
-    Util.Bytes.extract_append_of_ge _ _ (by rw [hUh]), hUh, Nat.sub_self,
+    Util.Bytes.extract_append_of_ge _ _ (by rw [hH]), hH, Nat.sub_self,
     show 𝓃 - (𝓃 - (j + 1) * 𝓅) = (j + 1) * 𝓅 by omega,
     extract_all _ _ (by rw [size_xorBytes, hUt]), hZ seeds, hZ seeds', ← hZt, ← hZt',
     xorBytes_append filler Zt' _ _ (by rw [zeroBytes_size, hf]),
@@ -1545,6 +1543,41 @@ theorem procKeysD_relayFrontLast (hvalid : geom.ValidForKEM kem)
         exact hpar)
       hnext hsurb, hpre 2 _ (by omega), hMc]
 
+/-- **The next layer under other hops in front.** The layer after the keyed hop, built from
+another draw with the same seeds after the keyed hop and the same filler, is the layer built
+from the given draw once the tail of the keyed hop's keystream is shifted. -/
+theorem layerPast_shift (hrouting : geom.routingInfoLength = 𝓅 * geom.nrHops)
+    (hops : Array PathHop) (d d' : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (U H : ByteArray) (hU : U.size = 𝓃) (hH : H.size = 𝓃 - (j + 1) * 𝓅)
+    (hlen : hops.size ≤ geom.nrHops) (hj : j + 1 < hops.size) (h2 : d'.2 = d.2)
+    (hs : (d'.1.toArray.extract 0 hops.size).extract (j + 1) (d'.1.toArray.extract 0 hops.size).size
+      = (d.1.toArray.extract 0 hops.size).extract (j + 1) (d.1.toArray.extract 0 hops.size).size) :
+    layerPast kem cipher macS kdfS streamS geom hops d' payload j
+        (H ++ xorBytes (U.extract (𝓃 - (j + 1) * 𝓅) 𝓃)
+          (xorBytes
+            ((fillerAtF kem kdfS streamS geom hops (d.1.toArray.extract 0 hops.size)
+              ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * 𝓅)) j (zeroBytes 𝓃)
+              (j + 1)).extract ((geom.nrHops - hops.size) * 𝓅)
+                ((geom.nrHops - hops.size) * 𝓅 + (j + 1) * 𝓅))
+            ((fillerAtF kem kdfS streamS geom hops (d'.1.toArray.extract 0 hops.size)
+              ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * 𝓅)) j (zeroBytes 𝓃)
+              (j + 1)).extract ((geom.nrHops - hops.size) * 𝓅)
+                ((geom.nrHops - hops.size) * 𝓅 + (j + 1) * 𝓅)))) (j + 1)
+      = layerPast kem cipher macS kdfS streamS geom hops d payload j U (j + 1) := by
+  have hf : ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * 𝓅)).size
+      = (geom.nrHops - hops.size) * 𝓅 := by
+    have hap : (geom.nrHops - hops.size) * 𝓅 ≤ geom.routingInfoLength := by
+      rw [hrouting, Nat.mul_comm 𝓅]
+      exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+    rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+    omega
+  have h := fillerAtF_shift geom kem kdfS streamS hrouting hops
+    (d.1.toArray.extract 0 hops.size) (d'.1.toArray.extract 0 hops.size) _ j U H hU hH hlen hj hf
+  rw [hf] at h
+  unfold layerPast
+  dsimp only
+  rw [h2, hs, h]
+
 /-! ## The layers in front of the keyed hop -/
 
 omit kdfS streamS cipher macS in
@@ -1594,6 +1627,126 @@ theorem wrapUp_congr (hops hops' : Array PathHop) (d d' : RSOR.Draw geom)
     unfold wrapHop kemHopCt kemHopKeys
     rw [p0, s0, kemRiFragment_path_congr geom kem _ (hops'.extract i hops'.size) _ _ _
       (hops'.extract i hops'.size).size p0 p1 (by simp; omega)]
+
+/-! ## The same header in both worlds -/
+
+/-- A mask shifted by the difference of two strings takes one to the other's masking. -/
+theorem xorBytes_shift (X X' M : ByteArray) (h : X.size = X'.size) (hM : M.size = X.size) :
+    xorBytes X (xorBytes M (xorBytes X' X)) = xorBytes X' M := by
+  rw [xorBytes_comm_of_size_eq M (xorBytes X' X) (by rw [size_xorBytes, hM, h]),
+    ← xorBytes_assoc X (xorBytes X' X) M (by rw [size_xorBytes, h])
+      (by rw [size_xorBytes, hM, h]),
+    xorBytes_comm_of_size_eq X (xorBytes X' X) (by rw [size_xorBytes, h]), xorBytes_xorBytes]
+
+set_option maxHeartbeats 1000000 in
+/-- **A middle hop's header is a last hop's header under a shifted keystream.** The keyed hop's
+header bytes on a path that goes on, with the head of its keystream shifted by the difference
+of the two routing informations, are its header bytes on a path that ends at it with the same
+hop keys in front. -/
+theorem relayFront_eq_last (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (hops hops' : Array PathHop) (d d' : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (c U T fwd : ByteArray)
+    (hj : j + 1 < hops.size) (hlen : hops.size ≤ geom.nrHops) (hj' : j + 1 = hops'.size)
+    (hU : U.size = 𝓃) (hT : T.size = (j + 1) * 𝓅) (hc : c.size = kem.ciphertextSize)
+    (hkeys : ∀ m, m < j → kemHopKeys kem kdfS hops (d.1.toArray.extract 0 hops.size) m
+      = kemHopKeys kem kdfS hops' (d'.1.toArray.extract 0 hops'.size) m)
+    (hfwd : layerPast kem cipher macS kdfS streamS geom hops d payload j
+      (xorBytes (U.extract 0 (geom.routingInfoLength - j * 𝓅))
+          (xorBytes
+            (lastFrag geom kem hops' j c
+              ++ (zeroFiller geom kem kdfS streamS hops' d' j).extract 0
+                ((geom.nrHops - hops'.size) * 𝓅))
+            (midFrag geom kem hops j fwd
+              ++ fwd.extract (2 + kem.ciphertextSize)
+                (2 + kem.ciphertextSize + (hops.size - (j + 1)) * 𝓅)
+              ++ (midPad geom kem kdfS streamS hops d j).extract 0
+                ((geom.nrHops - hops.size) * 𝓅)))
+        ++ T) (j + 1) = .ok fwd)
+    (hs : (relayFront kem cipher macS kdfS streamS geom hops d payload j c
+      (xorBytes (U.extract 0 (geom.routingInfoLength - j * 𝓅))
+          (xorBytes
+            (lastFrag geom kem hops' j c
+              ++ (zeroFiller geom kem kdfS streamS hops' d' j).extract 0
+                ((geom.nrHops - hops'.size) * 𝓅))
+            (midFrag geom kem hops j fwd
+              ++ fwd.extract (2 + kem.ciphertextSize)
+                (2 + kem.ciphertextSize + (hops.size - (j + 1)) * 𝓅)
+              ++ (midPad geom kem kdfS streamS hops d j).extract 0
+                ((geom.nrHops - hops.size) * 𝓅)))
+        ++ T)).size = 2 + kem.ciphertextSize + geom.routingInfoLength)
+    (hs' : (relayFrontLast kem kdfS streamS geom hops' d' j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength) :
+    relayFront kem cipher macS kdfS streamS geom hops d payload j c
+      (xorBytes (U.extract 0 (geom.routingInfoLength - j * 𝓅))
+          (xorBytes
+            (lastFrag geom kem hops' j c
+              ++ (zeroFiller geom kem kdfS streamS hops' d' j).extract 0
+                ((geom.nrHops - hops'.size) * 𝓅))
+            (midFrag geom kem hops j fwd
+              ++ fwd.extract (2 + kem.ciphertextSize)
+                (2 + kem.ciphertextSize + (hops.size - (j + 1)) * 𝓅)
+              ++ (midPad geom kem kdfS streamS hops d j).extract 0
+                ((geom.nrHops - hops.size) * 𝓅)))
+        ++ T)
+      = relayFrontLast kem kdfS streamS geom hops' d' j c U := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  obtain ⟨X1, hX1⟩ : ∃ X1, X1 = lastFrag geom kem hops' j c
+      ++ (zeroFiller geom kem kdfS streamS hops' d' j).extract 0
+        ((geom.nrHops - hops'.size) * 𝓅) := ⟨_, rfl⟩
+  obtain ⟨X0, hX0⟩ : ∃ X0, X0 = midFrag geom kem hops j fwd
+      ++ fwd.extract (2 + kem.ciphertextSize)
+        (2 + kem.ciphertextSize + (hops.size - (j + 1)) * 𝓅)
+      ++ (midPad geom kem kdfS streamS hops d j).extract 0
+        ((geom.nrHops - hops.size) * 𝓅) := ⟨_, rfl⟩
+  rw [← hX1, ← hX0] at hfwd hs ⊢
+  obtain ⟨V, hV⟩ : ∃ V, V = xorBytes (U.extract 0 (geom.routingInfoLength - j * 𝓅))
+      (xorBytes X1 X0) ++ T := ⟨_, rfl⟩
+  rw [← hV] at hfwd hs ⊢
+  have hjp : j * 𝓅 + 𝓅 ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm 𝓅, ← Nat.succ_mul]
+    exact Nat.mul_le_mul_right _ (by omega)
+  have hUh : (U.extract 0 (geom.routingInfoLength - j * 𝓅)).size
+      = geom.routingInfoLength - j * 𝓅 := by
+    rw [ByteArray.size_extract, hU]
+    omega
+  have hVs : V.size = 𝓃 := by
+    rw [hV, ByteArray.size_append, size_xorBytes, hUh, hT, Nat.succ_mul]
+    omega
+  have h0 := relayFront_canon geom kem kdfS streamS cipher macS hvalid hmactag hops d payload j
+    c V fwd hj hlen hVs hc hfwd hs
+  have h1 := relayFrontLast_canon geom kem kdfS streamS hrouting hops' d' j c U hj' (by omega)
+    hU hc hs'
+  rw [← hX0] at h0
+  rw [← hX1] at h1
+  have hv0 : v0AD.size = 2 := rfl
+  have hap : (geom.nrHops - hops'.size) * 𝓅 ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm 𝓅]
+    exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+  have hzs : (zeroFiller geom kem kdfS streamS hops' d' j).size
+      = (geom.nrHops - hops'.size) * 𝓅 + j * 𝓅 := by
+    unfold zeroFiller
+    rw [fillerAtF_size kem kdfS streamS geom hrouting hops' _ _ j _ (by omega) (by
+        rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+        omega) (zeroBytes_size _) j (by omega), Nat.add_mul]
+  have hp1 := zeroFiller_front geom kem kdfS streamS hrouting hops' d' j hj' (by omega) j le_rfl
+  have hp0 := midPad_front geom kem kdfS streamS hvalid hops d j hj hlen j le_rfl
+  rw [hzs, hp1] at h1
+  rw [hp0, frontPadOf_congr geom kem kdfS streamS hops hops' _ _ j hkeys j le_rfl] at h0
+  have hFP : (frontPadOf geom kem kdfS streamS hops' (d'.1.toArray.extract 0 hops'.size) j
+      j).size = j * 𝓅 := by
+    rw [← hp1, ByteArray.size_extract, hzs]
+    omega
+  have hX1s : X1.size = geom.routingInfoLength - j * 𝓅 := by
+    rw [h1] at hs'
+    simp only [ByteArray.size_append, size_xorBytes, hc, hv0, hFP] at hs'
+    omega
+  have hX0s : X0.size = geom.routingInfoLength - j * 𝓅 := by
+    rw [h0] at hs
+    simp only [ByteArray.size_append, size_xorBytes, hc, hv0, hFP] at hs
+    omega
+  rw [h0, h1, hV, Util.Bytes.extract_append_of_le _ _ (by rw [size_xorBytes, hUh]),
+    extract_all _ _ (by rw [size_xorBytes, hUh]),
+    xorBytes_shift X0 X1 _ (hX0s.trans hX1s.symm) (hUh.trans hX0s.symm)]
 
 /-! ## The honest relay's answers as steps of the game -/
 
