@@ -195,7 +195,13 @@ World 1 reads the adversary's onion through three things only: its first layer, 
 the reply's layer at the relay, and the header of its last forward layer (`world1With`,
 `world1_eq`, for any scheme).
 
-Not proved yet: the MAC, payload cipher and keystream steps; the sender's keys; the last
+The MAC step is proved for both worlds (`backward0_keyedIdeal_sub_tagged_le`,
+`backward1_keyedIdeal_sub_tagged_le`): the relay may answer its ciphertext under its own header
+only, at the cost of a forgery. The bytes its MAC covers are the same in both worlds (`backM0`),
+since both show the adversary's own onion. The closed form of a keyed layer that this needs is
+stated for any route (`routeK_parts`), so one lemma serves the forward path and the reply.
+
+Not proved yet: the payload cipher and keystream steps; the sender's keys; the last
 comparison.
 
 ## How the bounds are built

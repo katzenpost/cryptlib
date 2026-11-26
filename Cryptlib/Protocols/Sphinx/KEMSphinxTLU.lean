@@ -1758,6 +1758,122 @@ theorem layer_zero_encap (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key ke
 omit [SampleableType kem.Plaintext] in
 include hvalid hmactag h16 in
 set_option maxHeartbeats 1000000 in
+/-- **A keyed layer over any route in closed form.** When the first layer can be built with the
+seed `s` at hop `j`, and the seeds in front do not make the KEM fail, then for any keys `t`
+given to hop `j`: the first layer is hop `j`'s layer wrapped once for each hop in front, and
+hop `j`'s layer is the bytes in front of its tag, their tag under its MAC key, and the bytes
+behind. -/
+theorem routeK_parts (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem))
+    (last : List RoutingCommand)
+    (hlast : ∀ x ∈ last, x ≠ RoutingCommand.null ∧ ∀ id b, x ≠ RoutingCommand.nextNodeHop id b)
+    (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ) (hj : j < R.hops.length) (pk : Key kem)
+    (sk : kem.PrivateKey) (hkey : (R.hops[j]'hj).key = pk) (hsk : pk.1 = kem.derivePublicKey sk)
+    (s : Vector UInt8 32) (hrelj : kem.Reliable (kem.stateFromSeed s)) (c : kem.Ciphertext)
+    (ss pkt : ByteArray)
+    (henc : kemEncap kem (ofVector (kem.encodePublicKey pk.1)) s
+      = .ok (ofVector (kem.encodeCiphertext c), ss))
+    (hpkt : RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem R last) (d.1.setIfInBounds
+        j s, d.2) payload 0 = .ok pkt)
+    (hrel : ∀ m, m < j → kem.Reliable (kem.stateFromSeed d.1.toArray[m]!))
+    (t : KeyTuple) :
+    layerPK kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload j (ofVector
+        (kem.encodeCiphertext c)) t 0
+        = .ok (wrapUp kem cipher macS kdfS streamS geom (RSOR.path kem R last) d 0 j
+      ((relayFrontAt kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload j
+          (ofVector (kem.encodeCiphertext c)) (ksOf streamS geom t))
+        ++ ofVector (macS.mac (ofVector t.2.2.1) (relayFrontAt kem cipher macS kdfS streamS geom
+            (RSOR.path kem R last) d payload j
+          (ofVector (kem.encodeCiphertext c)) (ksOf streamS geom t)))
+        ++ (relayBackAt kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload j
+          (ksOf streamS geom t) (encOf cipher t)))) ∧
+      (relayFrontAt kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload j
+          (ofVector (kem.encodeCiphertext c)) (ksOf streamS geom t)).size = 2 + kem.ciphertextSize
+              + geom.routingInfoLength ∧
+      layerPK kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload j (ofVector
+          (kem.encodeCiphertext c)) t j
+        = .ok ((relayFrontAt kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload j
+          (ofVector (kem.encodeCiphertext c)) (ksOf streamS geom t))
+        ++ ofVector (macS.mac (ofVector t.2.2.1) (relayFrontAt kem cipher macS kdfS streamS geom
+            (RSOR.path kem R last) d payload j
+          (ofVector (kem.encodeCiphertext c)) (ksOf streamS geom t)))
+        ++ (relayBackAt kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload j
+          (ksOf streamS geom t) (encOf cipher t))) := by
+  have hn := RSOR.path_size kem R last
+  have hposn : j < (RSOR.path kem R last).size := by
+    rw [hn]
+    exact hj
+  have hlen : (RSOR.path kem R last).size ≤ geom.nrHops := by
+    rw [hn]
+    exact R.length_le
+  have hpub : ((RSOR.path kem R last)[j]!).publicKey = ofVector (kem.encodePublicKey pk.1) := by
+    rw [RSOR.path_getElem! kem _ _ _ hj]
+    exact congrArg (fun k : Key kem => ofVector (kem.encodePublicKey k.1)) hkey
+  have hself : ∀ (sk' : kem.PrivateKey), kemSelfPublicKeyBytes kem
+      (ofVector (kem.encodePrivateKey sk')) = ofVector (kem.encodePublicKey
+        (kem.derivePublicKey sk')) := fun sk' => by
+    unfold kemSelfPublicKeyBytes
+    rw [toVecN_ofVector, kem.decode_encode_priv]
+  have hencj : kemEncap kem ((RSOR.path kem R last)[j]!).publicKey s
+      = .ok (ofVector (kem.encodeCiphertext c), ss) := by rw [hpub]; exact henc
+  have henc' : ∀ m, m < (RSOR.path kem R last).size → m ≠ j → ∃ ct ss',
+      kemEncap kem ((RSOR.path kem R last)[m]!).publicKey (d.1.toArray[m]!) = .ok (ct, ss') := by
+    intro m hm hmj
+    rw [hn] at hm
+    obtain ⟨ct, ss', he⟩ := layer_zero_encap kem cipher macS kdfS streamS geom R last
+        (d.1.setIfInBounds j s, d.2) _ pkt
+      hpkt m hm
+    refine ⟨ct, ss', ?_⟩
+    rw [RSOR.path_getElem! kem _ _ _ hm]
+    have hseed : (d.1.setIfInBounds j s).toArray[m]! = d.1.toArray[m]! := by
+      simp [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?, Ne.symm hmj]
+    rw [hseed] at he
+    exact he
+  have hsk' : ∀ m, m < j → ∃ skb, kemSelfPublicKeyBytes kem skb = ((RSOR.path kem R
+      last)[m]!).publicKey := by
+    intro m hm
+    have hm' : m < R.hops.length := lt_trans hm hj
+    obtain ⟨skm, hskm⟩ := (R.hops[m]'hm').key.2
+    refine ⟨ofVector (kem.encodePrivateKey skm), ?_⟩
+    rw [RSOR.path_getElem! kem _ _ _ hm', hself skm, ← hskm]
+  have hpp : kemSelfPublicKeyBytes kem (ofVector (kem.encodePrivateKey sk))
+      = ((RSOR.path kem R last)[j]!).publicKey := by rw [hpub, hself sk, ← hsk]
+  have hnn : ∀ m, m ≤ j → ∀ x ∈ ((RSOR.path kem R last)[m]!).commands, x ≠ RoutingCommand.null := by
+    intro m hm x hx
+    rw [RSOR.path_getElem! kem _ _ _ (lt_of_le_of_lt hm hj)] at hx
+    dsimp only at hx
+    split at hx
+    · exact (hlast x hx).1
+    · simp at hx
+  have hnh : ∀ m, m ≤ j → ∀ x ∈ ((RSOR.path kem R last)[m]!).commands, ∀ id b,
+      x ≠ RoutingCommand.nextNodeHop id b := by
+    intro m hm x hx
+    rw [RSOR.path_getElem! kem _ _ _ (lt_of_le_of_lt hm hj)] at hx
+    dsimp only at hx
+    split at hx
+    · exact (hlast x hx).2
+    · simp at hx
+  have hF := layerF_real kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload pkt j 0
+      s _ ss (Nat.zero_le _) hposn hlen
+    hencj hpkt
+  rw [layerF_eq_layerPK] at hF
+  obtain ⟨p, hp⟩ : ∃ p, layerPK kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload
+      j (ofVector (kem.encodeCiphertext c))
+      (keyTuple (deriveHopKeys kdfS ss)) 0 = .ok p := by
+    cases hl : layerPK kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload j
+        (ofVector (kem.encodeCiphertext c))
+        (keyTuple (deriveHopKeys kdfS ss)) 0 with
+    | ok p => exact ⟨p, rfl⟩
+    | error e =>
+      rw [hl] at hF
+      cases hF
+  exact layerPK_zero_parts kem cipher macS kdfS streamS geom hvalid hmactag h16 (RSOR.path kem R
+      last) d payload
+    (ofVector (kem.encodePrivateKey sk)) j (ofVector (kem.encodeCiphertext c)) t s ss hposn hlen
+    hencj hrelj henc' hrel hsk' hpp hnn hnh _ _ p hp
+
+omit [SampleableType kem.Plaintext] in
+include hvalid hmactag h16 in
+set_option maxHeartbeats 1000000 in
 /-- **The keyed onion in closed form.** When the onion can be built with the seed `s` at the
 honest relay's position, and the seeds in front do not make the KEM fail, then for any keys `t`
 given to the relay: the first layer of the keyed onion is the relay's layer wrapped once for
@@ -1808,85 +1924,13 @@ theorem onionK_parts (q : RSOR.Request kem geom) (r : RSOR.Randomness geom)
           (RSOR.body kem macS kdfS streamS geom q r) j
           (ofVector (kem.encodeCiphertext c)) (ksOf streamS geom t)).size = 2 +
               kem.ciphertextSize + geom.routingInfoLength := by
-  have hn := RSOR.path_size kem q.fwd [.recipient q.receiver]
-  have hposn : (j : ℕ) < (RSOR.path kem q.fwd [.recipient q.receiver]).size := by
-    rw [hn]
-    exact j.isLt
-  have hlen : (RSOR.path kem q.fwd [.recipient q.receiver]).size ≤ geom.nrHops := by
-    rw [hn]
-    exact q.fwd.length_le
-  have hpub : ((RSOR.path kem q.fwd [.recipient q.receiver])[(j : ℕ)]!).publicKey = ofVector
-      (kem.encodePublicKey pk.1) := by
-    rw [RSOR.path_getElem! kem _ _ _ j.isLt]
-    exact congrArg (fun k : Key kem => ofVector (kem.encodePublicKey k.1)) hkey
-  have hself : ∀ (sk' : kem.PrivateKey), kemSelfPublicKeyBytes kem
-      (ofVector (kem.encodePrivateKey sk')) = ofVector (kem.encodePublicKey
-        (kem.derivePublicKey sk')) := fun sk' => by
-    unfold kemSelfPublicKeyBytes
-    rw [toVecN_ofVector, kem.decode_encode_priv]
-  have hencj : kemEncap kem ((RSOR.path kem q.fwd [.recipient q.receiver])[(j : ℕ)]!).publicKey s
-      = .ok (ofVector (kem.encodeCiphertext c), ss) := by rw [hpub]; exact henc
-  have henc' : ∀ m, m < (RSOR.path kem q.fwd [.recipient q.receiver]).size → m ≠ (j : ℕ) → ∃ ct ss',
-      kemEncap kem ((RSOR.path kem q.fwd [.recipient q.receiver])[m]!).publicKey
-          (r.1.1.toArray[m]!) = .ok (ct, ss') := by
-    intro m hm hmj
-    rw [hn] at hm
-    obtain ⟨ct, ss', he⟩ := layer_zero_encap kem cipher macS kdfS streamS geom q.fwd
-        [.recipient q.receiver]
-      (setSeed geom r j s).1 _ pkt hpkt m hm
-    refine ⟨ct, ss', ?_⟩
-    rw [RSOR.path_getElem! kem _ _ _ hm]
-    have hseed : (setSeed geom r j s).1.1.toArray[m]! = r.1.1.toArray[m]! := by
-      simp [setSeed, Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?, Ne.symm hmj]
-    rw [hseed] at he
-    exact he
-  have hsk' : ∀ m, m < (j : ℕ) → ∃ skb, kemSelfPublicKeyBytes kem skb
-      = ((RSOR.path kem q.fwd [.recipient q.receiver])[m]!).publicKey := by
-    intro m hm
-    have hm' : m < q.fwd.hops.length := lt_trans hm j.isLt
-    obtain ⟨skm, hskm⟩ := (q.fwd.hops[m]'hm').key.2
-    refine ⟨ofVector (kem.encodePrivateKey skm), ?_⟩
-    rw [RSOR.path_getElem! kem _ _ _ hm', hself skm, ← hskm]
-  have hpp : kemSelfPublicKeyBytes kem (ofVector (kem.encodePrivateKey sk))
-      = ((RSOR.path kem q.fwd [.recipient q.receiver])[(j : ℕ)]!).publicKey := by rw [hpub,
-          hself sk, ← hsk]
-  have hnn : ∀ m, m ≤ (j : ℕ) → ∀ x ∈ ((RSOR.path kem q.fwd [.recipient
-      q.receiver])[m]!).commands, x ≠ RoutingCommand.null := by
-    intro m hm x hx
-    rw [RSOR.path_getElem! kem _ _ _ (lt_of_le_of_lt hm j.isLt)] at hx
-    dsimp only at hx
-    split at hx <;> simp at hx
-    subst hx
-    simp
-  have hnh : ∀ m, m ≤ (j : ℕ) → ∀ x ∈ ((RSOR.path kem q.fwd [.recipient
-      q.receiver])[m]!).commands, ∀ id b,
-      x ≠ RoutingCommand.nextNodeHop id b := by
-    intro m hm x hx
-    rw [RSOR.path_getElem! kem _ _ _ (lt_of_le_of_lt hm j.isLt)] at hx
-    dsimp only at hx
-    split at hx <;> simp at hx
-    subst hx
-    simp
-  have hF := layerF_real kem cipher macS kdfS streamS geom (RSOR.path kem q.fwd [.recipient
-      q.receiver]) r.1
-    (RSOR.body kem macS kdfS streamS geom q r) pkt j 0 s _ ss (Nat.zero_le _) hposn hlen hencj hpkt
-  rw [layerF_eq_layerPK] at hF
-  obtain ⟨p, hp⟩ : ∃ p, layerPK kem cipher macS kdfS streamS geom (RSOR.path kem q.fwd
-      [.recipient q.receiver]) r.1
-      (RSOR.body kem macS kdfS streamS geom q r) j (ofVector (kem.encodeCiphertext c))
-      (keyTuple (deriveHopKeys kdfS ss)) 0 = .ok p := by
-    cases hl : layerPK kem cipher macS kdfS streamS geom (RSOR.path kem q.fwd [.recipient
-        q.receiver]) r.1
-        (RSOR.body kem macS kdfS streamS geom q r) j (ofVector (kem.encodeCiphertext c))
-        (keyTuple (deriveHopKeys kdfS ss)) 0 with
-    | ok p => exact ⟨p, rfl⟩
-    | error e =>
-      rw [hl] at hF
-      cases hF
-  obtain ⟨hz, hsize, hjj⟩ := layerPK_zero_parts kem cipher macS kdfS streamS geom hvalid hmactag h16
-    (RSOR.path kem q.fwd [.recipient q.receiver]) r.1 (RSOR.body kem macS kdfS streamS geom q r)
-    (ofVector (kem.encodePrivateKey sk)) j (ofVector (kem.encodeCiphertext c)) t s ss hposn hlen
-    hencj hrelj henc' hrel hsk' hpp hnn hnh _ _ p hp
+  obtain ⟨hz, hsize, hjj⟩ := routeK_parts kem cipher macS kdfS streamS geom hvalid hmactag h16
+      q.fwd [.recipient q.receiver]
+    (fun x hx => by
+      rw [List.mem_singleton.1 hx]
+      exact ⟨by simp, by simp⟩)
+    r.1 (RSOR.body kem macS kdfS streamS geom q r) j j.isLt pk sk hkey hsk s hrelj c ss pkt henc
+    hpkt hrel t
   refine ⟨?_, ?_, hsize⟩
   · unfold onionK onionF
     rw [layerF_eq_layerPK, hz]
