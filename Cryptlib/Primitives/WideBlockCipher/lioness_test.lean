@@ -10,7 +10,8 @@ import Cryptlib.Util.HexBytes
 /-!
 # Lioness known-answer tests
 
-Checks `Lioness.chacha20Blake2b` against the rust-lioness vectors in `lioness_chacha20_blake2b.json`.
+Checks `Lioness.chacha20Blake2b` against the rust-lioness vectors in
+`lioness_chacha20_blake2b.json`.
 -/
 
 open Lean
@@ -32,7 +33,8 @@ def main : IO UInt32 := do
     match j.getObjVal? "primitive" >>= Json.getStr? with
     | .error e => do IO.eprintln e; pure 1
     | .ok prim =>
-      if prim ≠ "lioness_chacha20_blake2b" then do IO.eprintln s!"unexpected primitive: {prim}"; pure 1
+      if prim ≠ "lioness_chacha20_blake2b" then do
+        IO.eprintln s!"unexpected primitive: {prim}"; pure 1
       else match j.getObjVal? "vectors" >>= Json.getArr? with
         | .error e => do IO.eprintln e; pure 1
         | .ok arr => do

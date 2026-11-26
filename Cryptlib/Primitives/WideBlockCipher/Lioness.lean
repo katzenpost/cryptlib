@@ -90,7 +90,8 @@ theorem split_join (n : Nat) (x : ByteArray × ByteArray)
   simp only [split, ByteArray.size_append] at hx ⊢
   rw [← hx, extract_append_left, extract_append_right]
 
-/-- The four round keys and IVs cut from the key and IV: `(k1, iv1, k2 ‖ iv2, k3, iv3, k4 ‖ iv4)`. -/
+/-- The four round keys and IVs cut from the key and IV:
+`(k1, iv1, k2 ‖ iv2, k3, iv3, k4 ‖ iv4)`. -/
 structure RoundKeys where
   k1 : ByteArray
   iv1 : ByteArray

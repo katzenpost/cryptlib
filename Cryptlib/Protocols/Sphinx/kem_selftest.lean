@@ -727,7 +727,8 @@ def runSuite (schemeName : String) (kem : KEM) : IO Bool := do
     ok := ok && rsorOk
     let lionessOk ← runRSORRound Cryptlib.Primitives.WideBlockCipher.Lioness.sphinx kem geom5surb
       hvalid5s h165s nFwd nBack
-    IO.println s!"RSOR scheme with Lioness ({nFwd} forward, {nBack} back of 5): {if lionessOk then "ok" else "FAIL"}"
+    IO.println (s!"RSOR scheme with Lioness ({nFwd} forward, {nBack} back of 5): "
+      ++ (if lionessOk then "ok" else "FAIL"))
     ok := ok && lionessOk
 
   for (atExit, tag) in [(true, false), (false, false), (true, true), (false, true)] do

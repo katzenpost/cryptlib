@@ -1547,7 +1547,8 @@ def unwrapKEMKeysD (kem : KEM) (macS : MAC) (geom : Geometry)
       = (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) pkt.size).size)
     (h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength) :
     Except String
-      (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
+      (Option ByteArray × Vector UInt8 32 × List RoutingCommand
+        × Option (Vector UInt8 pkt.size)) := do
   let geOff := 2
   let riOff := geOff + kem.ciphertextSize
   let macOff := riOff + geom.routingInfoLength
@@ -1654,7 +1655,8 @@ def unwrapKEMWith (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KD
     (streamS : StreamCipher) (geom : Geometry) (dec : ByteArray → Except String ByteArray)
     (pkt : ByteArray) :
     Except String
-      (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
+      (Option ByteArray × Vector UInt8 32 × List RoutingCommand
+        × Option (Vector UInt8 pkt.size)) := do
   let geOff := 2
   let riOff := geOff + kem.ciphertextSize
   let macOff := riOff + geom.routingInfoLength

@@ -76,7 +76,8 @@ theorem key_of_keygen (k : Key nike) (sk : nike.PrivateKey)
 /-! ## The sender's hop keys -/
 
 /-- The group action on encoded keys. Empty when `pk` is not the encoding of a safe key. -/
-def dh (sk : nike.PrivateKey) (pk : ByteArray) : ByteArray := (nikeDH nike sk pk).toOption.getD .empty
+def dh (sk : nike.PrivateKey) (pk : ByteArray) : ByteArray :=
+  (nikeDH nike sk pk).toOption.getD .empty
 
 /-- The factor a relay blinds the group element by. -/
 def factor (k : HopKeys) : nike.PrivateKey :=
@@ -121,7 +122,8 @@ def peel (k : HopKeys) (pkt : ByteArray) : ByteArray :=
     | .error _ => default
   let raw := pkt.extract payloadOff pkt.size
   let dec :=
-    if raw.size > 0 then cipher.decrypt k.payloadEncryption.toArray (ofVector k.headerEncryptionIV) raw
+    if raw.size > 0 then
+      cipher.decrypt k.payloadEncryption.toArray (ofVector k.headerEncryptionIV) raw
     else raw
   v0AD ++ nikeBlind nike (pkt.extract 2 riOff) k.blindingFactor
     ++ b.extract geom.perHopRoutingInfoLength b.size ++ ofVector mac
@@ -196,7 +198,8 @@ def Builds (R : Protocols.RSOR.Route geom.nrHops Name (Key nike)) (last : List R
 /-- The reply packet the exit relay builds from the SURB, and the relay it sends it to. -/
 def replyPacket (q : Request nike geom) (r : Randomness nike geom) (m : Msg geom) :
     ByteArray × Name :=
-  match SURB.newPacketFromSURB cipher geom (surb nike macS kdfS streamS geom q r).1 (pad geom m) with
+  match SURB.newPacketFromSURB cipher geom (surb nike macS kdfS streamS geom q r).1
+      (pad geom m) with
   | .ok x => x
   | .error _ => (.empty, default)
 
@@ -335,7 +338,8 @@ theorem trace_size (sprp : Array SPRPKey) (P : ByteArray) (i : ℕ) :
 
 theorem trace_succ (sprp : Array SPRPKey) (P : ByteArray) (i : ℕ) (hi : i < sprp.size) :
     trace cipher sprp P i
-      = trace cipher sprp (cipher.decrypt sprp[i]!.key.toArray (ofVector sprp[i]!.iv) P) (i + 1) := by
+      = trace cipher sprp (cipher.decrypt sprp[i]!.key.toArray (ofVector sprp[i]!.iv) P)
+        (i + 1) := by
   funext j
   induction j with
   | zero =>
@@ -455,7 +459,8 @@ theorem layer_ok (hops : Array PathHop) (d : Draw nike geom) (payload : ByteArra
 theorem layer_succ (hops : Array PathHop) (d : Draw nike geom) (payload : ByteArray) (i : ℕ)
     (pkt : ByteArray) (h : layer nike cipher macS kdfS streamS geom hops d payload i = .ok pkt) :
     layer nike cipher macS kdfS streamS geom hops d payload (i + 1)
-      = .ok (peel nike cipher streamS geom (hopKey nike kdfS (clientKey nike geom d) hops i) pkt) := by
+      = .ok (peel nike cipher streamS geom (hopKey nike kdfS (clientKey nike geom d) hops i)
+        pkt) := by
   obtain ⟨p, hp, rfl⟩ := (layer_ok nike cipher macS kdfS streamS geom hops d payload i pkt).1 h
   exact (layer_ok nike cipher macS kdfS streamS geom hops d payload (i + 1) _).2
     ⟨p, hp, by rw [hopKeys_succ, List.foldl_append]; rfl⟩
@@ -614,7 +619,8 @@ theorem unwrap_layer (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize =
       ++ ((s (hops.size - k)).1 ++ (if k > 0 then riPadding[k - 1]! else ByteArray.empty))
       ++ (s (hops.size - k)).2, fun _ _ => rfl⟩
   have hpsize := fun k (hk : k < hops.size) => hopPacket_size nike macS geom hops keys groupElements
-    riKeyStream riPadding sprpKeys hops.size s t hvalid hmactag hs0size hstep hgsize hgesize hpadsize
+    riKeyStream riPadding sprpKeys hops.size s t hvalid hmactag hs0size hstep hgsize hgesize
+    hpadsize
     htsize ht0size hsprp hgen k hk
   have hHsize : ∀ k, k < hops.size → (H k).size = geom.headerLength := by
     intro k hk

@@ -501,7 +501,8 @@ IV only for one keystream.** -/
 theorem procKeys_eq_procKeysD (t : KeyTuple) (pkt : ByteArray) :
     procKeys kem cipher macS streamS geom t pkt
       = procKeysD kem macS geom t.2.2.1
-          (streamS.keystream (ofVector t.2.2.2) (ofVector t.2.1) (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+          (streamS.keystream (ofVector t.2.2.2) (ofVector t.2.1)
+            (geom.routingInfoLength + geom.perHopRoutingInfoLength))
           (cipher.decrypt t.1.toArray (ofVector t.2.1)
             (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) pkt.size))
           pkt := by
@@ -512,7 +513,8 @@ theorem procKeys_eq_procKeysD (t : KeyTuple) (pkt : ByteArray) :
       K.headerMAC = t.2.2.1 → K.headerEncryption = t.2.2.2 →
       ∀ tag h1, unwrapKEMKeys kem cipher macS streamS geom K tag pkt h1
         = unwrapKEMKeysD kem macS geom t.2.2.1
-            (streamS.keystream (ofVector t.2.2.2) (ofVector t.2.1) (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+            (streamS.keystream (ofVector t.2.2.2) (ofVector t.2.1)
+              (geom.routingInfoLength + geom.perHopRoutingInfoLength))
             tag pkt
             (cipher.decrypt t.1.toArray (ofVector t.2.1)
               (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) pkt.size))

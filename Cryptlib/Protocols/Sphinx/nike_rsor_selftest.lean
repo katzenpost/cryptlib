@@ -143,7 +143,8 @@ def runSuite (schemeName : String) (nike : NIKE) : IO Bool := do
   let mut ok := true
   for (nFwd, nBack) in [(1, 1), (3, 2), (5, 5), (2, 0)] do
     let roundOk ← runRound nike geom hvalid h16 nFwd nBack
-    IO.println s!"RSOR scheme ({nFwd} forward, {nBack} back of 5): {if roundOk then "ok" else "FAIL"}"
+    IO.println (s!"RSOR scheme ({nFwd} forward, {nBack} back of 5): "
+      ++ (if roundOk then "ok" else "FAIL"))
     ok := ok && roundOk
   pure ok
 

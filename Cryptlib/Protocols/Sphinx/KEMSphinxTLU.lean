@@ -1333,7 +1333,8 @@ theorem layerPast_real (hops : Array PathHop) (d : RSOR.Draw geom) (payload : By
     (henc : kemEncap kem (hops[j]!).publicKey s = .ok (c, ss)) :
     layerPast kem cipher macS kdfS streamS geom hops d payload j
         (ksOf streamS geom (keyTuple (deriveHopKeys kdfS ss))) i
-      = RSOR.layer kem cipher macS kdfS streamS geom hops (d.1.setIfInBounds j s, d.2) payload i := by
+      = RSOR.layer kem cipher macS kdfS streamS geom hops (d.1.setIfInBounds j s, d.2) payload
+        i := by
   have hj : j < hops.size := by omega
   have hsz : ((d.1.setIfInBounds j s).toArray.extract 0 hops.size).size = hops.size := by
     simp; omega
