@@ -28,6 +28,87 @@ With the honest relay's keys used up, world 0 of SLU← is compared with the wor
 relay sends on an onion built like a reply layer (`replySwap`). On the backward path the reply's
 next layer is a first layer over the rest of the path. -/
 
+section Uniform
+
+/-- **The two parts of a uniform string are uniform.** -/
+theorem evalDistEq_split {δ : Type} {a b n : ℕ} (hn : a + b = n)
+    (K : ByteArray → ByteArray → ProbComp δ) :
+    ($ᵗ (Vector UInt8 n) >>= fun u => K ((ofVector u).extract 0 a) ((ofVector u).extract a n))
+      =ᵈ (do
+        let x ← $ᵗ (Vector UInt8 a)
+        let y ← $ᵗ (Vector UInt8 b)
+        K (ofVector x) (ofVector y)) := by
+  have e0 : ∀ (x : Vector UInt8 a) (y : Vector UInt8 b),
+      (ofVector (padFiller hn (zeroBytes 0) x y)).extract 0 a = ofVector x
+        ∧ (ofVector (padFiller hn (zeroBytes 0) x y)).extract a n = ofVector y := by
+    intro x y
+    rw [ofVector_padFiller, xorBytes_zeroBytes]
+    constructor
+    · have h1 := Util.Bytes.extract_append_left (ofVector x) (ofVector y)
+      rwa [Util.Bytes.size_ofVector] at h1
+    · have h1 := Util.Bytes.extract_append_right (ofVector x) (ofVector y)
+      rwa [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector, hn] at h1
+  have h := (evalDistEq_pair_of_bijective (padFiller_bijective hn (zeroBytes 0))
+    (fun u : Vector UInt8 n => K ((ofVector u).extract 0 a) ((ofVector u).extract a n))).symm
+  simpa only [(e0 _ _).1, (e0 _ _).2] using h
+
+/-- **A region of a uniform string as the tail of a keystream.** A keystream whose head is a
+uniform string under any mask, and whose tail is `t` bytes of another uniform string under a
+fixed mask, is a uniform keystream. -/
+theorem evalDistEq_headRegion {δ : Type} {n a t h m : ℕ} (hat : a + t ≤ n) (hm : h + t = m)
+    (A : Vector UInt8 n → ByteArray → ByteArray) (B : ByteArray)
+    (K : Vector UInt8 m → ProbComp δ) :
+    (do
+      let P ← $ᵗ (Vector UInt8 n)
+      let U ← $ᵗ (Vector UInt8 m)
+      K (Util.Bytes.toVecN m
+        (xorBytes ((ofVector U).extract 0 h) (A P ((ofVector U).extract h m))
+          ++ xorBytes ((ofVector P).extract a (a + t)) B)))
+      =ᵈ ($ᵗ (Vector UInt8 m) >>= K) := by
+  have hc : a + (n - a) = n := by omega
+  have hr : t + (n - a - t) = n - a := by omega
+  have e0 : ∀ (x : Vector UInt8 a) (r : Vector UInt8 (n - a)),
+      (ofVector (padFiller hc (zeroBytes 0) x r)).extract a (a + t)
+        = (ofVector r).extract 0 t := by
+    intro x r
+    rw [ofVector_padFiller, xorBytes_zeroBytes,
+      Util.Bytes.extract_append_of_ge _ _ (by rw [Util.Bytes.size_ofVector]),
+      Util.Bytes.size_ofVector, Nat.sub_self, Nat.add_sub_cancel_left]
+  -- the head: a uniform string under any mask
+  have head : ∀ (P : Vector UInt8 n) (C : ByteArray),
+      ($ᵗ (Vector UInt8 m) >>= fun U => K (Util.Bytes.toVecN m
+        (xorBytes ((ofVector U).extract 0 h) (A P ((ofVector U).extract h m)) ++ C)))
+      =ᵈ ($ᵗ (Vector UInt8 h) >>= fun x => K (Util.Bytes.toVecN m (ofVector x ++ C))) :=
+    fun P C => by
+    refine EvalDistEq.trans (evalDistEq_split hm fun X Y =>
+      K (Util.Bytes.toVecN m (xorBytes X (A P Y) ++ C))) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+    refine EvalDistEq.trans (EvalDistEq.bind_right _ fun y => ?_)
+      (OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 t)) _)
+    have h5 := evalDistEq_otp h (A P (ofVector y))
+      (fun z => K (Util.Bytes.toVecN m (ofVector z ++ C)))
+    simpa only [Util.Bytes.ofVector_toVecN _
+      ((size_xorBytes _ _).trans (Util.Bytes.size_ofVector _))] using h5
+  -- the region: `t` bytes of a uniform string are uniform
+  have region : ∀ J : ByteArray → ProbComp δ,
+      ($ᵗ (Vector UInt8 n) >>= fun P => J ((ofVector P).extract a (a + t)))
+      =ᵈ ($ᵗ (Vector UInt8 t) >>= fun y => J (ofVector y)) := fun J => by
+    refine EvalDistEq.trans (evalDistEq_pair_of_bijective
+      (padFiller_bijective hc (zeroBytes 0))
+      (fun P : Vector UInt8 n => J ((ofVector P).extract a (a + t)))).symm ?_
+    simp only [e0]
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 a)) _) ?_
+    refine EvalDistEq.trans (evalDistEq_split hr fun X _ => J X) ?_
+    exact EvalDistEq.bind_right _ fun y =>
+      OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 (n - a - t))) _
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun P => head P _) ?_
+  refine EvalDistEq.trans (region fun T =>
+    $ᵗ (Vector UInt8 h) >>= fun x => K (Util.Bytes.toVecN m (ofVector x ++ xorBytes T B))) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact evalDistEq_pair_of_bijective (padFiller_bijective hm B) K
+
+end Uniform
+
 section RestOfPath
 
 variable (kem : KEM) (geom : Geometry)
@@ -345,17 +426,31 @@ theorem relayFront_headShift (hvalid : geom.ValidForKEM kem) (hmactag : macS.tag
     extract_all _ _ (by rw [size_xorBytes, hUh]),
     xorBytes_shift X0 X1 _ (hX0s.trans hX1s.symm) (hUh.trans hX0s.symm)]
 
-/-- A draw whose seeds after position `j` and whose padding are another draw's. -/
-def joinDraw (d d' : RSOR.Draw geom) (j : ℕ) : RSOR.Draw geom :=
+/-- A draw whose seeds after position `j` and whose first `a` bytes of padding are another
+draw's. -/
+def joinDraw (d d' : RSOR.Draw geom) (j a : ℕ) : RSOR.Draw geom :=
   (Vector.ofFn fun i : Fin geom.nrHops =>
     if i.val ≤ j then d.1[i.val]'i.isLt else d'.1[i.val - (j + 1)]'(by have := i.isLt; omega),
-    d'.2)
+    Vector.ofFn fun i : Fin geom.routingInfoLength =>
+      if i.val < a then d'.2[i.val]'i.isLt else d.2[i.val]'i.isLt)
+
+omit kem kdfS streamS cipher macS in
+/-- The first `a` bytes of a joined draw's padding are the other draw's. -/
+theorem joinDraw_prefix (d d' : RSOR.Draw geom) (j a : ℕ) :
+    (ofVector (joinDraw geom d d' j a).2).extract 0 a = (ofVector d'.2).extract 0 a := by
+  apply ByteArray.ext_getElem
+  · simp [ByteArray.size_extract]
+  · intro i h1 h2
+    have hi : i < a := by
+      simp [ByteArray.size_extract] at h1
+      omega
+    simp [ofVector, ByteArray.getElem_eq_getElem_data, joinDraw, hi]
 
 omit kem kdfS streamS cipher macS in
 /-- The seeds of a joined draw after position `j` are the other draw's first seeds. -/
-theorem joinDraw_extract_after (d d' : RSOR.Draw geom) (j n : ℕ) (hn : n ≤ geom.nrHops) :
-    ((joinDraw geom d d' j).1.toArray.extract 0 n).extract (j + 1)
-        ((joinDraw geom d d' j).1.toArray.extract 0 n).size
+theorem joinDraw_extract_after (d d' : RSOR.Draw geom) (j a n : ℕ) (hn : n ≤ geom.nrHops) :
+    ((joinDraw geom d d' j a).1.toArray.extract 0 n).extract (j + 1)
+        ((joinDraw geom d d' j a).1.toArray.extract 0 n).size
       = d'.1.toArray.extract 0 (n - (j + 1)) := by
   apply Array.ext
   · simp
@@ -366,14 +461,91 @@ theorem joinDraw_extract_after (d d' : RSOR.Draw geom) (j n : ℕ) (hn : n ≤ g
       omega
     simp [joinDraw, show ¬ (j + 1 + i ≤ j) by omega]
 
+/-- What joining two draws leaves over: the first draw's seeds after position `j`, moved to
+the front of the second draw's, and the second draw's padding with the first `a` bytes of the
+first's. -/
+def coJoin (d d' : RSOR.Draw geom) (j a : ℕ) : RSOR.Draw geom :=
+  (Vector.ofFn fun i : Fin geom.nrHops =>
+    if h : i.val + (j + 1) < geom.nrHops then d.1[i.val + (j + 1)]'h else d'.1[i.val]'i.isLt,
+    Vector.ofFn fun i : Fin geom.routingInfoLength =>
+      if i.val < a then d.2[i.val]'i.isLt else d'.2[i.val]'i.isLt)
+
+omit kem kdfS streamS cipher macS in
+/-- Joining twice gives the first draw back. -/
+theorem joinDraw_joinDraw (d d' : RSOR.Draw geom) (j a : ℕ) :
+    joinDraw geom (joinDraw geom d d' j a) (coJoin geom d d' j a) j a = d := by
+  obtain ⟨s, f⟩ := d
+  obtain ⟨s', f'⟩ := d'
+  unfold joinDraw coJoin
+  refine Prod.ext (Vector.ext fun i hi => ?_) (Vector.ext fun i hi => ?_)
+  · by_cases h : i ≤ j
+    · simp [h]
+    · have h2 : i - (j + 1) + (j + 1) = i := by omega
+      simp [h, h2, hi]
+  · by_cases h : i < a <;> simp [h]
+
+omit kem kdfS streamS cipher macS in
+/-- Joining twice gives the second draw back. -/
+theorem coJoin_coJoin (d d' : RSOR.Draw geom) (j a : ℕ) :
+    coJoin geom (joinDraw geom d d' j a) (coJoin geom d d' j a) j a = d' := by
+  obtain ⟨s, f⟩ := d
+  obtain ⟨s', f'⟩ := d'
+  unfold joinDraw coJoin
+  refine Prod.ext (Vector.ext fun i hi => ?_) (Vector.ext fun i hi => ?_)
+  · by_cases h : i + (j + 1) < geom.nrHops
+    · simp [h, show ¬ (i + (j + 1) ≤ j) by omega]
+    · simp [h]
+  · by_cases h : i < a <;> simp [h]
+
+omit kem kdfS streamS cipher macS in
+/-- Past its first `a` bytes, the leftover's padding is the second draw's. -/
+theorem coJoin_region (d d' : RSOR.Draw geom) (j a t : ℕ) :
+    (ofVector (coJoin geom d d' j a).2).extract a (a + t) = (ofVector d'.2).extract a (a + t) := by
+  apply ByteArray.ext_getElem
+  · simp [ByteArray.size_extract]
+  · intro i h1 h2
+    simp [ofVector, ByteArray.getElem_eq_getElem_data, coJoin]
+
+/-- World 0's randomness, from the randomness of the world where the relay sends on a reply
+layer over the rest of the backward path and the randomness of that layer. -/
+def backMix (r r' : RSOR.Randomness geom) (j a : ℕ) : RSOR.Randomness geom :=
+  (r.1, joinDraw geom r.2.1 r'.1 j a, r.2.2.1, r'.2.2.2)
+
+/-- What `backMix` leaves over. -/
+def backCo (r r' : RSOR.Randomness geom) (j a : ℕ) : RSOR.Randomness geom :=
+  (coJoin geom r.2.1 r'.1 j a, r'.2.1, r'.2.2.1, r.2.2.2)
+
+omit kem kdfS streamS cipher macS in
+/-- **The mixed randomness is uniform.** A game that reads two uniform draws through `backMix`
+and `backCo` reads two uniform draws. -/
+theorem evalDistEq_backMix {δ : Type} (j a : ℕ)
+    (K : RSOR.Randomness geom → RSOR.Randomness geom → ProbComp δ) :
+    (do
+      let r ← $ᵗ (RSOR.Randomness geom)
+      let r' ← $ᵗ (RSOR.Randomness geom)
+      K (backMix geom r r' j a) (backCo geom r r' j a))
+      =ᵈ (do
+        let r ← $ᵗ (RSOR.Randomness geom)
+        let r' ← $ᵗ (RSOR.Randomness geom)
+        K r r') := by
+  have hb : Function.Bijective (Function.uncurry fun (r r' : RSOR.Randomness geom) =>
+      (backMix geom r r' j a, backCo geom r r' j a)) :=
+    Function.Involutive.bijective fun p => by
+      obtain ⟨r, r'⟩ := p
+      simp only [Function.uncurry, backMix, backCo, joinDraw_joinDraw, coJoin_coJoin]
+  have hid : Function.Bijective (Function.uncurry fun (x y : RSOR.Randomness geom) => (x, y)) :=
+    Function.bijective_id
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective hb fun p => K p.1 p.2) ?_
+  exact (evalDistEq_pair_of_bijective hid fun p => K p.1 p.2).symm
+
 omit streamS cipher macS in
 /-- The keys of the hops up to position `j` under a joined draw are the first draw's, whatever
 the last hop's commands. -/
 theorem kemHopKeys_joinDraw (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem))
-    (last last' : List RoutingCommand) (d d' : RSOR.Draw geom) (j m : ℕ) (hm : m ≤ j)
+    (last last' : List RoutingCommand) (d d' : RSOR.Draw geom) (j a m : ℕ) (hm : m ≤ j)
     (hj : j < R.hops.length) :
     kemHopKeys kem kdfS (RSOR.path kem R last)
-        ((joinDraw geom d d' j).1.toArray.extract 0 (RSOR.path kem R last).size) m
+        ((joinDraw geom d d' j a).1.toArray.extract 0 (RSOR.path kem R last).size) m
       = kemHopKeys kem kdfS (RSOR.path kem R last') (d.1.toArray.extract 0 (RSOR.path kem R
           last').size) m := by
   have hle := R.length_le
@@ -388,7 +560,7 @@ header bytes it has on a second path of the same length under the first draw, an
 of the rest of the path under the second draw. Its head is the second path's keystream shifted
 by the difference of the two routing informations; its tail sets the next layer's filler to
 the second draw's padding. -/
-def backShift (hops hops' : Array PathHop) (d0 d : RSOR.Draw geom) (j : ℕ)
+def backShift (hops hops' : Array PathHop) (d0 d dS : RSOR.Draw geom) (j : ℕ)
     (U fwd fwd' : ByteArray) : ByteArray :=
   (xorBytes (U.extract 0 (geom.routingInfoLength - j * geom.perHopRoutingInfoLength))
         (xorBytes (midFrag geom kem hops' j fwd'
@@ -401,7 +573,7 @@ def backShift (hops hops' : Array PathHop) (d0 d : RSOR.Draw geom) (j : ℕ)
           (2 + kem.ciphertextSize + (hops.size - (j + 1)) * geom.perHopRoutingInfoLength)
         ++ (midPad geom kem kdfS streamS hops d0 j).extract 0 ((geom.nrHops - hops.size) *
             geom.perHopRoutingInfoLength))))
-    ++ (xorBytes ((ofVector d0.2).extract ((geom.nrHops - hops.size) *
+    ++ (xorBytes ((ofVector dS.2).extract ((geom.nrHops - hops.size) *
         geom.perHopRoutingInfoLength) (((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength) +
         (j + 1) * geom.perHopRoutingInfoLength))
       ((fillerAtF kem kdfS streamS geom hops (d0.1.toArray.extract 0 hops.size)
@@ -426,17 +598,20 @@ theorem backShift_spec (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize =
     (hfwd : RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem (R.drop (j + 1)) last) dS
         payload 0 = .ok fwd) :
     (backShift kem geom kdfS streamS (RSOR.path kem R last) (RSOR.path kem R last') (joinDraw geom
-        d dS j) d j U fwd fwd').size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)
-    ∧ relayFront kem cipher macS kdfS streamS geom (RSOR.path kem R last) (joinDraw geom d dS j)
-        payload j c
+        d dS j ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)) d dS j
+        U fwd fwd').size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+    ∧ relayFront kem cipher macS kdfS streamS geom (RSOR.path kem R last) (joinDraw geom d dS j
+        ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)) payload j c
         (backShift kem geom kdfS streamS (RSOR.path kem R last) (RSOR.path kem R last') (joinDraw
-            geom d dS j) d j U fwd fwd')
+            geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)) d dS j U fwd fwd')
       = relayFront kem cipher macS kdfS streamS geom (RSOR.path kem R last') d payload j c U
     ∧ ∀ i, j + 1 + i ≤ R.hops.length →
-      layerPast kem cipher macS kdfS streamS geom (RSOR.path kem R last) (joinDraw geom d dS j)
-          payload j
+      layerPast kem cipher macS kdfS streamS geom (RSOR.path kem R last) (joinDraw geom d dS j
+          ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)) payload j
           (backShift kem geom kdfS streamS (RSOR.path kem R last) (RSOR.path kem R last') (joinDraw
-              geom d dS j) d j U fwd fwd') (j + 1 + i)
+              geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+              geom.perHopRoutingInfoLength)) d dS j U fwd fwd') (j + 1 + i)
         = RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem (R.drop (j + 1)) last) dS
             payload i := by
   obtain ⟨-, -, hrouting, -⟩ := id hvalid
@@ -461,98 +636,124 @@ theorem backShift_spec (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize =
     rw [← Nat.add_mul, hszS]
     congr 1
     omega
-  have hf : ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R
-      last).size) * geom.perHopRoutingInfoLength)).size = ((geom.nrHops - (RSOR.path kem R
-      last).size) * geom.perHopRoutingInfoLength) := by
+  have hf : ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+      geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size) *
+      geom.perHopRoutingInfoLength)).size = ((geom.nrHops - (RSOR.path kem R last).size) *
+      geom.perHopRoutingInfoLength) := by
     rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
     omega
-  have hT : ((ofVector (joinDraw geom d dS j).2).extract ((geom.nrHops - (RSOR.path kem R
-      last).size) * geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R last).size) *
+  have hT : ((ofVector dS.2).extract ((geom.nrHops - (RSOR.path kem R last).size) *
+      geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R last).size) *
       geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength)).size
       = (j + 1) * geom.perHopRoutingInfoLength := by
     rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
     omega
-  have hseeds := joinDraw_extract_after geom d dS j (RSOR.path kem R last).size hlen0
+  have hseeds := joinDraw_extract_after geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+      geom.perHopRoutingInfoLength) (RSOR.path kem R last).size hlen0
   rw [show (RSOR.path kem R last).size - (j + 1) = (RSOR.path kem (R.drop (j + 1)) last).size by rw
       [hszS, hsz0]] at hseeds
   have hfill : ∀ H : ByteArray, H.size = (geom.routingInfoLength + geom.perHopRoutingInfoLength) -
       (j + 1) * geom.perHopRoutingInfoLength →
-      fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS
-          j).1.toArray.extract 0 (RSOR.path kem R last).size)
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)) j
-        (H ++ (xorBytes ((ofVector (joinDraw geom d dS j).2).extract ((geom.nrHops - (RSOR.path kem
-            R last).size) * geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R
-            last).size) * geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength))
-      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS
-          j).1.toArray.extract 0 (RSOR.path kem R last).size)
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
+      fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS j ((geom.nrHops -
+          (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).1.toArray.extract 0
+          (RSOR.path kem R last).size)
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)) j
+        (H ++ (xorBytes ((ofVector dS.2).extract ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength))
+      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS j ((geom.nrHops
+          - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).1.toArray.extract 0
+          (RSOR.path kem R last).size)
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
             geom.perHopRoutingInfoLength)) (j + 1)).extract
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j).2).extract 0
-            ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).size + (j
-            + 1) * geom.perHopRoutingInfoLength)))) (j + 1)
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j
+            ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size + (j + 1) *
+            geom.perHopRoutingInfoLength)))) (j + 1)
       = (ofVector dS.2).extract 0 ((geom.nrHops - (RSOR.path kem (R.drop (j + 1)) last).size) *
           geom.perHopRoutingInfoLength) := fun H hH => by
-    rw [fillerAtF_target kem geom kdfS streamS hrouting _ _ _ j H _ hH hT hlen0 hj0 hf, ← hpadS]
+    rw [fillerAtF_target kem geom kdfS streamS hrouting _ _ _ j H _ hH hT hlen0 hj0 hf,
+      joinDraw_prefix, ← hpadS]
     exact extract_adjacent _ 0 _ _ (Nat.zero_le _) (Nat.le_add_right _ _)
       (by rw [Util.Bytes.size_ofVector]; exact hpad)
   have hdrop := fun (H : ByteArray) (hH : H.size = (geom.routingInfoLength +
       geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength) =>
-    layerPast_drop kem geom kdfS streamS cipher macS R last (joinDraw geom d dS j) dS payload j
-      (H ++ (xorBytes ((ofVector (joinDraw geom d dS j).2).extract ((geom.nrHops - (RSOR.path kem R
-          last).size) * geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R last).size)
-          * geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength))
-      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS
-          j).1.toArray.extract 0 (RSOR.path kem R last).size)
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
+    layerPast_drop kem geom kdfS streamS cipher macS R last (joinDraw geom d dS j ((geom.nrHops -
+        (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)) dS payload j
+      (H ++ (xorBytes ((ofVector dS.2).extract ((geom.nrHops - (RSOR.path kem R last).size) *
+          geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R last).size) *
+          geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength))
+      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS j ((geom.nrHops
+          - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).1.toArray.extract 0
+          (RSOR.path kem R last).size)
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
             geom.perHopRoutingInfoLength)) (j + 1)).extract
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j).2).extract 0
-            ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).size + (j
-            + 1) * geom.perHopRoutingInfoLength)))) hseeds (hfill H hH)
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j
+            ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size + (j + 1) *
+            geom.perHopRoutingInfoLength)))) hseeds (hfill H hH)
   have hZ : (zeroBytes (geom.routingInfoLength - j * geom.perHopRoutingInfoLength)).size =
       (geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
       geom.perHopRoutingInfoLength := by
     rw [zeroBytes_size, Nat.succ_mul]
     rw [Nat.succ_mul] at hjp
     omega
-  have hTs : (xorBytes ((ofVector (joinDraw geom d dS j).2).extract ((geom.nrHops - (RSOR.path kem
-      R last).size) * geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R last).size) *
-      geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength))
-      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS
-          j).1.toArray.extract 0 (RSOR.path kem R last).size)
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
-            geom.perHopRoutingInfoLength)) (j + 1)).extract
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j).2).extract 0
-            ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).size + (j
-            + 1) * geom.perHopRoutingInfoLength))).size = (j + 1) * geom.perHopRoutingInfoLength :=
-            by
-    rw [size_xorBytes, hT]
-  have hU1 : (zeroBytes (geom.routingInfoLength - j * geom.perHopRoutingInfoLength) ++ (xorBytes
-      ((ofVector (joinDraw geom d dS j).2).extract ((geom.nrHops - (RSOR.path kem R last).size) *
+  have hTs : (xorBytes ((ofVector dS.2).extract ((geom.nrHops - (RSOR.path kem R last).size) *
       geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R last).size) *
       geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength))
-      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS
-          j).1.toArray.extract 0 (RSOR.path kem R last).size)
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
+      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS j ((geom.nrHops
+          - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).1.toArray.extract 0
+          (RSOR.path kem R last).size)
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
             geom.perHopRoutingInfoLength)) (j + 1)).extract
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j).2).extract 0
-            ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).size + (j
-            + 1) * geom.perHopRoutingInfoLength)))).size = (geom.routingInfoLength +
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j
+            ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size + (j + 1) *
+            geom.perHopRoutingInfoLength))).size = (j + 1) * geom.perHopRoutingInfoLength := by
+    rw [size_xorBytes, hT]
+  have hU1 : (zeroBytes (geom.routingInfoLength - j * geom.perHopRoutingInfoLength) ++ (xorBytes
+      ((ofVector dS.2).extract ((geom.nrHops - (RSOR.path kem R last).size) *
+      geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R last).size) *
+      geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength))
+      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS j ((geom.nrHops
+          - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).1.toArray.extract 0
+          (RSOR.path kem R last).size)
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
+            geom.perHopRoutingInfoLength)) (j + 1)).extract
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j
+            ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size + (j + 1) *
+            geom.perHopRoutingInfoLength)))).size = (geom.routingInfoLength +
             geom.perHopRoutingInfoLength) := by
     rw [ByteArray.size_append, hZ, hTs]
     omega
   have hcmd : ∀ l : List RoutingCommand, ((RSOR.path kem R l)[j]!).commands = [] := fun l => by
     rw [RSOR.path_getElem! kem R l j (by omega), ite_eq_right (by omega)]
-  have htail : (midPad geom kem kdfS streamS (RSOR.path kem R last) (joinDraw geom d dS j)
-      j).extract ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)
+  have htail : (midPad geom kem kdfS streamS (RSOR.path kem R last) (joinDraw geom d dS j
+      ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)) j).extract
+      ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)
         (((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength) + j *
             geom.perHopRoutingInfoLength)
       = (midPad geom kem kdfS streamS (RSOR.path kem R last') d j).extract ((geom.nrHops -
@@ -563,52 +764,68 @@ theorem backShift_spec (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize =
       midPad_front geom kem kdfS streamS hvalid _ _ j (lt_of_lt_of_eq hj hsz1.symm)
         (le_of_eq_of_le hsz1 hle) j le_rfl]
     exact frontPadOf_congr geom kem kdfS streamS _ _ _ _ j
-      (fun m hm => kemHopKeys_joinDraw kem geom kdfS R last last' d dS j m (by omega) (by omega))
+      (fun m hm => kemHopKeys_joinDraw kem geom kdfS R last last' d dS j _ m (by omega)
+        (by omega))
       j le_rfl
   have hs := relayFront_headShift kem geom kdfS streamS cipher macS hvalid hmactag (RSOR.path kem R
       last)
-    (RSOR.path kem R last') (joinDraw geom d dS j) d payload j c
+    (RSOR.path kem R last') (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+        geom.perHopRoutingInfoLength)) d payload j c
     (zeroBytes (geom.routingInfoLength - j * geom.perHopRoutingInfoLength) ++ (xorBytes ((ofVector
-        (joinDraw geom d dS j).2).extract ((geom.nrHops - (RSOR.path kem R last).size) *
-        geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R last).size) *
-        geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength))
-      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS
-          j).1.toArray.extract 0 (RSOR.path kem R last).size)
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
+        dS.2).extract ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)
+        (((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength) + (j + 1) *
+        geom.perHopRoutingInfoLength))
+      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS j ((geom.nrHops
+          - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).1.toArray.extract 0
+          (RSOR.path kem R last).size)
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
             geom.perHopRoutingInfoLength)) (j + 1)).extract
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j).2).extract 0
-            ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).size + (j
-            + 1) * geom.perHopRoutingInfoLength)))) U fwd fwd' hj0 hlen0 (hsz1.trans hsz0.symm) hU1
-            hU hc
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j
+            ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size + (j + 1) *
+            geom.perHopRoutingInfoLength)))) U fwd fwd' hj0 hlen0 (hsz1.trans hsz0.symm) hU1 hU hc
     (hcmd last) (hcmd last') ((hdrop _ hZ 0 (by omega)).trans hfwd) hfwd' htail
   have ht : (zeroBytes (geom.routingInfoLength - j * geom.perHopRoutingInfoLength) ++ (xorBytes
-      ((ofVector (joinDraw geom d dS j).2).extract ((geom.nrHops - (RSOR.path kem R last).size) *
+      ((ofVector dS.2).extract ((geom.nrHops - (RSOR.path kem R last).size) *
       geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R last).size) *
       geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength))
-      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS
-          j).1.toArray.extract 0 (RSOR.path kem R last).size)
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
+      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS j ((geom.nrHops
+          - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).1.toArray.extract 0
+          (RSOR.path kem R last).size)
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
             geom.perHopRoutingInfoLength)) (j + 1)).extract
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j).2).extract 0
-            ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).size + (j
-            + 1) * geom.perHopRoutingInfoLength)))).extract (geom.routingInfoLength - j *
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j
+            ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size + (j + 1) *
+            geom.perHopRoutingInfoLength)))).extract (geom.routingInfoLength - j *
             geom.perHopRoutingInfoLength) (geom.routingInfoLength + geom.perHopRoutingInfoLength)
-      = (xorBytes ((ofVector (joinDraw geom d dS j).2).extract ((geom.nrHops - (RSOR.path kem R
-          last).size) * geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R last).size)
-          * geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength))
-      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS
-          j).1.toArray.extract 0 (RSOR.path kem R last).size)
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
+      = (xorBytes ((ofVector dS.2).extract ((geom.nrHops - (RSOR.path kem R last).size) *
+          geom.perHopRoutingInfoLength) (((geom.nrHops - (RSOR.path kem R last).size) *
+          geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength))
+      ((fillerAtF kem kdfS streamS geom (RSOR.path kem R last) ((joinDraw geom d dS j ((geom.nrHops
+          - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).1.toArray.extract 0
+          (RSOR.path kem R last).size)
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)) j (zeroBytes (geom.routingInfoLength +
             geom.perHopRoutingInfoLength)) (j + 1)).extract
-        ((ofVector (joinDraw geom d dS j).2).extract 0 ((geom.nrHops - (RSOR.path kem R last).size)
-            * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j).2).extract 0
-            ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)).size + (j
-            + 1) * geom.perHopRoutingInfoLength))) := by
+        ((ofVector (joinDraw geom d dS j ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size (((ofVector (joinDraw geom d dS j
+            ((geom.nrHops - (RSOR.path kem R last).size) *
+            geom.perHopRoutingInfoLength)).2).extract 0 ((geom.nrHops - (RSOR.path kem R
+            last).size) * geom.perHopRoutingInfoLength)).size + (j + 1) *
+            geom.perHopRoutingInfoLength))) := by
     rw [Util.Bytes.extract_append_of_ge _ _ (by rw [zeroBytes_size]), zeroBytes_size,
       Nat.sub_self]
     exact extract_all _ _ (by rw [hTs, Nat.succ_mul]; rw [Nat.succ_mul] at hjp; omega)
@@ -624,7 +841,8 @@ theorem backShift_spec (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize =
         ++ fwd.extract (2 + kem.ciphertextSize)
           (2 + kem.ciphertextSize + ((RSOR.path kem R last).size - (j + 1)) *
               geom.perHopRoutingInfoLength)
-        ++ (midPad geom kem kdfS streamS (RSOR.path kem R last) (joinDraw geom d dS j) j).extract 0
+        ++ (midPad geom kem kdfS streamS (RSOR.path kem R last) (joinDraw geom d dS j ((geom.nrHops
+            - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)) j).extract 0
             ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)))).size =
             (geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
             geom.perHopRoutingInfoLength := by
