@@ -133,8 +133,16 @@ far:
   in front is the same layer once the tail of the keystream is shifted (`layerPast_shift`).
   The layers in front read only the hops in front (`wrapUp_congr`).
 
-Not proved yet: the equality of the two games from these pieces, up to the chance that a
-uniform block passes the payload's tag check; a bound on the bad draws;
+- After their draws the two worlds are the same game, in both positions of the relay
+  (`nextDrawn_eq_forward`, `nextDrawn_eq_last`). World 0 is played with the original's
+  randomness except for the seeds of the hops in front, which are the replacement's
+  (`mixSeeds`), and with the relay's keystream shifted (`shiftStream`, `lastShift`). The
+  conditions are that the next layer builds, the senders' payloads have a payload's length, the
+  original's request is reliable, and the ideal cipher's second block does not begin with the
+  zero tag.
+
+Not proved yet: that the relabelled draws are uniform, and from it the bound on the distance
+of the two games; a bound on the bad draws and on the zero-tag event;
 SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx.
 
 ## How the bounds are built
