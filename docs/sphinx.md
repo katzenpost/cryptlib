@@ -171,7 +171,8 @@ The zero-tag event is bounded: a draw of world 1 is not good with at most the ch
 layer cannot be built, plus one in the number of payload tags (`prEvent_not_finalGood_le`,
 from `prEvent_zeroPrefix`).
 
-Not proved yet: those two; SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx.
+Not proved yet: those two; STI↔ for KEM Sphinx; all three for NIKE Sphinx. SLU← for KEM Sphinx
+is below.
 
 ### SLU← (in progress)
 
@@ -347,6 +348,21 @@ The statement for SLU← is `backwardUnlinkable_le`, for `backwardWith freshSwap
 
 Not proved yet: bounds on the explicit events (bad draws, draws that are not good). Each is a
 statement about the KEM not failing, a layer being built, or a uniform block having a zero tag.
+
+## STI↔ for KEM Sphinx: not started, the plan
+
+World 0 shows the layer of the adversary's onion at forward position `pos`; world 1 shows the
+first layer of an onion with the same message over the rest of the forward path and the
+backward path up to its honest relay. Two honest relays hide the difference.
+
+- The relay before `pos`. Its layer is not shown, so its ciphertext is hidden, and its keys
+  reach the shown layer through the tail of its keystream only. With that keystream uniform
+  the shown layer is a first layer over the rest of the path: the same facts as for the
+  backward path of SLU← (`layerPast_drop`, `fillerAtF_target`), for the forward path.
+- The honest relay on the backward path. The SURB in the payload carries the reply's first
+  header, built over the whole backward path in world 0 and over the path cut at the honest
+  relay in world 1. The two headers differ in what that relay reads, and it answers nothing to
+  the reply's layer in either world. This is the keyed game at that relay, as in TLU→.
 
 ## How the bounds are built
 
