@@ -1199,6 +1199,31 @@ def relayFrontAt (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArra
   if j + 1 < hops.size then relayFront kem cipher macS kdfS streamS geom hops d payload j c U
   else relayFrontLast kem kdfS streamS geom hops d j c U
 
+/-- The bytes in front of the tag have the hop's ciphertext in the ciphertext field, when
+they have a header's length. -/
+theorem relayFrontAt_ct (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray)
+    (j : ℕ) (c U : ByteArray) (hc : c.size = kem.ciphertextSize)
+    (hs : (relayFrontAt kem cipher macS kdfS streamS geom hops d payload j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength) :
+    (relayFrontAt kem cipher macS kdfS streamS geom hops d payload j c U).extract 2
+      (2 + kem.ciphertextSize) = c := by
+  have key : ∀ X : ByteArray, (v0AD ++ c ++ X).extract 2 (2 + kem.ciphertextSize) = c := by
+    intro X
+    rw [Cryptlib.Util.Bytes.extract_append_of_le _ _
+      (by rw [ByteArray.size_append, hc]; exact Nat.le_refl _)]
+    have h := Cryptlib.Util.Bytes.extract_append_right v0AD c
+    rwa [hc] at h
+  unfold relayFrontAt at hs ⊢
+  split_ifs at hs ⊢ with hj
+  · unfold relayFront at hs ⊢
+    cases hl : layerPast kem cipher macS kdfS streamS geom hops d payload j U (j + 1) with
+    | ok fwd => exact key _
+    | error e =>
+      rw [hl] at hs
+      simp at hs
+      omega
+  · exact key _
+
 /-- The bytes of the keyed hop's layer behind its tag, at either place on the path. -/
 def relayBackAt (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
     (U : ByteArray) (encf : ByteArray → ByteArray) : ByteArray :=

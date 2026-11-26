@@ -535,7 +535,9 @@ only. -/
 theorem unwrapKEMKeysD_congr (K₁ K₂ : HopKeys) (hm : K₁.headerMAC = K₂.headerMAC)
     (he : K₁.headerEncryption = K₂.headerEncryption)
     (hi : K₁.headerEncryptionIV = K₂.headerEncryptionIV) (tag : Vector UInt8 32)
-    (pkt dec : ByteArray) (hd : dec.size = (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) pkt.size).size)
+    (pkt dec : ByteArray)
+    (hd : dec.size
+      = (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) pkt.size).size)
     (h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength) :
     unwrapKEMKeysD kem macS streamS geom K₁ tag pkt dec hd h1
       = unwrapKEMKeysD kem macS streamS geom K₂ tag pkt dec hd h1 := by

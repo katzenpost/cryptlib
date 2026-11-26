@@ -73,6 +73,43 @@ def keyedDraw : ProbComp (KeyedDraw A) := do
   let o ← S.drawOth cs.1
   return ⟨k, cs, s, o⟩
 
+/-- The second phase of `keyedGameH` after its draws. -/
+def keyedRunH
+    (hand : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → KeyTuple
+      → ByteArray → ProcResult)
+    (d : KeyedDraw A) (u : KeyTuple) : ProbComp Bool :=
+  simulateQ (procImplF kem cipher macS kdfS streamS geom d.k.2 d.c (hand d.cs.1 d.o d.c u))
+    (S.final d.cs.1 d.o d.c u <$> A.post d.cs.2 (S.view d.cs.1 d.o d.c u))
+
+/-- `keyedGameH` with the node's payload key and IV drawn first, then its other two keys, then
+the rest. -/
+theorem keyedGameH_evalDistEq
+    (hand : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → KeyTuple
+      → ByteArray → ProcResult) :
+    keyedGameH cipher macS kdfS streamS geom A hand
+      =ᵈ (do
+        let kp ← $ᵗ (Vector UInt8 48)
+        let iv ← $ᵗ (Vector UInt8 16)
+        let r ← $ᵗ (Vector UInt8 32 × Vector UInt8 32)
+        let d ← keyedDraw cipher macS kdfS streamS geom A
+        keyedRunH cipher macS kdfS streamS geom A hand d (kp, iv, r)) := by
+  have hb : ∀ {α β : Type},
+      Function.Bijective (Function.uncurry fun (a : α) (b : β) => (a, b)) :=
+    fun {_ _} => Function.bijective_id
+  let K : KeyTuple → ProbComp Bool := fun u =>
+    keyedDraw cipher macS kdfS streamS geom A >>= fun d =>
+      keyedRunH cipher macS kdfS streamS geom A hand d u
+  have h0 : keyedGameH cipher macS kdfS streamS geom A hand = $ᵗ KeyTuple >>= K := by
+    unfold keyedGameH
+    simp only [K, keyedDraw, keyedRunH, KeyedDraw.c, bind_assoc, pure_bind]
+  rw [h0]
+  exact ((evalDistEq_pair_of_bijective
+      (g := fun (kp : Vector UInt8 48)
+        (t : Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32) => (kp, t)) hb K).symm).trans
+    (EvalDistEq.bind_right _ fun kp => (evalDistEq_pair_of_bijective
+      (g := fun (iv : Vector UInt8 16) (r : Vector UInt8 32 × Vector UInt8 32) => (iv, r)) hb
+      (fun t => K (kp, t))).symm)
+
 /-- What a packet the node was sent offers as a forgery: the bytes its MAC covers, and its
 tag. -/
 def attempt : procSpec.Domain → Option (ByteArray × Vector UInt8 macS.tagSize)

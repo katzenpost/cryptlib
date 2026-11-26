@@ -77,6 +77,14 @@ def carries (c : kem.Ciphertext) (pkt : ByteArray) : Bool :=
   | some c' => decide (kem.encodeCiphertext c' = kem.encodeCiphertext c)
   | none => false
 
+/-- A packet with the encoding of `c` in its ciphertext field carries `c`. -/
+theorem carries_of_extract (c : kem.Ciphertext) (pkt : ByteArray)
+    (h : pkt.extract 2 (2 + kem.ciphertextSize) = ofVector (kem.encodeCiphertext c)) :
+    carries kem c pkt = true := by
+  unfold carries
+  rw [h, Cryptlib.Protocols.Sphinx.Common.toVecN_ofVector, kem.decode_encode_ct]
+  simp
+
 /-- A query is bad if it is a packet that carries `c` and is bad. -/
 def badQuery (c : kem.Ciphertext) (bad : ByteArray → Bool) : procSpec.Domain → Bool
   | .inl _ => false
