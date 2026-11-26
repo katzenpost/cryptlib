@@ -1077,7 +1077,8 @@ theorem procKeysD_forward (km : Vector UInt8 32) (U x pkt X : ByteArray)
       pkt.size).size = x.size := by
     rw [ByteArray.size_extract]
     omega
-  rw [dif_neg (by omega), hver, dif_pos hraw.symm]
+  have hlt : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by omega
+  simp only [hlt, ↓reduceDIte, hver, hraw.symm]
   simp only [ne_eq, not_true_eq_false, ↓reduceIte, hmac, hri, hb, he1, he2, he3, hparse, hraw,
     hx]
   dsimp only [Bind.bind, Except.bind, pure, Except.pure]
@@ -1135,14 +1136,15 @@ theorem procKeysD_last (km : Vector UInt8 32) (U x pkt X : ByteArray)
       pkt.size).size = x.size := by
     rw [ByteArray.size_extract]
     omega
-  rw [dif_neg (by omega), hver, dif_pos hraw.symm]
+  have hlt : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by omega
+  simp only [hlt, ↓reduceDIte, hver, hraw.symm]
   simp only [ne_eq, not_true_eq_false, ↓reduceIte, hmac, hri, hb, he1, he2, he3, hparse, hraw,
     hx]
   dsimp only [Bind.bind, Except.bind, pure, Except.pure]
   generalize hfs : List.findSome? _ cmds = o
   obtain rfl : o = none := hfs.symm.trans hnext
   dsimp only
-  rw [if_neg (by omega)]
+  simp only [show ¬ x.size < geom.payloadTagLength by omega, ↓reduceIte]
   generalize hsr : List.any cmds _ = sr
   obtain rfl : sr = false := hsr.symm.trans hsurb
   by_cases ht : ((x.extract 0 geom.payloadTagLength).data.all fun a => a == 0) = true
@@ -1150,6 +1152,192 @@ theorem procKeysD_last (km : Vector UInt8 32) (U x pkt X : ByteArray)
     rfl
   · simp only [ht, Bool.not_false, Bool.false_eq_true, ↓reduceIte]
     rfl
+
+/-! ## The honest relay's answer to its own header -/
+
+/-- A built packet begins with the packet version. -/
+theorem newKEMPacket_version (seeds : Array (Vector UInt8 32)) (filler : ByteArray)
+    (path : Array PathHop) (payload pkt : ByteArray)
+    (h : newKEMPacket kem cipher macS kdfS streamS geom seeds filler path payload = .ok pkt) :
+    pkt.extract 0 2 = v0AD := by
+  obtain ⟨-, hdr0, sprp0, _t0, hcreate0, -⟩ :=
+    newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ _ _ h
+  obtain ⟨hpos, hgen, hseeds, hfsize, ke, keys, _rks, _rp, _s, hkn, hkeys, -, -, hkc, -⟩ :=
+    createKEMHeader_unfold kem macS kdfS streamS geom _ _ _ _ _ hcreate0
+  rw [newKEMPacket_eq_newKEMPacketFrom kem cipher macS kdfS streamS geom seeds filler path
+    payload ke keys hpos hgen hseeds hfsize hkn hkeys hkc] at h
+  obtain ⟨-, hdr, sprp, t, hcreate, -, -, hpkt⟩ :=
+    newKEMPacketFrom_unfold kem cipher macS streamS geom _ _ _ _ _ _ h
+  obtain ⟨s, -, hhdr, -⟩ := createKEMHeaderFrom_hdrTrace kem geom macS streamS ke keys filler
+    path hdr sprp hcreate
+  rw [hpkt, hhdr, ByteArray.append_assoc, ByteArray.append_assoc, ByteArray.append_assoc]
+  exact Util.Bytes.extract_append_left v0AD _
+
+set_option maxHeartbeats 1000000 in
+/-- **The keyed hop forwards the next layer, for any keystream.** Before the end of the path,
+given its MAC key, any keystream `U` and any decrypted payload `x`, the hop takes its own
+header with a valid tag to the header of the next layer with the payload `x`. -/
+theorem procKeysD_relayFront (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (c U fwd : ByteArray) (km : Vector UInt8 32) (x y : ByteArray)
+    (hj : j + 1 < hops.size) (hlen : hops.size ≤ geom.nrHops) (hU : U.size = 𝓃)
+    (hc : c.size = kem.ciphertextSize)
+    (hfwd : layerPast kem cipher macS kdfS streamS geom hops d payload j U (j + 1) = .ok fwd)
+    (hs : (relayFront kem cipher macS kdfS streamS geom hops d payload j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength)
+    (hx : 0 < x.size) (hxy : y.size = x.size)
+    (hcmdnn : ∀ k ∈ (hops[j]!).commands, k ≠ RoutingCommand.null)
+    (hcmdnh : ∀ k ∈ (hops[j]!).commands, ∀ id m, k ≠ RoutingCommand.nextNodeHop id m) :
+    procKeysD kem macS geom km U x
+        (relayFront kem cipher macS kdfS streamS geom hops d payload j c U
+          ++ ofVector (macS.mac (ofVector km)
+            (relayFront kem cipher macS kdfS streamS geom hops d payload j c U))
+          ++ y)
+      = some (none, Cryptlib.Primitives.Hash.Sha512.sha512_256 c,
+          (hops[j]!).commands ++ [RoutingCommand.nextNodeHop (hops[j + 1]!).id
+            (toVec32 (fwd.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+              (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)))],
+          some (fwd.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+            ++ x)) := by
+  obtain ⟨hnnh, hperhopEq, hrouting, hhdr, hpacket, -⟩ := id hvalid
+  have hnnpos : 0 < Constants.nextNodeHopLength := by decide
+  have hfwd' : newKEMPacket kem cipher macS kdfS streamS geom
+      ((d.1.toArray.extract 0 hops.size).extract (j + 1) (d.1.toArray.extract 0 hops.size).size)
+      (fillerAtF kem kdfS streamS geom hops (d.1.toArray.extract 0 hops.size)
+        ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * 𝓅)) j U (j + 1))
+      (hops.extract (j + 1) hops.size) payload = .ok fwd := hfwd
+  have hfsz : fwd.size = geom.packetLength :=
+    newKEMPacket_size kem cipher macS kdfS streamS geom _ _ _ _ _ hvalid hmactag hfwd'
+      (newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ _ _ hfwd').1
+  have hver := newKEMPacket_version geom kem kdfS streamS cipher macS _ _ _ _ _ hfwd'
+  have hlast := layerPast_lastBlock geom kem kdfS streamS cipher macS hvalid hops d payload j U
+    fwd hj hlen hU hfwd
+  have had : adLength = 2 := rfl
+  have hmL : macLength = 32 := rfl
+  have hpR : 𝓅 ≤ geom.routingInfoLength := by
+    rw [hrouting]
+    exact Nat.le_mul_of_pos_right _ (by omega)
+  obtain ⟨M, hM⟩ : ∃ M, M = relayFront kem cipher macS kdfS streamS geom hops d payload j c U :=
+    ⟨_, rfl⟩
+  rw [← hM] at hs ⊢
+  unfold relayFront at hM
+  rw [hfwd] at hM
+  dsimp only at hM
+  have hv0 : v0AD.size = 2 := rfl
+  have hE : (fwd.extract (2 + kem.ciphertextSize)
+      (2 + kem.ciphertextSize + geom.routingInfoLength - 𝓅)).size
+      = geom.routingInfoLength - 𝓅 := by
+    rw [ByteArray.size_extract]
+    omega
+  have hpsz : (hops.extract j hops.size).size = hops.size - j := by simp
+  cases hfr : kemRiFragment kem geom (hops.extract j hops.size)
+      #[ByteArray.empty, fwd.extract 2 (2 + kem.ciphertextSize)]
+      (fwd.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+        (2 + kem.ciphertextSize + geom.routingInfoLength + macLength))
+      (hops.extract j hops.size).size 0 with
+  | error e =>
+    rw [hfr] at hM
+    rw [hM] at hs
+    simp only [ByteArray.size_append, size_xorBytes, hE, hc, hv0] at hs
+    have : ByteArray.empty.size = 0 := rfl
+    omega
+  | ok frag =>
+    rw [hfr] at hM
+    dsimp only at hM
+    have hke1 : (Array.replicate (hops.size - j) (fwd.extract 2 (2 + kem.ciphertextSize)))[1]!
+        = fwd.extract 2 (2 + kem.ciphertextSize) := by
+      rw [getElem!_pos _ 1 (by simp; omega)]
+      simp
+    have hfr' : kemRiFragment kem geom (hops.extract j hops.size)
+        (Array.replicate (hops.size - j) (fwd.extract 2 (2 + kem.ciphertextSize)))
+        (fwd.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+          (2 + kem.ciphertextSize + geom.routingInfoLength + macLength))
+        (hops.extract j hops.size).size 0 = .ok frag := by
+      rw [kemRiFragment_zero_congr, hke1]
+      exact hfr
+    have hksz : ∀ i (hi : i < (Array.replicate (hops.size - j)
+          (fwd.extract 2 (2 + kem.ciphertextSize))).size),
+        ((Array.replicate (hops.size - j) (fwd.extract 2 (2 + kem.ciphertextSize)))[i]'hi).size
+          = kem.ciphertextSize := fun i hi => by
+      simp only [Array.getElem_replicate, ByteArray.size_extract]
+      omega
+    have h0 : (hops.extract j hops.size)[0]! = hops[j]! := by
+      have := getElem!_extract_from hops j 0 (by omega)
+      rwa [Nat.add_zero] at this
+    have h1 : (hops.extract j hops.size)[0 + 1]! = hops[j + 1]! :=
+      getElem!_extract_from hops j 1 (by omega)
+    have hfsz' := kemRiFragment_size kem geom _ _ _ _ 0 (by omega) (by omega) hnnh
+      (by simp) hksz frag hfr'
+    obtain ⟨hpar, hnc⟩ := kemRiFragment_content_nonterminal kem geom _ _ _ _ 0 (by omega)
+      (by omega) (by omega) hnnh (by simp) hksz (by rw [h0]; exact hcmdnn) frag hfr'
+    rw [h0, h1] at hpar
+    rw [hke1] at hnc
+    obtain ⟨X, hX⟩ : ∃ X, X = frag ++ fwd.extract (2 + kem.ciphertextSize)
+        (2 + kem.ciphertextSize + geom.routingInfoLength - 𝓅) := ⟨_, rfl⟩
+    rw [← hX] at hM
+    have hXsz : X.size = geom.routingInfoLength := by
+      rw [hX, ByteArray.size_append, hfsz', hE]
+      omega
+    obtain ⟨T, hT⟩ : ∃ T, T = ofVector (macS.mac (ofVector km) M) := ⟨_, rfl⟩
+    rw [← hT]
+    have hTsz : T.size = macLength := by
+      rw [hT, Util.Bytes.size_ofVector, hmactag]
+    obtain ⟨p1, p2, -⟩ := three_parts M T y
+    rw [hs] at p1 p2
+    rw [hTsz] at p2
+    have hpre : ∀ a b, b ≤ 2 + kem.ciphertextSize + geom.routingInfoLength →
+        (M ++ T ++ y).extract a b = M.extract a b := fun a b hb => by
+      rw [Util.Bytes.extract_append_of_le _ _ (by rw [ByteArray.size_append]; omega),
+        Util.Bytes.extract_append_of_le _ _ (by omega)]
+    have hMc : M.extract 2 (2 + kem.ciphertextSize) = c := by
+      rw [hM, Util.Bytes.extract_append_of_le _ _ (by rw [ByteArray.size_append]; omega)]
+      have := Util.Bytes.extract_append_right v0AD c
+      rwa [hc] at this
+    have hMr : M.extract (2 + kem.ciphertextSize) (2 + kem.ciphertextSize + geom.routingInfoLength)
+        = xorBytes X (U.extract 0 geom.routingInfoLength) := by
+      rw [hM, Util.Bytes.extract_append_of_ge _ _ (by rw [ByteArray.size_append]; omega),
+        ByteArray.size_append, hc, hv0, Nat.sub_self,
+        show 2 + kem.ciphertextSize + geom.routingInfoLength - (2 + kem.ciphertextSize)
+          = geom.routingInfoLength by omega]
+      exact extract_all _ _ (by rw [size_xorBytes, hXsz])
+    have hMv : M.extract 0 2 = v0AD := by
+      rw [hM, ByteArray.append_assoc]
+      exact Util.Bytes.extract_append_left v0AD _
+    have hn1 : (hops[j]!).commands.findSome? (fun
+        | .nextNodeHop id m => some (id, m)
+        | _ => none) = none := by
+      rw [List.findSome?_eq_none_iff]
+      intro k hk
+      cases k <;> first | rfl | exact absurd rfl (hcmdnh _ hk _ _)
+    rw [procKeysD_forward geom kem macS km U x (M ++ T ++ y) X
+      (by simp only [ByteArray.size_append, hs, hTsz, hxy])
+      hx ((hpre 0 2 (by omega)).trans hMv)
+      (by rw [p2, p1, hT])
+      ((hpre _ _ le_rfl).trans hMr) hXsz hU hpR (by omega) _
+      (by
+        rw [hX, Util.Bytes.extract_append_of_le _ _ (by omega)]
+        exact hpar)
+      (hops[j + 1]!).id (toVec32 (fwd.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+        (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)))
+      (by simp [List.findSome?_append, hn1])]
+    have hXa : X.extract (𝓅 - kem.ciphertextSize) 𝓅 = fwd.extract 2 (2 + kem.ciphertextSize) := by
+      rw [hX, Util.Bytes.extract_append_of_le _ _ (by omega)]
+      exact hnc
+    have hXb : X.extract 𝓅 geom.routingInfoLength = fwd.extract (2 + kem.ciphertextSize)
+        (2 + kem.ciphertextSize + geom.routingInfoLength - 𝓅) := by
+      rw [hX, Util.Bytes.extract_append_of_ge _ _ (by omega), hfsz', Nat.sub_self]
+      exact extract_all _ _ (by rw [hE])
+    rw [hpre 2 _ (by omega), hMc, hXa, hXb, ← hlast,
+      ofVector_toVecN _ (by rw [ByteArray.size_extract]; omega),
+      ofVector_toVec32 _ (by rw [ByteArray.size_extract]; omega), ← hver,
+      extract_split fwd (2 + kem.ciphertextSize + geom.routingInfoLength)
+        (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) (by omega) (by omega),
+      extract_split fwd (2 + kem.ciphertextSize + geom.routingInfoLength - 𝓅)
+        (2 + kem.ciphertextSize + geom.routingInfoLength) (by omega) (by omega),
+      extract_split fwd (2 + kem.ciphertextSize)
+        (2 + kem.ciphertextSize + geom.routingInfoLength - 𝓅) (by omega) (by omega),
+      extract_split fwd 2 (2 + kem.ciphertextSize) (by omega) (by omega)]
+    simp only [ByteArray.append_assoc]
 
 end Pad
 
