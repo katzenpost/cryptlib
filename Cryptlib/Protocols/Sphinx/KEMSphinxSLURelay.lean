@@ -1856,6 +1856,85 @@ theorem replyOf_body_enc (q : RSOR.Request kem geom) (r : RSOR.Randomness geom)
     omega), h1]
   rfl
 
+include hvalid hmactag h16 in
+set_option maxHeartbeats 2000000 in
+/-- **The exit relay under its own header.** With the sender's block for the unchanged payload
+and a block without the zero tag for any other, the exit relay delivers the sender's message
+and replies with one encryption under the SURB's payload key for the unchanged payload, and
+does nothing for any other. -/
+theorem exitRelay (q : RSOR.Request kem geom)
+    (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem)) (hR : q.fwd = R)
+    (r : RSOR.Randomness geom) (cc U : ByteArray) (km : Vector UInt8 32) (u v : Block geom)
+    (hU : U.size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hc : cc.size =
+        kem.ciphertextSize)
+    (hr : RSOR.Reliable kem cipher macS kdfS streamS geom q r) (hb : 0 < q.back.hops.length)
+    (hbody : (RSOR.body kem macS kdfS streamS geom q r).size = geom.forwardPayloadLength)
+    (hv : ¬ ((ofVector v).extract 0 geom.payloadTagLength).data.all (· == 0) = true) :
+    (∀ y : Block geom,
+      RSOR.stepOf geom (procKeysD kem macS geom km U (ofVector (if y = u then Util.Bytes.toVecN
+          (geom.payloadTagLength + geom.forwardPayloadLength)
+          ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ (RSOR.body kem macS kdfS
+              streamS geom q r)) else v))
+        (RSOR.join ((Util.Bytes.toVecN geom.headerLength
+          ((relayFrontLast kem kdfS streamS geom (RSOR.path kem R [.recipient q.receiver]) r.1
+              (R.hops.length - 1) cc U)
+            ++ ofVector (macS.mac (ofVector km) (relayFrontLast kem kdfS streamS geom (RSOR.path
+                kem R [.recipient q.receiver]) r.1 (R.hops.length - 1) cc U)))), y)))
+      = if y = u then some (.deliver q.msg q.receiver) else none)
+    ∧ ∀ (y : Block geom) (m : RSOR.Msg geom),
+      RSOR.replyOf cipher geom m (procKeysD kem macS geom km U (ofVector (if y = u then
+          Util.Bytes.toVecN (geom.payloadTagLength + geom.forwardPayloadLength)
+          ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ (RSOR.body kem macS kdfS
+              streamS geom q r)) else v))
+        (RSOR.join ((Util.Bytes.toVecN geom.headerLength
+          ((relayFrontLast kem kdfS streamS geom (RSOR.path kem R [.recipient q.receiver]) r.1
+              (R.hops.length - 1) cc U)
+            ++ ofVector (macS.mac (ofVector km) (relayFrontLast kem kdfS streamS geom (RSOR.path
+                kem R [.recipient q.receiver]) r.1 (R.hops.length - 1) cc U)))), y)))
+      = if y = u then some (q.back.hops[0].name,
+          ((match RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem q.back [.surbReply
+              r.2.2.2]) r.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray)
+              0 with
+            | .ok pkt => (RSOR.split geom pkt).1
+            | .error _ => (default : RSOR.Onion geom).1),
+          Util.Bytes.toVecN _ (cipher.encrypt ((ofVector r.2.2.1).extract 0 48).data
+            ((ofVector r.2.2.1).extract 48 64)
+            ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ RSOR.pad geom m))))
+        else none := by
+  have hpos : 0 < R.hops.length := by
+    rw [← hR]
+    exact List.length_pos_iff.2 q.fwd_ne
+  have hle := R.length_le
+  have hj : R.hops.length - 1 + 1 = (RSOR.path kem R [.recipient q.receiver]).size := by
+    rw [RSOR.path_size]
+    omega
+  have hlen : (RSOR.path kem R [.recipient q.receiver]).size ≤ geom.nrHops := by
+    rw [RSOR.path_size]
+    exact hle
+  have hcmd : ((RSOR.path kem R [.recipient q.receiver])[R.hops.length - 1]!).commands =
+      [.recipient q.receiver] := by
+    rw [RSOR.path_getElem! kem R _ (R.hops.length - 1) (by omega), ite_eq_left (by omega)]
+  have hx : 0 < geom.payloadTagLength + geom.forwardPayloadLength := by omega
+  have hs := relayFrontLast_size geom kem kdfS streamS hvalid (RSOR.path kem R [.recipient
+      q.receiver]) r.1 (R.hops.length - 1)
+    cc U hj hlen hU hc q.receiver hcmd
+  have hz := RSOR.zeroTag_block geom (RSOR.body kem macS kdfS streamS geom q r) hbody
+  refine ⟨fun y => ?_, fun y m => ?_⟩
+  · rw [stepOf_relayFrontLast geom kem kdfS streamS macS hvalid hmactag (RSOR.path kem R
+      [.recipient q.receiver]) r.1
+      (R.hops.length - 1) cc U km _ y hj hlen hU hc hs hx q.receiver hcmd]
+    by_cases hy : y = u
+    · rw [ite_eq_left hy, ite_eq_left hy, ite_eq_left hz.1, hz.2,
+        RSOR.msgOf_body kem macS kdfS streamS geom q r]
+    · rw [ite_eq_right hy, ite_eq_right hy, ite_eq_right hv]
+  · rw [replyOf_relayFrontLast geom kem kdfS streamS cipher macS hvalid hmactag (RSOR.path kem R
+      [.recipient q.receiver]) r.1
+      (R.hops.length - 1) cc U km _ y hj hlen hU hc hs hx q.receiver hcmd m]
+    by_cases hy : y = u
+    · rw [ite_eq_left hy, ite_eq_left hy, ite_eq_left hz.1, hz.2,
+        replyOf_body_enc kem cipher macS kdfS streamS geom hvalid hmactag q r m hr hb]
+    · rw [ite_eq_right hy, ite_eq_right hy, ite_eq_right hv]
+
 section Canon
 
 variable (names : Role → RSOR.Name)
