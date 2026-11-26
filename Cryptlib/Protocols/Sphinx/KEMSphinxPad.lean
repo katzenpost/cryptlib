@@ -31,6 +31,8 @@ variable (geom : Geometry)
 
 local notation "𝓃" => geom.routingInfoLength + geom.perHopRoutingInfoLength
 
+local notation "𝓅" => geom.perHopRoutingInfoLength
+
 /-- A slice of zero bytes is zero bytes. -/
 theorem extract_zeroBytes (n a b : ℕ) (h : b ≤ n) :
     (zeroBytes n).extract a b = zeroBytes (b - a) := by
@@ -216,6 +218,97 @@ theorem xorBytes_mask_split (fr G1 G2 U : ByteArray) (a jp n : ℕ) (h1 : G1.siz
       rw [ByteArray.size_append, ByteArray.size_extract]
       omega),
     xorBytes_xorBytes]
+
+/-! ## A header's last bytes are affine in its filler -/
+
+/-- XOR is associative on strings of one width. -/
+theorem xorBytes_assoc (a b c : ByteArray) (hab : a.size = b.size) (hbc : b.size = c.size) :
+    xorBytes (xorBytes a b) c = xorBytes a (xorBytes b c) := by
+  rw [xorBytes_comm_of_size_eq _ c (by rw [size_xorBytes, hab, hbc]),
+    xorBytes_left_comm c a b (by omega) hab, xorBytes_comm_of_size_eq c b hbc.symm]
+
+/-- What the hops of a path XOR onto the filler: after the last `t` hops, the slices of their
+keystreams that cover it. -/
+def traceMask (ks : ℕ → ByteArray) (size f : ℕ) : ℕ → ByteArray
+  | 0 => zeroBytes f
+  | t + 1 => xorBytes (traceMask ks size f t)
+      ((ks (size - 1 - t)).extract ((t + 1) * geom.perHopRoutingInfoLength)
+        ((t + 1) * geom.perHopRoutingInfoLength + f))
+
+theorem traceMask_size (ks : ℕ → ByteArray) (size f t : ℕ) :
+    (traceMask geom ks size f t).size = f := by
+  cases t with
+  | zero => exact zeroBytes_size f
+  | succ t => rw [traceMask, size_xorBytes, traceMask_size]
+
+/-- **A header's last bytes are its filler XOR a mask that does not depend on the filler.** -/
+theorem hdrTrace_tail (hrouting : geom.routingInfoLength
+      = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (ke : Array ByteArray)
+    (filler : ByteArray) (path : Array PathHop) (hple : path.size ≤ geom.nrHops)
+    (hF : (if geom.nrHops > path.size then filler else ByteArray.empty).size
+      = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hks : ∀ h, (ks h).size = 𝓃) (hkn : ke.size = path.size)
+    (hksz : ∀ j (hj : j < ke.size), (ke[j]'hj).size = kem.ciphertextSize) (t : ℕ)
+    (ht : t ≤ path.size) (s : ByteArray × ByteArray)
+    (hs : hdrTrace kem geom ks tag ke filler path t = .ok s) :
+    s.1.size = t * geom.perHopRoutingInfoLength
+        + (geom.nrHops - path.size) * geom.perHopRoutingInfoLength ∧
+      s.1.extract (t * geom.perHopRoutingInfoLength)
+          (t * geom.perHopRoutingInfoLength
+            + (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+        = xorBytes (if geom.nrHops > path.size then filler else ByteArray.empty)
+          (traceMask geom ks path.size
+            ((geom.nrHops - path.size) * geom.perHopRoutingInfoLength) t) := by
+  induction t generalizing s with
+  | zero =>
+    simp only [hdrTrace, Except.ok.injEq] at hs
+    subst hs
+    refine ⟨by rw [hF]; omega, ?_⟩
+    simp only [traceMask, xorBytes_zeroBytes, Nat.zero_mul, Nat.zero_add]
+    rw [← hF]
+    exact ByteArray.extract_zero_size
+  | succ t ih =>
+    obtain ⟨s0, frag, hs0, hfrag, rfl⟩ := hdrTrace_succ_ok kem geom ks tag ke filler path t s hs
+    obtain ⟨hsz0, hext0⟩ := ih (by omega) s0 hs0
+    have hfr := kemRiFragment_size kem geom path ke s0.2 path.size (path.size - 1 - t)
+      (by omega) hperhop hnnh hkn hksz frag hfrag
+    have h1 : path.size - 1 - t + 1 = path.size - t := by omega
+    have h2 : (path.size - t) * 𝓅 + (t + 1) * 𝓅 = (path.size + 1) * 𝓅 := by
+      rw [← Nat.add_mul]
+      congr 1
+      omega
+    have h3 : (geom.nrHops - path.size) * 𝓅 + (path.size + 1) * 𝓅 = (geom.nrHops + 1) * 𝓅 := by
+      rw [← Nat.add_mul]
+      congr 1
+      omega
+    have h4 : (geom.nrHops + 1) * 𝓅 = 𝓃 := by
+      rw [Nat.add_mul, Nat.one_mul, hrouting, Nat.mul_comm]
+    have h5 : (t + 1) * 𝓅 = t * 𝓅 + 𝓅 := Nat.succ_mul _ _
+    have hK : 𝓃 - (path.size - 1 - t + 1) * 𝓅
+        = (t + 1) * 𝓅 + (geom.nrHops - path.size) * 𝓅 := by
+      rw [h1]
+      omega
+    have hsl : ((ks (path.size - 1 - t)).extract ((t + 1) * 𝓅)
+        ((t + 1) * 𝓅 + (geom.nrHops - path.size) * 𝓅)).size
+        = (geom.nrHops - path.size) * 𝓅 := by
+      rw [ByteArray.size_extract, hks]
+      omega
+    refine ⟨by rw [size_xorBytes, ByteArray.size_append, hfr, hsz0]; omega, ?_⟩
+    rw [xorBytes_extract _ _ _ _ (by rw [ByteArray.size_append, hfr, hsz0]; omega)
+        (by rw [ByteArray.size_extract, hks]; omega),
+      Util.Bytes.extract_append_of_ge frag s0.1 (by rw [hfr]; omega), hfr,
+      show (t + 1) * 𝓅 - 𝓅 = t * 𝓅 by omega,
+      show (t + 1) * 𝓅 + (geom.nrHops - path.size) * 𝓅 - 𝓅
+        = t * 𝓅 + (geom.nrHops - path.size) * 𝓅 by omega,
+      hext0, ByteArray.extract_extract, Nat.zero_add, Nat.zero_add,
+      Nat.min_eq_left (by omega)]
+    simp only [traceMask]
+    exact xorBytes_assoc _ _ _ (hF.trans (traceMask_size geom _ _ _ _).symm)
+      ((traceMask_size geom _ _ _ _).trans hsl.symm)
+
 
 /-! ## The honest relay's header at the end of a path -/
 
