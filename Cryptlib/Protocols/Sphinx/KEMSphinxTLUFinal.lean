@@ -590,6 +590,24 @@ theorem msgOf_body (q : Request kem geom) (r : Randomness geom) :
   rw [Util.Bytes.size_ofVector] at h
   rw [h, Cryptlib.Protocols.Sphinx.Common.toVecN_ofVector]
 
+omit h16 in
+include hvalid hmactag in
+/-- **A sender's payload has one length**, whatever the request and the randomness: the two
+flag bytes, a reply block, and the message. -/
+theorem body_size (q : Request kem geom) (r : Randomness geom) :
+    (body kem macS kdfS streamS geom q r).size
+      = 2 + geom.surbLength + geom.userForwardPayloadLength := by
+  have hs : (surb kem macS kdfS streamS geom q r).1.size = geom.surbLength := by
+    unfold surb
+    dsimp only
+    split
+    · rename_i x hx
+      exact newKEMSURB_size kem macS kdfS streamS geom _ _ _ _ hvalid hmactag x.1 x.2 hx
+    · exact Array.size_replicate
+  have h2 : (⟨#[if q.back.hops.isEmpty then 0 else 1, 0]⟩ : ByteArray).size = 2 := rfl
+  unfold body
+  rw [ByteArray.size_append, ByteArray.size_append, h2, hs, Util.Bytes.size_ofVector]
+
 omit hvalid hmactag h16 in
 /-- A request with no backward path has a payload that starts with the flag for no reply
 block. -/
@@ -1796,9 +1814,8 @@ theorem shortMU_size {pk : Key kem}
     (congrArg (·.commands) (RSOR.path_take_last kem geom ch.c.req.fwd _ ch.c.pos hpos))
 
 /-- The draws of world 1 on which it is world 0 at the relabelled draws: the original's next
-layer builds when there is one, the replacement's payload has a payload's length, at the end of
-the path so has the original's and its request is reliable, and the ideal cipher's second block
-does not begin with the zero tag. -/
+layer builds when there is one, at the end of the path the original's request is reliable, and
+the ideal cipher's second block does not begin with the zero tag. -/
 def finalGood {pk : Key kem}
     (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk) (x : NextOth
         geom) (U' : Keystream geom) : Prop :=
@@ -1807,13 +1824,8 @@ def finalGood {pk : Key kem}
         (RSOR.path kem ch.c.req.fwd [.recipient ch.c.req.receiver]) x.2.2.2.1.1.1
         (RSOR.body kem macS kdfS streamS geom ch.c.req x.2.2.2.1.1) ch.c.pos (ofVector U')
         (ch.c.pos + 1) = .ok fwd)
-    ∧ (RSOR.body kem macS kdfS streamS geom
-        (ch.c.short x.2.2.2.1.2.1 x.2.2.2.1.2.2.1) x.2.2.2.1.2.2.2).size
-      = geom.forwardPayloadLength
     ∧ (¬ ch.c.pos + 1 < ch.c.req.fwd.hops.length →
-      (RSOR.body kem macS kdfS streamS geom ch.c.req x.2.2.2.1.1).size
-          = geom.forwardPayloadLength
-        ∧ RSOR.Reliable kem cipher macS kdfS streamS geom ch.c.req x.2.2.2.1.1)
+      RSOR.Reliable kem cipher macS kdfS streamS geom ch.c.req x.2.2.2.1.1)
     ∧ ¬ ((ofVector x.2.2.2.2.2).extract 0 geom.payloadTagLength).data.all (· == 0) = true
 
 /-- World 1 after its draws, with the random payload `g` of its patch drawn: the relay answers
@@ -1890,8 +1902,16 @@ theorem run1g_eq_forward (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adv
             | .ok f => f
             | .error _ => ByteArray.empty)))
         x.2.1 x.2.2.1 (RSOR.mixSeeds geom x.2.2.2.1.1 x.2.2.2.1.2.2.2 ch.c.pos) x.2.2.2.2.1 g := by
-  obtain ⟨hfw, hb₁, -, hv⟩ := hg
+  obtain ⟨hfw, -, hv⟩ := hg
   obtain ⟨fwd, hfwd⟩ := hfw hn
+  have hfwd' := hfwd
+  unfold layerPast at hfwd'
+  have hb₁ : (RSOR.body kem macS kdfS streamS geom
+      (ch.c.short x.2.2.2.1.2.1 x.2.2.2.1.2.2.1) x.2.2.2.1.2.2.2).size
+      = geom.forwardPayloadLength :=
+    (RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans
+      ((RSOR.body_size kem macS kdfS streamS geom hvalid hmactag ch.c.req x.2.2.2.1.1).symm.trans
+        (newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ _ _ hfwd').1)
   obtain ⟨-, -, hrouting, -⟩ := id hvalid
   have hm : (match layerPast kem cipher macS kdfS streamS geom
       (RSOR.path kem ch.c.req.fwd [.recipient ch.c.req.receiver]) x.2.2.2.1.1.1
@@ -1947,8 +1967,19 @@ theorem run1g_eq_last (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Advers
           (ofVector (kem.encodeCiphertext (encapOf kem k.1.1 x.2.2.1).1)) (ofVector x.1)))
         x.2.1 x.2.2.1 (RSOR.mixSeeds geom x.2.2.2.1.1 x.2.2.2.1.2.2.2 ch.c.pos) x.2.2.2.2.1
         x.2.2.2.2.2 := by
-  obtain ⟨-, hb₁, hlast, hv⟩ := hg
-  obtain ⟨hb₀, hr⟩ := hlast hn
+  obtain ⟨-, hlast, hv⟩ := hg
+  have hr := hlast hn
+  obtain ⟨pkt, hpkt⟩ := hr.1.2 (Nat.zero_lt_of_lt ch.c.pos.isLt)
+  unfold RSOR.layer at hpkt
+  have hb₀ : (RSOR.body kem macS kdfS streamS geom ch.c.req x.2.2.2.1.1).size
+      = geom.forwardPayloadLength := (newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ _
+          _ hpkt).1
+  have hb₁ : (RSOR.body kem macS kdfS streamS geom
+      (ch.c.short x.2.2.2.1.2.1 x.2.2.2.1.2.2.1) x.2.2.2.1.2.2.2).size
+      = geom.forwardPayloadLength :=
+    (RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans
+      ((RSOR.body_size kem macS kdfS streamS geom hvalid hmactag ch.c.req x.2.2.2.1.1).symm.trans
+          hb₀)
   obtain ⟨-, -, hrouting, -⟩ := id hvalid
   have hl : ch.c.pos + 1 = ch.c.req.fwd.hops.length :=
     Nat.le_antisymm ch.c.pos.isLt (Nat.not_lt.1 hn)

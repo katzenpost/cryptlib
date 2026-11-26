@@ -137,9 +137,9 @@ far:
   (`nextDrawn_eq_forward`, `nextDrawn_eq_last`). World 0 is played with the original's
   randomness except for the seeds of the hops in front, which are the replacement's
   (`mixSeeds`), and with the relay's keystream shifted (`shiftStream`, `lastShift`). The
-  conditions are that the next layer builds, the senders' payloads have a payload's length, the
-  original's request is reliable, and the ideal cipher's second block does not begin with the
-  zero tag.
+  conditions are that the next layer builds, the original's request is reliable at the exit,
+  and the ideal cipher's second block does not begin with the zero tag. A sender's payload has
+  one length whatever the request (`body_size`), so its length is not a condition.
 
 - The relabelled draws are uniform (`evalDistEq_mixSeeds`, `evalDistEq_headTail`,
   `evalDistEq_shiftStream`, `evalDistEq_lastShift`), so the two games differ by at most the
@@ -157,9 +157,8 @@ most the sum of:
 - the keystream generator's advantage, for each of the three keystreams;
 - the chance that the adversary sends the hidden ciphertext (`nextHidden`);
 - the chance of a draw of world 1 that is not good for the last comparison (`finalGood`): the
-  original's next layer does not build, a sender's payload has not a payload's length, the
-  original's request is not reliable at the exit, or the ideal cipher's second block begins
-  with the zero tag.
+  original's next layer does not build, the original's request is not reliable at the exit, or
+  the ideal cipher's second block begins with the zero tag.
 
 No term is a distance between two games. The last two groups and the first are probabilities
 of events on draws, not yet bounded by numbers:
@@ -167,10 +166,9 @@ of events on draws, not yet bounded by numbers:
 - that a KEM ciphertext is hard to guess is not a law of the KEM type yet, so `nextHidden`
   has no bound;
 - the zero-tag event has chance 2^(-8 * payloadTagLength), not proved;
-- that a payload has a payload's length should follow from the geometry, not proved;
 - the chance that a layer does not build is the chance of a KEM failure, not proved.
 
-Not proved yet: those four; SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx.
+Not proved yet: those three; SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx.
 
 ## How the bounds are built
 
