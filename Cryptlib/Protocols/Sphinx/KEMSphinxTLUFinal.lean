@@ -146,6 +146,47 @@ theorem abs_prEvent_bind_sub_le {α γ : Type} (mx : ProbComp α) (F G : α → 
   rw [ENNReal.toReal_add (prEvent_ne_top _) (prEvent_ne_top _)] at r12 r21
   exact abs_sub_le_iff.2 ⟨by linarith, by linarith⟩
 
+/-! ## The chance that a uniform block begins with the zero tag -/
+
+/-- A byte vector is all zero exactly when it is the zero vector. -/
+theorem all_zero_iff {a : ℕ} (x : Vector UInt8 a) :
+    (ofVector x).data.all (· == 0) = true ↔ x = Vector.replicate a 0 := by
+  constructor
+  · intro h
+    rw [Array.all_eq_true] at h
+    refine Vector.ext fun i hi => ?_
+    have h1 := h i (by simpa [ofVector] using hi)
+    simpa [ofVector] using h1
+  · rintro rfl
+    rw [Array.all_eq_true]
+    intro i hi
+    simp [ofVector]
+
+/-- **A uniform string begins with `a` zero bytes with chance one in the number of strings of
+`a` bytes.** -/
+theorem prEvent_zeroPrefix {a b n : ℕ} (hn : a + b = n) :
+    Pr{let v ← $ᵗ (Vector UInt8 n)}[((ofVector v).extract 0 a).data.all (· == 0) = true]
+      = (Fintype.card (Vector UInt8 a) : ENNReal)⁻¹ := by
+  have hcat := padFiller_bijective (a := a) (b := b) hn (zeroBytes 0)
+  have e0 : ∀ (x : Vector UInt8 a) (y : Vector UInt8 b),
+      (ofVector (padFiller hn (zeroBytes 0) x y)).extract 0 a = ofVector x := by
+    intro x y
+    rw [ofVector_padFiller, xorBytes_zeroBytes]
+    have h1 := Util.Bytes.extract_append_left (ofVector x) (ofVector y)
+    rwa [Util.Bytes.size_ofVector] at h1
+  have h : ($ᵗ (Vector UInt8 n) >>= fun v =>
+        (pure (((ofVector v).extract 0 a).data.all (· == 0)) : ProbComp Bool))
+      =ᵈ ($ᵗ (Vector UInt8 a) >>= fun x =>
+        (pure ((ofVector x).data.all (· == 0)) : ProbComp Bool)) := by
+    refine EvalDistEq.trans (evalDistEq_pair_of_bijective hcat _).symm ?_
+    simp only [e0]
+    exact EvalDistEq.bind_right _ fun x => OracleComp.EvalDistEq.bind_const _ _
+  have key := h (fun b => b = true)
+  simp only [bind_pure_comp, prEvent_map] at key
+  rw [key]
+  simp only [all_zero_iff]
+  exact SampleableType.prEvent_uniformSample_eq_singleton _
+
 section ForwardFinal
 
 open Cryptlib.Protocols.RSOR (Role)
@@ -2302,6 +2343,75 @@ theorem next_final_le (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Advers
         <$> (do let U' ← $ᵗ (Keystream geom); let x ← nextDraw geom; pure (U', x)) := by
     simp only [map_eq_bind_pure_comp, bind_assoc, pure_bind, Function.comp_def]
   rw [e, prEvent_map]
+
+/-! ## The zero-tag event -/
+
+/-- The draws of world 1 on which the layers the last comparison needs can be built: the
+original's next layer when there is one, and at the end of the path a reliable request. -/
+def finalBuilds {pk : Key kem}
+    (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk) (x : NextOth
+        geom) (U' : Keystream geom) : Prop :=
+  (ch.c.pos + 1 < ch.c.req.fwd.hops.length →
+      ∃ fwd, layerPast kem cipher macS kdfS streamS geom
+        (RSOR.path kem ch.c.req.fwd [.recipient ch.c.req.receiver]) x.2.2.2.1.1.1
+        (RSOR.body kem macS kdfS streamS geom ch.c.req x.2.2.2.1.1) ch.c.pos (ofVector U')
+        (ch.c.pos + 1) = .ok fwd)
+    ∧ (¬ ch.c.pos + 1 < ch.c.req.fwd.hops.length →
+      RSOR.Reliable kem cipher macS kdfS streamS geom ch.c.req x.2.2.2.1.1)
+
+set_option maxHeartbeats 1000000 in
+/-- **The zero-tag event has the chance of one tag.** A draw of world 1 is not good with at
+most the chance that a layer cannot be built, plus one in the number of payload tags. -/
+theorem prEvent_not_finalGood_le (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    Pr{let d ← (finalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[¬
+        finalGood kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.cs.1 d.x d.U']
+      ≤ Pr{let d ← (finalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[¬
+          finalBuilds kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.cs.1 d.x d.U']
+        + (Fintype.card (Vector UInt8 geom.payloadTagLength) : ENNReal)⁻¹ := by
+  have hE : (finalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun d =>
+        (pure (((ofVector d.x.2.2.2.2.2).extract 0 geom.payloadTagLength).data.all (· == 0)) :
+          ProbComp Bool))
+      =ᵈ ($ᵗ (Block geom) >>= fun v =>
+        (pure (((ofVector v).extract 0 geom.payloadTagLength).data.all (· == 0)) :
+          ProbComp Bool)) := by
+    simp only [finalDraw, nextDraw, shortDraw, bind_assoc, pure_bind]
+    refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ =>
+      OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    exact EvalDistEq.rfl
+  have key := hE (fun b => b = true)
+  simp only [bind_pure_comp, prEvent_map] at key
+  have hmono := prEvent_mono (finalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+      A)
+    (fun d : FinalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A => ¬ finalGood
+        kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.cs.1 d.x d.U')
+    (fun d : FinalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A => ¬
+        finalBuilds kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.cs.1 d.x d.U'
+      ∨ ((ofVector d.x.2.2.2.2.2).extract 0 geom.payloadTagLength).data.all (· == 0) = true)
+    fun d h => by
+      unfold finalGood at h
+      unfold finalBuilds
+      by_cases hz : ((ofVector d.x.2.2.2.2.2).extract 0
+          geom.payloadTagLength).data.all (· == 0) = true
+      · exact Or.inr hz
+      · exact Or.inl fun hb => h ⟨hb.1, hb.2, hz⟩
+  have hor := prEvent_or_le (finalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+    (fun d : FinalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A => ¬
+        finalBuilds kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.cs.1 d.x d.U')
+    (fun d : FinalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A =>
+      ((ofVector d.x.2.2.2.2.2).extract 0 geom.payloadTagLength).data.all (· == 0) = true)
+  have hz := key.trans (prEvent_zeroPrefix (a := geom.payloadTagLength)
+    (b := geom.forwardPayloadLength) rfl)
+  exact hmono.trans (hor.trans (add_le_add le_rfl (le_of_eq hz)))
 
 /-! ## TLU→ for KEM Sphinx -/
 

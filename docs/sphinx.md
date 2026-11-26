@@ -165,10 +165,13 @@ of events on draws, not yet bounded by numbers:
 
 - that a KEM ciphertext is hard to guess is not a law of the KEM type yet, so `nextHidden`
   has no bound;
-- the zero-tag event has chance 2^(-8 * payloadTagLength), not proved;
 - the chance that a layer does not build is the chance of a KEM failure, not proved.
 
-Not proved yet: those three; SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx.
+The zero-tag event is bounded: a draw of world 1 is not good with at most the chance that a
+layer cannot be built, plus one in the number of payload tags (`prEvent_not_finalGood_le`,
+from `prEvent_zeroPrefix`).
+
+Not proved yet: those two; SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx.
 
 ## How the bounds are built
 
