@@ -112,4 +112,61 @@ theorem body_eq (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLen
 
 end RSOR
 
+/-! ## The first layer, with the honest relay's reply layer keyed -/
+
+section BackKeyed
+
+variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+  (geom : Geometry)
+
+/-- The sender's payload with `hdr` as the header of the reply's first layer. -/
+def bodyH (q : RSOR.Request kem geom) (r : RSOR.Randomness geom) (hb : 0 < q.back.hops.length)
+    (hdr : ByteArray) : ByteArray :=
+  ⟨#[if q.back.hops.isEmpty then 0 else 1, 0]⟩
+    ++ (hdr ++ ofVector q.back.hops[0].name ++ ofVector r.2.2.1) ++ ofVector q.msg
+
+/-- The first layer of `q`'s onion, with the KEM ciphertext, header keystream, tagging function
+and payload encryption of the relay at backward position `k` given. Those enter through the
+header of the reply's first layer, which the sender's payload carries. -/
+def backOnionF (q : RSOR.Request kem geom) (r : RSOR.Randomness geom)
+    (hb : 0 < q.back.hops.length) (k : ℕ) (c U : ByteArray) (tagf encf : ByteArray → ByteArray) :
+    RSOR.Onion geom :=
+  match layerF kem cipher macS kdfS streamS geom (RSOR.path kem q.back [.surbReply r.2.2.2]) r.2.1
+      ⟨Array.replicate geom.forwardPayloadLength 0⟩ k c U tagf encf 0 with
+  | some x0 =>
+    (match RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem q.fwd [.recipient
+        q.receiver]) r.1
+        (bodyH kem geom q r hb (x0.extract 0 geom.headerLength)) 0 with
+      | .ok pkt => RSOR.split geom pkt
+      | .error _ => default)
+  | none => default
+
+/-- **With the keys that the seed `s` gives at backward position `k`, the keyed first layer is
+the first layer of `q`'s onion** built from the randomness with `s` at that position. -/
+theorem backOnionF_real (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (q : RSOR.Request kem geom) (r : RSOR.Randomness geom) (hb : 0 < q.back.hops.length)
+    (k : ℕ) (hk : k < q.back.hops.length) (s : Vector UInt8 32) (c ss x0 : ByteArray)
+    (henc : kemEncap kem ((RSOR.path kem q.back [.surbReply r.2.2.2])[k]!).publicKey s
+      = .ok (c, ss))
+    (hx0 : RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem q.back [.surbReply r.2.2.2])
+      (setSeedBack geom r k s).2.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩ 0 = .ok x0) :
+    backOnionF kem cipher macS kdfS streamS geom q r hb k c
+        (ksOf streamS geom (keyTuple (deriveHopKeys kdfS ss)))
+        (tagOf macS (keyTuple (deriveHopKeys kdfS ss)))
+        (encOf cipher (keyTuple (deriveHopKeys kdfS ss)))
+      = RSOR.form kem cipher macS kdfS streamS geom q (setSeedBack geom r k s) q.first := by
+  have hF := layerF_real kem cipher macS kdfS streamS geom (RSOR.path kem q.back [.surbReply
+      r.2.2.2]) r.2.1
+    ⟨Array.replicate geom.forwardPayloadLength 0⟩ x0 k 0 s c ss (Nat.zero_le _)
+    (by rw [RSOR.path_size]; exact hk)
+    (by rw [RSOR.path_size]; exact q.back.length_le) henc hx0
+  unfold backOnionF RSOR.form
+  rw [hF]
+  dsimp only
+  rw [RSOR.body_eq kem cipher macS kdfS streamS geom hvalid hmactag q (setSeedBack geom r k s) _ x0
+      hb hx0]
+  rfl
+
+end BackKeyed
+
 end Cryptlib.Protocols.Sphinx.KEMSphinx
