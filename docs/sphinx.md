@@ -88,6 +88,10 @@ packets with the game's keys (`keyedChain_le`).
   by the ideal one at the cost of that game's advantage and the bad draws. In the ideal world
   the encrypted block is uniform, and the relay decrypts it to the sender's block and any other
   block to one uniform block.
+- All of the above in one statement: `forwardUnlinkable_le_uniform`. The TLU→ advantage against
+  KEM Sphinx is at most the bad draws, the KEM and KDF advantages, a MAC forgery, the one-block
+  cipher advantage and the keystream generator's advantage, each in either world, and the
+  distance between the two worlds played from a uniform keystream.
 
 The cipher game gives the adversary a decryption oracle that answers for one block, the first
 it is asked about. The relay asks it twice about the same block when it replies to an onion it
