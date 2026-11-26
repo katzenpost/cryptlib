@@ -2879,6 +2879,43 @@ theorem abs_prEvent_bind_sub_le_bad_dist {α : Type} (mx : ProbComp α) (F G : �
       exact ENNReal.toReal_nonneg
   simpa only [bind_pure] using h1
 
+omit kem cipher macS kdfS streamS geom hvalid hmactag h16 in
+/-- **A bound that holds after every outcome the common prefix can have holds with the prefix
+in front**, for the distance of two games with boolean output. -/
+theorem abs_prEvent_bind_sub_le_support {α γ : Type} (mx : ProbComp α)
+    (F G : α → ProbComp Bool) (B : α → ProbComp γ) (r : γ → Prop)
+    (h : ∀ x ∈ support mx,
+      |(Pr{let y ← F x}[y = true]).toReal - (Pr{let y ← G x}[y = true]).toReal|
+        ≤ (Pr{let z ← B x}[r z]).toReal) :
+    |(Pr{let y ← mx >>= F}[y = true]).toReal - (Pr{let y ← mx >>= G}[y = true]).toReal|
+      ≤ (Pr{let z ← mx >>= B}[r z]).toReal := by
+  have hle : ∀ (a b c : ENNReal), a ≠ ⊤ → b ≠ ⊤ → c ≠ ⊤ → a.toReal - b.toReal ≤ c.toReal →
+      a ≤ b + c := fun a b c ha hb hc habc => by
+    rw [← ENNReal.toReal_le_toReal ha (ENNReal.add_ne_top.mpr ⟨hb, hc⟩),
+      ENNReal.toReal_add hb hc]
+    linarith
+  have key : ∀ F G : α → ProbComp Bool,
+      (∀ x ∈ support mx, Pr{let y ← F x}[y = true]
+        ≤ Pr{let y ← G x}[y = true] + Pr{let z ← B x}[r z]) →
+      Pr{let y ← mx >>= F}[y = true]
+        ≤ Pr{let y ← mx >>= G}[y = true] + Pr{let z ← mx >>= B}[r z] := fun F G h' => by
+    have := prEvent_bind_le_add_bad_of_disagree' (mx := mx) (my := F) (oc := G) (ob := B)
+      (q := fun y => y = true) (r := r) (D := fun _ => False) (ε := 0)
+      (fun _ _ hD => hD.elim) (fun x hx _ => by simpa using h' x hx)
+    simpa using this
+  have h12 := key F G fun x hx =>
+    hle _ _ _ (prEvent_ne_top _) (prEvent_ne_top _) (prEvent_ne_top _)
+      (abs_sub_le_iff.1 (h x hx)).1
+  have h21 := key G F fun x hx =>
+    hle _ _ _ (prEvent_ne_top _) (prEvent_ne_top _) (prEvent_ne_top _)
+      (abs_sub_le_iff.1 (h x hx)).2
+  have r12 := ENNReal.toReal_mono
+    (ENNReal.add_ne_top.mpr ⟨prEvent_ne_top _, prEvent_ne_top _⟩) h12
+  have r21 := ENNReal.toReal_mono
+    (ENNReal.add_ne_top.mpr ⟨prEvent_ne_top _, prEvent_ne_top _⟩) h21
+  rw [ENNReal.toReal_add (prEvent_ne_top _) (prEvent_ne_top _)] at r12 r21
+  exact abs_sub_le_iff.2 ⟨by linarith, by linarith⟩
+
 /-- The draws on which the comparison on the backward path goes through: the reply's layer
 after the relay's can be built from the relay's keystream, and so can the first layer over the
 rest of the path. -/
@@ -3968,6 +4005,127 @@ theorem exit_ideal_le (names : Role → RSOR.Name) (A : (Protocols.RSOR.backward
       exact exitRun1_eq kem cipher macS kdfS streamS geom hvalid hmactag h16 names A km k cs s hp q
           hq hb r r' g U u v hr hbody hv pkt hpk
   simpa only [bind_assoc, pure_bind] using h
+
+/-- What the two games of the last comparison share: the honest relay's MAC key and keys, the
+challenge and the adversary's state after the first phase, and the seed of the relay's
+ciphertext. -/
+structure BackPre (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith (replySwap kem
+    cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) where
+  km : Vector UInt8 32
+  k : Key kem × kem.PrivateKey
+  cs : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)) .relay names k.1
+    × (A.State × Protocols.RSOR.Log 𝒮 × (Role → kem.PrivateKey))
+  s : Vector UInt8 32
+
+/-- The draw of `BackPre`. -/
+def backPre (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith (replySwap kem cipher macS
+    kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    ProbComp (BackPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) := do
+  let km ← $ᵗ (Vector UInt8 32)
+  let k ← keygen kem
+  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
+    ((backAdv0 kem cipher macS kdfS streamS geom hvalid hmactag h16 (replySwap kem cipher macS kdfS
+        streamS geom hvalid hmactag h16) names A).pre k.1)
+  let s ← $ᵗ (Vector UInt8 32)
+  return ⟨km, k, cs, s⟩
+
+/-- World 0 from a uniform keystream, after the shared draws. -/
+def backInner0 (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith (replySwap kem cipher
+    macS kdfS streamS geom hvalid hmactag h16)).Adversary)
+    (x : BackPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) : ProbComp Bool := do
+  let r ← $ᵗ (RSOR.Randomness geom)
+  let U ← $ᵗ (Keystream geom)
+  let b ← $ᵗ (Block geom)
+  let u ← $ᵗ (Block geom)
+  let v ← $ᵗ (Block geom)
+  (propRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)) .relay names _ (backDraw0
+      geom)
+        (backView0 kem cipher macS kdfS streamS geom hvalid hmactag h16 (replySwap kem cipher macS
+            kdfS streamS geom hvalid hmactag h16) names) A (backMU0 kem cipher macS kdfS streamS
+            geom hvalid hmactag h16 (replySwap kem cipher macS kdfS streamS geom hvalid hmactag
+            h16) names)
+        (backBlockU0 kem cipher macS kdfS streamS geom hvalid hmactag h16 (replySwap kem cipher
+            macS kdfS streamS geom hvalid hmactag h16) names) (backViewU0 kem cipher macS kdfS
+            streamS geom hvalid hmactag h16 (replySwap kem cipher macS kdfS streamS geom hvalid
+            hmactag h16) names) x.km
+        (ofVector U)
+        (⟨x.k, x.cs, x.s, (r, b)⟩ : KeyedDraw (backAdv0 kem cipher macS kdfS streamS geom hvalid
+            hmactag h16 (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16) names A))
+            u v)
+
+/-- The world where an onion is sent on, from a uniform keystream, after the shared draws. -/
+def backInner1 (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith (replySwap kem cipher
+    macS kdfS streamS geom hvalid hmactag h16)).Adversary)
+    (x : BackPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) : ProbComp Bool := do
+  let r ← $ᵗ (RSOR.Randomness geom)
+  let r' ← $ᵗ (RSOR.Randomness geom)
+  let U ← $ᵗ (Keystream geom)
+  let g ← $ᵗ (Block geom)
+  let u ← $ᵗ (Block geom)
+  let v ← $ᵗ (Block geom)
+  (propRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)) .relay names _ (swapDraw
+      kem cipher macS kdfS streamS geom hvalid hmactag h16 (replySwap kem cipher macS kdfS streamS
+      geom hvalid hmactag h16))
+        (backView1 kem cipher macS kdfS streamS geom hvalid hmactag h16 (replySwap kem cipher macS
+            kdfS streamS geom hvalid hmactag h16) names) A (backMU1 kem cipher macS kdfS streamS
+            geom hvalid hmactag h16 (replySwap kem cipher macS kdfS streamS geom hvalid hmactag
+            h16) names)
+        (backBlockU1 kem cipher macS kdfS streamS geom hvalid hmactag h16 (replySwap kem cipher
+            macS kdfS streamS geom hvalid hmactag h16) names) (backViewU1 kem cipher macS kdfS
+            streamS geom hvalid hmactag h16 (replySwap kem cipher macS kdfS streamS geom hvalid
+            hmactag h16) names) x.km
+        (ofVector U)
+        (⟨x.k, x.cs, x.s, (r, (r', g))⟩ : KeyedDraw (backAdv1 kem cipher macS kdfS streamS geom
+            hvalid hmactag h16 (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)
+            names A)) u v)
+
+set_option maxHeartbeats 4000000 in
+/-- World 0 from a uniform keystream is the shared draws and then `backInner0`. -/
+theorem backIdeal0_evalDistEq (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith
+    (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    PRGScheme.prgIdealExperiment (backStreamAdv0 kem cipher macS kdfS streamS geom hvalid hmactag
+        h16 (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16) names A)
+      =ᵈ backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= backInner0 kem
+          cipher macS kdfS streamS geom hvalid hmactag h16 names A := by
+  unfold PRGScheme.prgIdealExperiment backStreamAdv0 propStreamAdv keyedDraw backPre backInner0
+  simp only [propSetupOf, backDraw0, bind_assoc, pure_bind]
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun km => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun k => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun cs => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun s => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact EvalDistEq.rfl
+
+set_option maxHeartbeats 4000000 in
+/-- The world where an onion is sent on, from a uniform keystream, is the shared draws and then
+`backInner1`. -/
+theorem backIdeal1_evalDistEq (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith
+    (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    PRGScheme.prgIdealExperiment (backStreamAdv1 kem cipher macS kdfS streamS geom hvalid hmactag
+        h16 (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16) names A)
+      =ᵈ backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= backInner1 kem
+          cipher macS kdfS streamS geom hvalid hmactag h16 names A := by
+  unfold PRGScheme.prgIdealExperiment backStreamAdv1 propStreamAdv keyedDraw backPre backInner1
+  simp only [propSetupOf, swapDraw, replySwap, bind_assoc, pure_bind]
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun km => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun k => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun cs => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun s => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun r => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact EvalDistEq.rfl
 
 end BackRelay
 
