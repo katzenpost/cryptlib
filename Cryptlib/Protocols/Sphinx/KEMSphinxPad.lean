@@ -1006,6 +1006,151 @@ theorem frontPadOf_congr (hops hops' : Array PathHop) (seeds seeds' : Array (Vec
     · simp only [hkm, ↓reduceIte]
     · simp only [hkm, ↓reduceIte, h (k + m) (by omega)]
 
+/-! ## What a hop does with a masked header -/
+
+/-- A hop's routing information after its keystream is taken off: the masked bytes, then the
+tail of the keystream. -/
+theorem xorBytes_unmask (X U : ByteArray) (hX : X.size = geom.routingInfoLength)
+    (hU : U.size = 𝓃) :
+    xorBytes (xorBytes X (U.extract 0 geom.routingInfoLength)
+        ++ (⟨Array.replicate 𝓅 0⟩ : ByteArray)) U
+      = X ++ U.extract geom.routingInfoLength 𝓃 := by
+  have h : xorBytes (xorBytes X (U.extract 0 geom.routingInfoLength)
+        ++ (⟨Array.replicate 𝓅 0⟩ : ByteArray))
+      (U.extract 0 geom.routingInfoLength ++ U.extract geom.routingInfoLength U.size)
+      = X ++ U.extract geom.routingInfoLength U.size := by
+    rw [xorBytes_append _ _ _ _ (by
+        rw [size_xorBytes, hX, ByteArray.size_extract, hU]
+        omega),
+      xorBytes_xorBytes,
+      xorBytes_zero_left _ _ (by
+        rw [ByteArray.size_extract, hU]
+        omega)]
+  rwa [Util.Bytes.append_extract U geom.routingInfoLength (by omega), hU] at h
+
+/-- **A hop forwards a masked header.** Given its MAC key and keystream `U`, a hop whose
+routing information is `X` under the head of `U`, with a valid tag, and whose `X` begins with
+commands that name a next hop, forwards: the next ciphertext and the rest of `X`, then the tail
+of `U`, the next hop's tag, and the decrypted payload it is given. -/
+theorem procKeysD_forward (km : Vector UInt8 32) (U x pkt X : ByteArray)
+    (hsz : pkt.size = 2 + kem.ciphertextSize + geom.routingInfoLength + macLength + x.size)
+    (hx : 0 < x.size) (hver : pkt.extract 0 2 = v0AD)
+    (hmac : pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+        (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+      = ofVector (macS.mac (ofVector km)
+        (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength))))
+    (hri : pkt.extract (2 + kem.ciphertextSize) (2 + kem.ciphertextSize + geom.routingInfoLength)
+      = xorBytes X (U.extract 0 geom.routingInfoLength))
+    (hX : X.size = geom.routingInfoLength) (hU : U.size = 𝓃)
+    (hp : 𝓅 ≤ geom.routingInfoLength) (hct : kem.ciphertextSize ≤ 𝓅)
+    (cmds : List RoutingCommand)
+    (hparse : parseAll (X.extract 0 (𝓅 - kem.ciphertextSize)) = .ok cmds)
+    (id : Vector UInt8 32) (m : Vector UInt8 32)
+    (hnext : cmds.findSome? (fun
+      | .nextNodeHop id m => some (id, m)
+      | _ => none) = some (id, m)) :
+    procKeysD kem macS geom km U x pkt
+      = some (none, Cryptlib.Primitives.Hash.Sha512.sha512_256
+          (pkt.extract 2 (2 + kem.ciphertextSize)), cmds,
+        some (v0AD ++ ofVector (toVecN kem.ciphertextSize
+            (X.extract (𝓅 - kem.ciphertextSize) 𝓅))
+          ++ (X.extract 𝓅 geom.routingInfoLength ++ U.extract geom.routingInfoLength 𝓃)
+          ++ ofVector m ++ x)) := by
+  have hb := xorBytes_unmask geom X U hX hU
+  unfold procKeysD unwrapKEMKeysD
+  dsimp only
+  have hUt : (U.extract geom.routingInfoLength 𝓃).size = 𝓅 := by
+    rw [ByteArray.size_extract, hU]
+    omega
+  have he1 : (X ++ U.extract geom.routingInfoLength 𝓃).extract 0 (𝓅 - kem.ciphertextSize)
+      = X.extract 0 (𝓅 - kem.ciphertextSize) :=
+    Util.Bytes.extract_append_of_le _ _ (by omega)
+  have he2 : (X ++ U.extract geom.routingInfoLength 𝓃).extract (𝓅 - kem.ciphertextSize) 𝓅
+      = X.extract (𝓅 - kem.ciphertextSize) 𝓅 :=
+    Util.Bytes.extract_append_of_le _ _ (by omega)
+  have he3 : (X ++ U.extract geom.routingInfoLength 𝓃).extract 𝓅
+        (X ++ U.extract geom.routingInfoLength 𝓃).size
+      = X.extract 𝓅 geom.routingInfoLength ++ U.extract geom.routingInfoLength 𝓃 := by
+    rw [ByteArray.size_append, ← hX]
+    exact Util.Bytes.extract_append_ge _ _ (by omega)
+  have hraw : (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+      pkt.size).size = x.size := by
+    rw [ByteArray.size_extract]
+    omega
+  rw [dif_neg (by omega), hver, dif_pos hraw.symm]
+  simp only [ne_eq, not_true_eq_false, ↓reduceIte, hmac, hri, hb, he1, he2, he3, hparse, hraw,
+    hx]
+  dsimp only [Bind.bind, Except.bind, pure, Except.pure]
+  generalize hfs : List.findSome? _ cmds = o
+  obtain rfl : o = some (id, m) := hfs.symm.trans hnext
+  rfl
+
+/-- **A hop at the end of a path, on a masked header.** Given its MAC key and keystream `U`, a
+hop whose routing information is `X` under the head of `U`, with a valid tag, and whose `X`
+begins with commands that name no next hop and carry no reply block, delivers the decrypted
+payload it is given when that begins with the zero tag, and rejects the packet otherwise. -/
+theorem procKeysD_last (km : Vector UInt8 32) (U x pkt X : ByteArray)
+    (hsz : pkt.size = 2 + kem.ciphertextSize + geom.routingInfoLength + macLength + x.size)
+    (hx : 0 < x.size) (hxt : geom.payloadTagLength ≤ x.size) (hver : pkt.extract 0 2 = v0AD)
+    (hmac : pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+        (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+      = ofVector (macS.mac (ofVector km)
+        (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength))))
+    (hri : pkt.extract (2 + kem.ciphertextSize) (2 + kem.ciphertextSize + geom.routingInfoLength)
+      = xorBytes X (U.extract 0 geom.routingInfoLength))
+    (hX : X.size = geom.routingInfoLength) (hU : U.size = 𝓃)
+    (hp : 𝓅 ≤ geom.routingInfoLength) (hct : kem.ciphertextSize ≤ 𝓅)
+    (cmds : List RoutingCommand)
+    (hparse : parseAll (X.extract 0 (𝓅 - kem.ciphertextSize)) = .ok cmds)
+    (hnext : cmds.findSome? (fun
+      | .nextNodeHop id m => some (id, m)
+      | _ => none) = none)
+    (hsurb : cmds.any (fun
+      | .surbReply _ => true
+      | _ => false) = false) :
+    procKeysD kem macS geom km U x pkt
+      = if (x.extract 0 geom.payloadTagLength).data.all (· == 0) then
+          some (some (x.extract geom.payloadTagLength x.size),
+            Cryptlib.Primitives.Hash.Sha512.sha512_256
+              (pkt.extract 2 (2 + kem.ciphertextSize)), cmds, none)
+        else none := by
+  have hb := xorBytes_unmask geom X U hX hU
+  unfold procKeysD unwrapKEMKeysD
+  dsimp only
+  have hUt : (U.extract geom.routingInfoLength 𝓃).size = 𝓅 := by
+    rw [ByteArray.size_extract, hU]
+    omega
+  have he1 : (X ++ U.extract geom.routingInfoLength 𝓃).extract 0 (𝓅 - kem.ciphertextSize)
+      = X.extract 0 (𝓅 - kem.ciphertextSize) :=
+    Util.Bytes.extract_append_of_le _ _ (by omega)
+  have he2 : (X ++ U.extract geom.routingInfoLength 𝓃).extract (𝓅 - kem.ciphertextSize) 𝓅
+      = X.extract (𝓅 - kem.ciphertextSize) 𝓅 :=
+    Util.Bytes.extract_append_of_le _ _ (by omega)
+  have he3 : (X ++ U.extract geom.routingInfoLength 𝓃).extract 𝓅
+        (X ++ U.extract geom.routingInfoLength 𝓃).size
+      = X.extract 𝓅 geom.routingInfoLength ++ U.extract geom.routingInfoLength 𝓃 := by
+    rw [ByteArray.size_append, ← hX]
+    exact Util.Bytes.extract_append_ge _ _ (by omega)
+  have hraw : (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+      pkt.size).size = x.size := by
+    rw [ByteArray.size_extract]
+    omega
+  rw [dif_neg (by omega), hver, dif_pos hraw.symm]
+  simp only [ne_eq, not_true_eq_false, ↓reduceIte, hmac, hri, hb, he1, he2, he3, hparse, hraw,
+    hx]
+  dsimp only [Bind.bind, Except.bind, pure, Except.pure]
+  generalize hfs : List.findSome? _ cmds = o
+  obtain rfl : o = none := hfs.symm.trans hnext
+  dsimp only
+  rw [if_neg (by omega)]
+  generalize hsr : List.any cmds _ = sr
+  obtain rfl : sr = false := hsr.symm.trans hsurb
+  by_cases ht : ((x.extract 0 geom.payloadTagLength).data.all fun a => a == 0) = true
+  · simp only [ht, Bool.not_true, Bool.false_eq_true, ↓reduceIte]
+    rfl
+  · simp only [ht, Bool.not_false, Bool.false_eq_true, ↓reduceIte]
+    rfl
+
 end Pad
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
