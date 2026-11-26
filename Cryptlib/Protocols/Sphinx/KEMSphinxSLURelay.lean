@@ -195,29 +195,30 @@ theorem layerPast_drop (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem)
     path_extract_drop kem geom R last (j + 1) (by omega)]
 
 set_option maxHeartbeats 2000000 in
-/-- **A middle hop's header under a shifted keystream.** Two draws on one path give the keyed
-hop two headers. With the head of the keystream shifted by the difference of the two routing
-informations, the first draw gives the second draw's header bytes, and still its own next
-layer. -/
+/-- **A middle hop's header under a shifted keystream.** Two paths of one length, each with a
+draw, give the keyed hop two headers. With the head of the keystream shifted by the difference
+of the two routing informations, the first gives the second's header bytes, and still its own
+next layer. -/
 theorem relayFront_headShift (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
-    (hops : Array PathHop) (d d' : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (hops hops' : Array PathHop) (d d' : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
     (c U U' fwd fwd' : ByteArray) (hj : j + 1 < hops.size) (hlen : hops.size ≤ geom.nrHops)
+    (hsz : hops'.size = hops.size)
     (hU : U.size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hU' : U'.size =
         (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hc : c.size = kem.ciphertextSize)
-    (hcmd : (hops[j]!).commands = [])
+    (hcmd : (hops[j]!).commands = []) (hcmd' : (hops'[j]!).commands = [])
     (hfwd : layerPast kem cipher macS kdfS streamS geom hops d payload j U (j + 1) = .ok fwd)
-    (hfwd' : layerPast kem cipher macS kdfS streamS geom hops d' payload j U' (j + 1) = .ok fwd')
+    (hfwd' : layerPast kem cipher macS kdfS streamS geom hops' d' payload j U' (j + 1) = .ok fwd')
     (htail : (midPad geom kem kdfS streamS hops d j).extract ((geom.nrHops - hops.size) *
         geom.perHopRoutingInfoLength) (((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength) +
         j * geom.perHopRoutingInfoLength)
-      = (midPad geom kem kdfS streamS hops d' j).extract ((geom.nrHops - hops.size) *
-          geom.perHopRoutingInfoLength) (((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength)
-          + j * geom.perHopRoutingInfoLength)) :
+      = (midPad geom kem kdfS streamS hops' d' j).extract ((geom.nrHops - hops'.size) *
+          geom.perHopRoutingInfoLength) (((geom.nrHops - hops'.size) *
+          geom.perHopRoutingInfoLength) + j * geom.perHopRoutingInfoLength)) :
     (xorBytes (U'.extract 0 (geom.routingInfoLength - j * geom.perHopRoutingInfoLength))
-        (xorBytes (midFrag geom kem hops j fwd'
+        (xorBytes (midFrag geom kem hops' j fwd'
         ++ fwd'.extract (2 + kem.ciphertextSize)
-          (2 + kem.ciphertextSize + (hops.size - (j + 1)) * geom.perHopRoutingInfoLength)
-        ++ (midPad geom kem kdfS streamS hops d' j).extract 0 ((geom.nrHops - hops.size) *
+          (2 + kem.ciphertextSize + (hops'.size - (j + 1)) * geom.perHopRoutingInfoLength)
+        ++ (midPad geom kem kdfS streamS hops' d' j).extract 0 ((geom.nrHops - hops'.size) *
             geom.perHopRoutingInfoLength))
         (midFrag geom kem hops j fwd
         ++ fwd.extract (2 + kem.ciphertextSize)
@@ -229,10 +230,10 @@ theorem relayFront_headShift (hvalid : geom.ValidForKEM kem) (hmactag : macS.tag
           geom.perHopRoutingInfoLength)
     ∧ layerPast kem cipher macS kdfS streamS geom hops d payload j
       (xorBytes (U'.extract 0 (geom.routingInfoLength - j * geom.perHopRoutingInfoLength))
-        (xorBytes (midFrag geom kem hops j fwd'
+        (xorBytes (midFrag geom kem hops' j fwd'
         ++ fwd'.extract (2 + kem.ciphertextSize)
-          (2 + kem.ciphertextSize + (hops.size - (j + 1)) * geom.perHopRoutingInfoLength)
-        ++ (midPad geom kem kdfS streamS hops d' j).extract 0 ((geom.nrHops - hops.size) *
+          (2 + kem.ciphertextSize + (hops'.size - (j + 1)) * geom.perHopRoutingInfoLength)
+        ++ (midPad geom kem kdfS streamS hops' d' j).extract 0 ((geom.nrHops - hops'.size) *
             geom.perHopRoutingInfoLength))
         (midFrag geom kem hops j fwd
         ++ fwd.extract (2 + kem.ciphertextSize)
@@ -243,10 +244,10 @@ theorem relayFront_headShift (hvalid : geom.ValidForKEM kem) (hmactag : macS.tag
           (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (j + 1) = .ok fwd
     ∧ relayFront kem cipher macS kdfS streamS geom hops d payload j c
       (xorBytes (U'.extract 0 (geom.routingInfoLength - j * geom.perHopRoutingInfoLength))
-        (xorBytes (midFrag geom kem hops j fwd'
+        (xorBytes (midFrag geom kem hops' j fwd'
         ++ fwd'.extract (2 + kem.ciphertextSize)
-          (2 + kem.ciphertextSize + (hops.size - (j + 1)) * geom.perHopRoutingInfoLength)
-        ++ (midPad geom kem kdfS streamS hops d' j).extract 0 ((geom.nrHops - hops.size) *
+          (2 + kem.ciphertextSize + (hops'.size - (j + 1)) * geom.perHopRoutingInfoLength)
+        ++ (midPad geom kem kdfS streamS hops' d' j).extract 0 ((geom.nrHops - hops'.size) *
             geom.perHopRoutingInfoLength))
         (midFrag geom kem hops j fwd
         ++ fwd.extract (2 + kem.ciphertextSize)
@@ -255,8 +256,10 @@ theorem relayFront_headShift (hvalid : geom.ValidForKEM kem) (hmactag : macS.tag
             geom.perHopRoutingInfoLength)))
       ++ U.extract (geom.routingInfoLength - j * geom.perHopRoutingInfoLength)
           (geom.routingInfoLength + geom.perHopRoutingInfoLength))
-      = relayFront kem cipher macS kdfS streamS geom hops d' payload j c U' := by
+      = relayFront kem cipher macS kdfS streamS geom hops' d' payload j c U' := by
   obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hj' : j + 1 < hops'.size := lt_of_lt_of_eq hj hsz.symm
+  have hlen' : hops'.size ≤ geom.nrHops := le_of_eq_of_le hsz hlen
   have hjp : (j + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength := by
     rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
     exact Nat.mul_le_mul_right _ (by omega)
@@ -270,10 +273,10 @@ theorem relayFront_headShift (hvalid : geom.ValidForKEM kem) (hmactag : macS.tag
           (2 + kem.ciphertextSize + (hops.size - (j + 1)) * geom.perHopRoutingInfoLength)
         ++ (midPad geom kem kdfS streamS hops d j).extract 0 ((geom.nrHops - hops.size) *
             geom.perHopRoutingInfoLength)) := ⟨_, rfl⟩
-  obtain ⟨X1, hX1⟩ : ∃ X1, X1 = (midFrag geom kem hops j fwd'
+  obtain ⟨X1, hX1⟩ : ∃ X1, X1 = (midFrag geom kem hops' j fwd'
         ++ fwd'.extract (2 + kem.ciphertextSize)
-          (2 + kem.ciphertextSize + (hops.size - (j + 1)) * geom.perHopRoutingInfoLength)
-        ++ (midPad geom kem kdfS streamS hops d' j).extract 0 ((geom.nrHops - hops.size) *
+          (2 + kem.ciphertextSize + (hops'.size - (j + 1)) * geom.perHopRoutingInfoLength)
+        ++ (midPad geom kem kdfS streamS hops' d' j).extract 0 ((geom.nrHops - hops'.size) *
             geom.perHopRoutingInfoLength)) := ⟨_, rfl⟩
   rw [← hX0, ← hX1]
   obtain ⟨V, hV⟩ : ∃ V, V = xorBytes (U'.extract 0 (geom.routingInfoLength - j *
@@ -305,12 +308,12 @@ theorem relayFront_headShift (hvalid : geom.ValidForKEM kem) (hmactag : macS.tag
   refine ⟨hVs, hfV, ?_⟩
   have hs := relayFront_size geom kem kdfS streamS cipher macS hvalid hmactag hops d payload j c
     V fwd hj hlen hc hfV hcmd
-  have hs' := relayFront_size geom kem kdfS streamS cipher macS hvalid hmactag hops d' payload j
-    c U' fwd' hj hlen hc hfwd' hcmd
+  have hs' := relayFront_size geom kem kdfS streamS cipher macS hvalid hmactag hops' d' payload
+    j c U' fwd' hj' hlen' hc hfwd' hcmd'
   have h0 := relayFront_canon geom kem kdfS streamS cipher macS hvalid hmactag hops d payload j
     c V fwd hj hlen hVs hc hfV hs
-  have h1 := relayFront_canon geom kem kdfS streamS cipher macS hvalid hmactag hops d' payload j
-    c U' fwd' hj hlen hU' hc hfwd' hs'
+  have h1 := relayFront_canon geom kem kdfS streamS cipher macS hvalid hmactag hops' d' payload
+    j c U' fwd' hj' hlen' hU' hc hfwd' hs'
   rw [← hX0] at h0
   rw [← hX1] at h1
   have hv0 : v0AD.size = 2 := rfl
@@ -320,22 +323,24 @@ theorem relayFront_headShift (hvalid : geom.ValidForKEM kem) (hmactag : macS.tag
       X.size = (geom.routingInfoLength - j * geom.perHopRoutingInfoLength) := fun X T W h hT => by
     simp only [ByteArray.size_append, size_xorBytes, hc, hv0, hT] at h
     omega
-  have hTs : ∀ dd : RSOR.Draw geom, ((midPad geom kem kdfS streamS hops dd j).extract ((geom.nrHops
-      - hops.size) * geom.perHopRoutingInfoLength)
-      (((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength) + j *
-          geom.perHopRoutingInfoLength)).size = j * geom.perHopRoutingInfoLength := fun dd => by
-    have hap : ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength) ≤ geom.routingInfoLength
-        := by
+  have hTs : ∀ (hp : Array PathHop) (dd : RSOR.Draw geom), hp.size ≤ geom.nrHops →
+      j + 1 < hp.size →
+      ((midPad geom kem kdfS streamS hp dd j).extract ((geom.nrHops - hp.size) *
+          geom.perHopRoutingInfoLength)
+        ((geom.nrHops - hp.size) * geom.perHopRoutingInfoLength + j *
+            geom.perHopRoutingInfoLength)).size = j * geom.perHopRoutingInfoLength :=
+    fun hp dd hl hjj => by
+    have hap : (geom.nrHops - hp.size) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength := by
       rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
       exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
     unfold midPad
     rw [ByteArray.size_extract, size_xorBytes,
-      fillerAtF_size kem kdfS streamS geom hrouting hops _ _ j _ hlen (by
+      fillerAtF_size kem kdfS streamS geom hrouting hp _ _ j _ hl (by
         rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
-        omega) (zeroBytes_size _) (j + 1) hj, Nat.add_mul, Nat.succ_mul]
+        omega) (zeroBytes_size _) (j + 1) hjj, Nat.add_mul, Nat.succ_mul]
     omega
-  have hX0s := hXs X0 _ _ (h0 ▸ hs) (hTs d)
-  have hX1s := hXs X1 _ _ (h1 ▸ hs') (hTs d')
+  have hX0s := hXs X0 _ _ (h0 ▸ hs) (hTs hops d hlen hj)
+  have hX1s := hXs X1 _ _ (h1 ▸ hs') (hTs hops' d' hlen' hj')
   rw [h0, h1, htail, hV, Util.Bytes.extract_append_of_le _ _ (by rw [size_xorBytes, hUh]),
     extract_all _ _ (by rw [size_xorBytes, hUh]),
     xorBytes_shift X0 X1 _ (hX0s.trans hX1s.symm) (hUh.trans hX0s.symm)]
