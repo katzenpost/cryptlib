@@ -2008,6 +2008,20 @@ def lastShift (hops hops' : Array PathHop) (d d' : RSOR.Draw geom) (j : ℕ) (c 
     ++ U.extract (geom.routingInfoLength - j * 𝓅) 𝓃
 
 omit cipher macS in
+/-- The keystream with its head shifted has a keystream's length. -/
+theorem lastShift_size (hrouting : geom.routingInfoLength = 𝓅 * geom.nrHops)
+    (hops hops' : Array PathHop) (d d' : RSOR.Draw geom) (j : ℕ) (c U : ByteArray)
+    (hj : j + 1 ≤ geom.nrHops) (hU : U.size = 𝓃) :
+    (lastShift geom kem kdfS streamS hops hops' d d' j c U).size = 𝓃 := by
+  have hjp : (j + 1) * 𝓅 ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm 𝓅]
+    exact Nat.mul_le_mul_right _ hj
+  rw [Nat.succ_mul] at hjp
+  unfold lastShift
+  rw [ByteArray.size_append, size_xorBytes, ByteArray.size_extract, ByteArray.size_extract, hU]
+  omega
+
+omit cipher macS in
 set_option maxHeartbeats 1000000 in
 /-- **At the end of the path the shifted keystream takes one world to the other.** Two paths
 that end at the keyed hop, with the same hop keys in front, give the same header bytes once
