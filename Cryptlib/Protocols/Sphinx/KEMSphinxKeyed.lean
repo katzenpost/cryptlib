@@ -104,6 +104,73 @@ theorem procImplF_congr (sk : kem.PrivateKey) (c : kem.Ciphertext)
       · simp only [he, ↓reduceIte, h' (by simp [he])]
       · simp only [he, ↓reduceIte]
 
+/-- What `procImplF` answers to a packet: `f`'s answer if the packet carries `c`, and the
+honest node's otherwise. -/
+theorem procImplF_apply_inr (sk : kem.PrivateKey) (c : kem.Ciphertext)
+    (f : ByteArray → ProcResult) (pkt : ByteArray) :
+    procImplF kem cipher macS kdfS streamS geom sk c f (.inr pkt)
+      = pure (if carries kem c pkt = true then f pkt
+        else procWith kem cipher macS kdfS streamS geom
+          (kemDecap kem (ofVector (kem.encodePrivateKey sk))) pkt) := by
+  have hk := kemDecap_encodePrivateKey kem sk (pkt.extract 2 (2 + kem.ciphertextSize))
+  cases hdc : kem.decodeCiphertext
+      (toVecN kem.ciphertextSize (pkt.extract 2 (2 + kem.ciphertextSize))) with
+  | none =>
+    have hc : carries kem c pkt = false := by
+      unfold carries
+      rw [hdc]
+    rw [hdc] at hk
+    simp only [procImplF, QueryImpl.apply_compose, procFromDecC, decImplX,
+      QueryImpl.add_eq_hAdd, QueryImpl.add_apply_inr, hdc, hc]
+    unfold procWith
+    rw [unwrapKEMWith_const kem cipher macS kdfS streamS geom (kemDecap kem _), hk]
+    simp
+  | some c' =>
+    rw [hdc] at hk
+    dsimp only at hk
+    by_cases he : kem.encodeCiphertext c' = kem.encodeCiphertext c
+    · have hc : carries kem c pkt = true := by
+        unfold carries
+        rw [hdc]
+        exact decide_eq_true he
+      simp only [procImplF, QueryImpl.apply_compose, procFromDecC, decImplX,
+        QueryImpl.add_eq_hAdd, QueryImpl.add_apply_inr, hdc, hc]
+      simp [he]
+    · have hc : carries kem c pkt = false := by
+        unfold carries
+        rw [hdc]
+        exact decide_eq_false he
+      simp only [procImplF, QueryImpl.apply_compose, procFromDecC, decImplX,
+        QueryImpl.add_eq_hAdd, QueryImpl.add_apply_inr, hdc, hc,
+        ite_eq_right_of_eq_false _ _ (eq_false he), simulateQ_bind, simulateQ_pure]
+      rw [QueryImpl.simulateQ_add_liftM_query_right]
+      unfold procWith
+      rw [unwrapKEMWith_const kem cipher macS kdfS streamS geom (kemDecap kem _), hk]
+      simp [he]
+
+/-- The honest node's oracle from what it answers to a packet. -/
+def relayImpl (ans : ByteArray → ProcResult) : QueryImpl procSpec ProbComp :=
+  QueryImpl.add unifSpec.passthrough fun pkt => pure (ans pkt)
+
+/-- What the node answers to a packet when packets that carry `c` are answered by `f`. -/
+def relayAns (sk : kem.PrivateKey) (c : kem.Ciphertext) (f : ByteArray → ProcResult)
+    (pkt : ByteArray) : ProcResult :=
+  if carries kem c pkt = true then f pkt
+  else procWith kem cipher macS kdfS streamS geom
+    (kemDecap kem (ofVector (kem.encodePrivateKey sk))) pkt
+
+/-- `procImplF` is the node's oracle with the answers `relayAns`. -/
+theorem procImplF_eq_relayImpl (sk : kem.PrivateKey) (c : kem.Ciphertext)
+    (f : ByteArray → ProcResult) :
+    procImplF kem cipher macS kdfS streamS geom sk c f
+      = relayImpl (relayAns kem cipher macS kdfS streamS geom sk c f) := by
+  funext t
+  cases t with
+  | inl t =>
+    simp [procImplF, procFromDecC, decImplX, relayImpl, QueryImpl.add_eq_hAdd]
+    exact (QueryImpl.simulateQ_add_liftM_query_left (QueryImpl.id' unifSpec) _ t).trans (by simp)
+  | inr pkt => exact procImplF_apply_inr kem cipher macS kdfS streamS geom sk c f pkt
+
 /-- **Two handlers that agree except on bad packets.** The node's oracles with them differ, for
 any adversary and event, by at most the chance that the adversary sends a bad packet carrying
 `c`. The bad packets are counted in the run with the second handler. -/
@@ -478,6 +545,13 @@ theorem simulateQ_procImpl_liftM (sk : kem.PrivateKey) {α : Type} (x : ProbComp
   rw [QueryImpl.add_eq_hAdd, QueryImpl.simulateQ_add_liftM_left]
   simp
 
+/-- The node's oracle answers a sampling query by sampling. -/
+theorem simulateQ_relayImpl_liftM (ans : ByteArray → ProcResult) {α : Type} (x : ProbComp α) :
+    simulateQ (relayImpl ans) (liftM x : OracleComp procSpec α) = x := by
+  unfold relayImpl
+  rw [QueryImpl.add_eq_hAdd, QueryImpl.simulateQ_add_liftM_left]
+  simp
+
 /-- KEM Sphinx as the scheme of the games. -/
 abbrev sphinx : Protocols.RSOR.Scheme :=
   RSOR.scheme kem cipher macS kdfS streamS geom hvalid hmactag h16
@@ -539,6 +613,49 @@ theorem viaOracle_honest
           hs, hr, hsk h hr]
         rfl
     · simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.answer, hs]
+
+/-- **The relay behind an oracle, for any answers.** Answering `viaOracle`'s oracle with the
+answers `ans` gives the honest relays of the game with `.relay` processing a packet by `ans`.
+The relay's log is then in front of `ans`: a header it has seen is refused before `ans` is
+asked. -/
+theorem viaOracle_relayImpl (ans : ByteArray → ProcResult) (sk : Role → kem.PrivateKey)
+    (patch : Protocols.RSOR.Patch (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
+    {α : Type}
+    (oa : OracleComp
+      (Protocols.RSOR.oracleSpec (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) α)
+    (log : Protocols.RSOR.Log (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) :
+    simulateQ (relayImpl ans)
+        ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 sk patch)
+          oa).run log)
+      = (simulateQ (Protocols.RSOR.oracle (m := ProbComp)
+          (fun h o => pure (if h = .relay then RSOR.stepOf geom (ans (RSOR.join o))
+            else RSOR.proc kem cipher macS kdfS streamS geom (sk h) o))
+          (fun h msg o => pure (if h = .relay then
+              RSOR.replyOf cipher geom msg (ans (RSOR.join o))
+            else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o))
+          patch) oa).run log := by
+  refine simulateQ_StateT_compose _ _ _ (fun q log => ?_) oa log
+  rcases q with (t | ⟨h, o⟩) | ⟨h, msg, o⟩
+  · simp only [viaOracle, Protocols.RSOR.oracle]
+    simpa using simulateQ_relayImpl_liftM ans (liftM (OracleSpec.query t))
+  · by_cases hs : (h, o.1) ∈ log.seen
+    · simp [viaOracle, Protocols.RSOR.oracle, Protocols.RSOR.process, hs]
+    · by_cases hr : h = .relay
+      · subst hr
+        simp [viaOracle, Protocols.RSOR.oracle, Protocols.RSOR.process, hs,
+          simulateQ_relayImpl_liftM]
+        rfl
+      · simp [viaOracle, Protocols.RSOR.oracle, Protocols.RSOR.process, hs, hr,
+          simulateQ_relayImpl_liftM]
+        rfl
+  · by_cases hs : (h, o) ∈ log.held
+    · by_cases hr : h = .relay
+      · subst hr
+        simp [viaOracle, Protocols.RSOR.oracle, Protocols.RSOR.answer, hs]
+        rfl
+      · simp [viaOracle, Protocols.RSOR.oracle, Protocols.RSOR.answer, hs, hr]
+        rfl
+    · simp [viaOracle, Protocols.RSOR.oracle, Protocols.RSOR.answer, hs]
 
 end Games
 
