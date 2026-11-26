@@ -279,4 +279,47 @@ theorem evalDistEq_relaySeed {δ : Type} (q : RSOR.Request kem geom) (pos : ℕ)
 
 end BackKeyed
 
+/-! ## World 0 as its draws -/
+
+section BackGame
+
+open Cryptlib.Protocols.RSOR (Role)
+
+variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+  (geom : Geometry)
+  (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+  (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+
+local notation "𝒮" => sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16
+
+/-- **World 0 of SLU← as its draws**, with the seed of the honest relay's layer drawn on its
+own, and then the adversary's guess against the honest relays. -/
+theorem backward_play_false_evalDistEq (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.backwardUnlinkable (S := 𝒮)).Adversary) :
+    Protocols.RSOR.Property.play names A false
+      =ᵈ propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness geom)
+          ($ᵗ RSOR.Randomness geom) A >>= fun d =>
+        (simulateQ (Protocols.RSOR.honest
+            (honAt kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay names d.k.1 d.keys)
+            (fun h => if h = .relay then d.k.2 else (d.keys h).2)
+            (Protocols.RSOR.BackwardChallenge.world0 d.c
+              (relaySeed kem geom d.c.req d.c.pos d.o d.s)).patch)
+          (A.guess d.st (Protocols.RSOR.BackwardChallenge.world0 d.c
+            (relaySeed kem geom d.c.req d.c.pos d.o d.s)).onion)).run' d.log := by
+  refine (play_evalDistEq_honAt kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names A false).trans ?_
+  unfold Protocols.RSOR.Property.playFrom propDrawOf
+  simp only [bind_assoc, pure_bind]
+  refine EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+    EvalDistEq.bind_right _ fun k₂ => EvalDistEq.bind_right _ fun out => ?_
+  have hcong : ∀ (m m' : ProbComp (Protocols.RSOR.World 𝒮))
+      (F : Protocols.RSOR.World 𝒮 → ProbComp Bool), m = m' → m >>= F =ᵈ m' >>= F :=
+    fun _ _ _ h => h ▸ EvalDistEq.rfl
+  refine (hcong _ _ _ (Protocols.RSOR.backwardUnlinkable_world_false (S := 𝒮) out.1.1)).trans ?_
+  simp only [bind_assoc, pure_bind]
+  exact (evalDistEq_relaySeed kem geom out.1.1.req out.1.1.pos out.1.1.pos.isLt _).symm
+
+end BackGame
+
 end Cryptlib.Protocols.Sphinx.KEMSphinx
