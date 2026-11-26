@@ -66,4 +66,50 @@ theorem evalDistEq_setSeedBack {δ : Type} (j : ℕ) (hj : j < geom.nrHops)
 
 end Backward
 
+/-! ## The reply block in the sender's payload -/
+
+namespace RSOR
+
+variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+  (geom : Geometry)
+
+/-- **The reply block is the header of the first layer on the backward path**, then the first
+relay's name and the reply's payload key. -/
+theorem surb_fst (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (q : Request kem geom) (r : Randomness geom) (payload x0 : ByteArray)
+    (hb : 0 < q.back.hops.length)
+    (hx0 : layer kem cipher macS kdfS streamS geom (path kem q.back [.surbReply r.2.2.2]) r.2.1
+      payload 0 = .ok x0) :
+    (surb kem macS kdfS streamS geom q r).1
+      = x0.extract 0 geom.headerLength ++ ofVector q.back.hops[0].name ++ ofVector r.2.2.1 := by
+  unfold layer at hx0
+  dsimp only at hx0
+  simp only [fillerAt, Array.extract_size] at hx0
+  obtain ⟨-, hdr, keys, t, hcreate, -, -, hx⟩ :=
+    newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ _ _ hx0
+  have hh := createKEMHeader_hdr_size kem macS kdfS streamS geom _ _ _ hdr keys hvalid hmactag
+    hcreate
+  have hxh : x0.extract 0 geom.headerLength = hdr := by
+    rw [hx, ← hh]
+    exact Cryptlib.Util.Bytes.extract_append_left hdr _
+  unfold surb
+  dsimp only
+  rw [newKEMSURB_eq kem macS kdfS streamS geom _ _ _ _ _ _ hcreate, path_getElem! kem _ _ 0 hb,
+    hxh]
+
+/-- The sender's payload, with the header of the reply's first layer written out. -/
+theorem body_eq (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (q : Request kem geom) (r : Randomness geom) (payload x0 : ByteArray)
+    (hb : 0 < q.back.hops.length)
+    (hx0 : layer kem cipher macS kdfS streamS geom (path kem q.back [.surbReply r.2.2.2]) r.2.1
+      payload 0 = .ok x0) :
+    body kem macS kdfS streamS geom q r
+      = ⟨#[if q.back.hops.isEmpty then 0 else 1, 0]⟩
+        ++ (x0.extract 0 geom.headerLength ++ ofVector q.back.hops[0].name ++ ofVector r.2.2.1)
+        ++ ofVector q.msg := by
+  unfold body
+  rw [surb_fst kem cipher macS kdfS streamS geom hvalid hmactag q r payload x0 hb hx0]
+
+end RSOR
+
 end Cryptlib.Protocols.Sphinx.KEMSphinx
