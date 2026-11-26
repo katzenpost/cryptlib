@@ -1179,8 +1179,9 @@ theorem procKeysD_forward (km : Vector UInt8 32) (U x pkt X : ByteArray)
 
 /-- **A hop at the end of a path, on a masked header.** Given its MAC key and keystream `U`, a
 hop whose routing information is `X` under the head of `U`, with a valid tag, and whose `X`
-begins with commands that name no next hop and carry no reply block, delivers the decrypted
-payload it is given when that begins with the zero tag, and rejects the packet otherwise. -/
+begins with commands that name no next hop, hands over the decrypted payload it is given: all
+of it when the commands carry a reply block, and otherwise what is behind the zero tag when
+the payload begins with it. -/
 theorem procKeysD_last (km : Vector UInt8 32) (U x pkt X : ByteArray)
     (hsz : pkt.size = 2 + kem.ciphertextSize + geom.routingInfoLength + macLength + x.size)
     (hx : 0 < x.size) (hxt : geom.payloadTagLength ≤ x.size) (hver : pkt.extract 0 2 = v0AD)
@@ -1197,11 +1198,14 @@ theorem procKeysD_last (km : Vector UInt8 32) (U x pkt X : ByteArray)
     (hnext : cmds.findSome? (fun
       | .nextNodeHop id m => some (id, m)
       | _ => none) = none)
-    (hsurb : cmds.any (fun
+    {sr : Bool} (hsurb : cmds.any (fun
       | .surbReply _ => true
-      | _ => false) = false) :
+      | _ => false) = sr) :
     procKeysD kem macS geom km U x pkt
-      = if (x.extract 0 geom.payloadTagLength).data.all (· == 0) then
+      = if sr = true then
+          some (some x, Cryptlib.Primitives.Hash.Sha512.sha512_256
+            (pkt.extract 2 (2 + kem.ciphertextSize)), cmds, none)
+        else if (x.extract 0 geom.payloadTagLength).data.all (· == 0) then
           some (some (x.extract geom.payloadTagLength x.size),
             Cryptlib.Primitives.Hash.Sha512.sha512_256
               (pkt.extract 2 (2 + kem.ciphertextSize)), cmds, none)
@@ -1236,13 +1240,18 @@ theorem procKeysD_last (km : Vector UInt8 32) (U x pkt X : ByteArray)
   obtain rfl : o = none := hfs.symm.trans hnext
   dsimp only
   simp only [show ¬ x.size < geom.payloadTagLength by omega, ↓reduceIte]
-  generalize hsr : List.any cmds _ = sr
-  obtain rfl : sr = false := hsr.symm.trans hsurb
-  by_cases ht : ((x.extract 0 geom.payloadTagLength).data.all fun a => a == 0) = true
-  · simp only [ht, Bool.not_true, Bool.false_eq_true, ↓reduceIte]
+  generalize hsr : List.any cmds _ = sr'
+  obtain rfl : sr' = sr := hsr.symm.trans hsurb
+  cases sr' with
+  | true =>
+    simp only [↓reduceIte]
     rfl
-  · simp only [ht, Bool.not_false, Bool.false_eq_true, ↓reduceIte]
-    rfl
+  | false =>
+    by_cases ht : ((x.extract 0 geom.payloadTagLength).data.all fun a => a == 0) = true
+    · simp only [ht, Bool.not_true, Bool.false_eq_true, ↓reduceIte]
+      rfl
+    · simp only [ht, Bool.not_false, Bool.false_eq_true, ↓reduceIte]
+      rfl
 
 /-! ## The honest relay's answer to its own header -/
 
@@ -1446,14 +1455,16 @@ theorem procKeysD_relayFrontLast (hvalid : geom.ValidForKEM kem)
     (hnext : (hops[j]!).commands.findSome? (fun
       | .nextNodeHop id m => some (id, m)
       | _ => none) = none)
-    (hsurb : (hops[j]!).commands.any (fun
+    {sr : Bool} (hsurb : (hops[j]!).commands.any (fun
       | .surbReply _ => true
-      | _ => false) = false) :
+      | _ => false) = sr) :
     procKeysD kem macS geom km U x
         (relayFrontLast kem kdfS streamS geom hops d j c U
           ++ ofVector (macS.mac (ofVector km) (relayFrontLast kem kdfS streamS geom hops d j c U))
           ++ y)
-      = if (x.extract 0 geom.payloadTagLength).data.all (· == 0) then
+      = if sr = true then
+          some (some x, Cryptlib.Primitives.Hash.Sha512.sha512_256 c, (hops[j]!).commands, none)
+        else if (x.extract 0 geom.payloadTagLength).data.all (· == 0) then
           some (some (x.extract geom.payloadTagLength x.size),
             Cryptlib.Primitives.Hash.Sha512.sha512_256 c, (hops[j]!).commands, none)
         else none := by
@@ -2266,7 +2277,8 @@ theorem stepOf_relayFrontLast (hvalid : geom.ValidForKEM kem)
       (by rw [Util.Bytes.size_ofVector]; exact hx)
       (by rw [Util.Bytes.size_ofVector]; omega)
       (by rw [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector])
-      (by rw [hcmd]; simp) (by rw [hcmd]; rfl) (by rw [hcmd]; rfl), hcmd]
+      (by rw [hcmd]; simp) (by rw [hcmd]; rfl) (sr := false) (by rw [hcmd]; rfl), hcmd]
+  simp only [Bool.false_eq_true, ↓reduceIte]
   split_ifs <;> rfl
 
 /-- At the end of the path the keyed hop replies from what is behind the zero tag of the
@@ -2302,8 +2314,41 @@ theorem replyOf_relayFrontLast (hvalid : geom.ValidForKEM kem)
       (by rw [Util.Bytes.size_ofVector]; exact hx)
       (by rw [Util.Bytes.size_ofVector]; omega)
       (by rw [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector])
-      (by rw [hcmd]; simp) (by rw [hcmd]; rfl) (by rw [hcmd]; rfl), hcmd]
+      (by rw [hcmd]; simp) (by rw [hcmd]; rfl) (sr := false) (by rw [hcmd]; rfl), hcmd]
+  simp only [Bool.false_eq_true, ↓reduceIte]
   split_ifs <;> rfl
+
+/-- At the end of a path that ends in a reply, the keyed hop does not reply: a reply packet's
+payload is not read for a SURB. -/
+theorem replyOf_relayFrontLast_reply (hvalid : geom.ValidForKEM kem)
+    (hmactag : macS.tagSize = macLength) (hops : Array PathHop) (d : RSOR.Draw geom) (j : ℕ)
+    (c U : ByteArray) (km : Vector UInt8 32)
+    (x y : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (hj : j + 1 = hops.size) (hlen : hops.size ≤ geom.nrHops) (hU : U.size = 𝓃)
+    (hc : c.size = kem.ciphertextSize)
+    (hs : (relayFrontLast kem kdfS streamS geom hops d j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength)
+    (hx : 0 < geom.payloadTagLength + geom.forwardPayloadLength)
+    (sid : Vector UInt8 16) (hcmd : (hops[j]!).commands = [.surbReply sid]) (m : RSOR.Msg geom) :
+    RSOR.replyOf cipher geom m (procKeysD kem macS geom km U (ofVector x)
+        (RSOR.join (Util.Bytes.toVecN geom.headerLength
+          (relayFrontLast kem kdfS streamS geom hops d j c U
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFrontLast kem kdfS streamS geom hops d j c U))), y)))
+      = none := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have had : adLength = 2 := rfl
+  unfold RSOR.join
+  dsimp only
+  rw [Util.Bytes.ofVector_toVecN _ (by
+      rw [ByteArray.size_append, hs, Util.Bytes.size_ofVector, hmactag, hhdr, had]),
+    procKeysD_relayFrontLast geom kem kdfS streamS macS hvalid hmactag hops d j c U km
+      (ofVector x) (ofVector y) hj hlen hU hc hs
+      (by rw [Util.Bytes.size_ofVector]; exact hx)
+      (by rw [Util.Bytes.size_ofVector]; omega)
+      (by rw [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector])
+      (by rw [hcmd]; simp) (by rw [hcmd]; rfl) (sr := true) (by rw [hcmd]; rfl), hcmd]
+  rfl
 
 
 end Pad

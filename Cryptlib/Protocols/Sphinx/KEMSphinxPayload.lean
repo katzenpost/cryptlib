@@ -112,6 +112,43 @@ def headerRelays (sk : Role → kem.PrivateKey) (c : kem.Ciphertext) (km : Vecto
       else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o)
     dec patch
 
+/-- **A relay that answers one header, by its patched answers under that header.** Two such
+relays with the same patch, which differ in the keystream and the decryption under the header,
+are the same when their patched answers under the header are. -/
+theorem headerRelays_congr (sk : Role → kem.PrivateKey) (c : kem.Ciphertext)
+    (km : Vector UInt8 32) (U U' : ByteArray) (Hv : Vector UInt8 geom.headerLength)
+    (D D' : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+      → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (patch : Protocols.RSOR.Patch (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
+    (hstep : ∀ o : RSOR.Onion geom, o.1 = Hv →
+      patch.proc ρ o (RSOR.stepOf geom
+          (procKeysD kem macS geom km U (ofVector (D o.2)) (RSOR.join o)))
+        = patch.proc ρ o (RSOR.stepOf geom
+          (procKeysD kem macS geom km U' (ofVector (D' o.2)) (RSOR.join o))))
+    (hrep : ∀ (m : RSOR.Msg geom) (o : RSOR.Onion geom), o.1 = Hv →
+      patch.reply ρ m o (RSOR.replyOf cipher geom m
+          (procKeysD kem macS geom km U (ofVector (D o.2)) (RSOR.join o)))
+        = patch.reply ρ m o (RSOR.replyOf cipher geom m
+          (procKeysD kem macS geom km U' (ofVector (D' o.2)) (RSOR.join o)))) :
+    headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk c km U Hv D patch
+      = headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk c km U' Hv D' patch
+          := by
+  refine Protocols.RSOR.oracle_patch_congr (S := sphinx kem cipher macS kdfS streamS geom hvalid
+      hmactag h16) patch patch _ _ _ _
+    (fun h o => ?_) (fun h m o => ?_)
+  · by_cases hc : h = ρ ∧ o.1 = Hv
+    · obtain ⟨rfl, ho⟩ := hc
+      exact (congrArg (patch.proc h o) (ite_eq_left ⟨rfl, ho⟩)).trans
+        ((hstep o ho).trans (congrArg (patch.proc h o) (ite_eq_left ⟨rfl, ho⟩).symm))
+    · exact (congrArg (patch.proc h o) (ite_eq_right hc)).trans
+        (congrArg (patch.proc h o) (ite_eq_right hc).symm)
+  · by_cases hc : h = ρ ∧ o.1 = Hv
+    · obtain ⟨rfl, ho⟩ := hc
+      exact (congrArg (patch.reply h m o) (ite_eq_left ⟨rfl, ho⟩)).trans
+        ((hrep m o ho).trans (congrArg (patch.reply h m o) (ite_eq_left ⟨rfl, ho⟩).symm))
+    · exact (congrArg (patch.reply h m o) (ite_eq_right hc)).trans
+        (congrArg (patch.reply h m o) (ite_eq_right hc).symm)
+
 /-- **The relay that answers one header, in the game.** If the relay's answers `f` to the
 ciphertext `c` are, on an onion with the header `Hv`, what its MAC key and keystream give from
 the decryption `D` of the payload, and nothing under any other header, then answering the

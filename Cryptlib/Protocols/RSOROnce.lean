@@ -322,15 +322,15 @@ theorem oracle_draw {α : Type} (oa : OracleComp (oracleSpec S) α) (log : Log S
 
 end Draw
 
-/-- **A patch that does not draw is part of the relays' answers.** Relays with pure answers
-and a patch that maps them to pure answers are relays with the patched answers and no patch. -/
-theorem oracle_pure_patch (P : Patch S)
+/-- **Relays with pure answers are their patched answers.** Two sets of relays with pure
+answers, each with a patch, are the same when the patched answers are. -/
+theorem oracle_patch_congr (P P' : Patch S)
     (proc proc' : Role → S.Onion → Option S.Step)
     (reply reply' : Role → S.Msg → S.Onion → Option (S.Name × S.Onion))
-    (hp : ∀ h o, P.proc h o (proc h o) = pure (proc' h o))
-    (hr : ∀ h m o, P.reply h m o (reply h m o) = reply' h m o) :
+    (hp : ∀ h o, P.proc h o (proc h o) = P'.proc h o (proc' h o))
+    (hr : ∀ h m o, P.reply h m o (reply h m o) = P'.reply h m o (reply' h m o)) :
     oracle (m := ProbComp) (fun h o => pure (proc h o)) (fun h m o => pure (reply h m o)) P
-      = oracle (fun h o => pure (proc' h o)) (fun h m o => pure (reply' h m o)) {} := by
+      = oracle (fun h o => pure (proc' h o)) (fun h m o => pure (reply' h m o)) P' := by
   funext t
   rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
   · simp [oracle]
@@ -340,6 +340,17 @@ theorem oracle_pure_patch (P : Patch S)
   · refine StateT.ext fun log => ?_
     rw [oracle_answer_run, oracle_answer_run]
     simp [hr]
+
+/-- **A patch that does not draw is part of the relays' answers.** Relays with pure answers
+and a patch that maps them to pure answers are relays with the patched answers and no patch. -/
+theorem oracle_pure_patch (P : Patch S)
+    (proc proc' : Role → S.Onion → Option S.Step)
+    (reply reply' : Role → S.Msg → S.Onion → Option (S.Name × S.Onion))
+    (hp : ∀ h o, P.proc h o (proc h o) = pure (proc' h o))
+    (hr : ∀ h m o, P.reply h m o (reply h m o) = reply' h m o) :
+    oracle (m := ProbComp) (fun h o => pure (proc h o)) (fun h m o => pure (reply h m o)) P
+      = oracle (fun h o => pure (proc' h o)) (fun h m o => pure (reply' h m o)) {} :=
+  oracle_patch_congr P {} proc proc' reply reply' hp hr
 
 namespace ForwardChallenge
 
