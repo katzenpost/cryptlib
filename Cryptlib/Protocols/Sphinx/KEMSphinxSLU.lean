@@ -110,6 +110,35 @@ theorem body_eq (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLen
   unfold body
   rw [surb_fst kem cipher macS kdfS streamS geom hvalid hmactag q r payload x0 hb hx0]
 
+/-- **A reply layer has the header of the layer on the backward path.** -/
+theorem formBack_fst (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (q : Request kem geom) (r : Randomness geom) (m : Msg geom) (j : Fin q.back.hops.length) :
+    (formBack kem cipher macS kdfS streamS geom q r m j).1
+      = (match layer kem cipher macS kdfS streamS geom (path kem q.back [.surbReply r.2.2.2]) r.2.1
+          ⟨Array.replicate geom.forwardPayloadLength 0⟩ j with
+        | .ok pkt => (split geom pkt).1
+        | .error _ => (default : Onion geom).1) := by
+  unfold formBack
+  dsimp only
+  cases h : layer kem cipher macS kdfS streamS geom (path kem q.back [.surbReply r.2.2.2]) r.2.1
+      ⟨Array.replicate geom.forwardPayloadLength 0⟩ j with
+  | error e => rfl
+  | ok pkt =>
+    dsimp only
+    obtain ⟨hsz, -⟩ := join_split_layer kem cipher macS kdfS streamS geom hvalid hmactag _ _ _ _ _ h
+    have hA : (pkt.extract 0 geom.headerLength).size = geom.headerLength := by
+      rw [ByteArray.size_extract]
+      omega
+    unfold split
+    dsimp only
+    have h1 := Cryptlib.Util.Bytes.extract_append_left (pkt.extract 0 geom.headerLength)
+      (peeled kem cipher kdfS (path kem q.back [.surbReply r.2.2.2])
+        (r.2.1.1.toArray.extract 0 (path kem q.back [.surbReply r.2.2.2]).size)
+        ((replyPacket kem cipher macS kdfS streamS geom q r m).1.extract geom.headerLength
+          (replyPacket kem cipher macS kdfS streamS geom q r m).1.size) j)
+    rw [hA] at h1
+    rw [h1]
+
 end RSOR
 
 /-! ## The first layer, with the honest relay's reply layer keyed -/
@@ -165,6 +194,36 @@ theorem backOnionF_real (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize 
   dsimp only
   rw [RSOR.body_eq kem cipher macS kdfS streamS geom hvalid hmactag q (setSeedBack geom r k s) _ x0
       hb hx0]
+  rfl
+
+/-- The header of the reply's layer at backward position `i`, past the relay at position `k`,
+from that relay's header keystream. -/
+def backHeaderU (q : RSOR.Request kem geom) (r : RSOR.Randomness geom) (k : ℕ) (U : ByteArray)
+    (i : ℕ) : Vector UInt8 geom.headerLength :=
+  match layerPast kem cipher macS kdfS streamS geom (RSOR.path kem q.back [.surbReply r.2.2.2])
+      r.2.1
+      ⟨Array.replicate geom.forwardPayloadLength 0⟩ k U i with
+  | .ok pkt => (RSOR.split geom pkt).1
+  | .error _ => (default : RSOR.Onion geom).1
+
+/-- **A reply layer past the relay depends on the relay's keys through its keystream only.**
+With the keystream of the keys that the seed `s` gives at backward position `k`, `backHeaderU`
+is the header of the reply's layer built from the randomness with `s` at that position. -/
+theorem formBack_fst_real (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (q : RSOR.Request kem geom) (r : RSOR.Randomness geom) (m : RSOR.Msg geom) (k : ℕ)
+    (i : Fin q.back.hops.length) (hki : k < i) (s : Vector UInt8 32) (c ss : ByteArray)
+    (henc : kemEncap kem ((RSOR.path kem q.back [.surbReply r.2.2.2])[k]!).publicKey s
+      = .ok (c, ss)) :
+    (RSOR.formBack kem cipher macS kdfS streamS geom q (setSeedBack geom r k s) m i).1
+      = backHeaderU kem cipher macS kdfS streamS geom q r k
+        (ksOf streamS geom (keyTuple (deriveHopKeys kdfS ss))) i := by
+  rw [RSOR.formBack_fst kem cipher macS kdfS streamS geom hvalid hmactag]
+  unfold backHeaderU
+  rw [layerPast_real kem cipher macS kdfS streamS geom (RSOR.path kem q.back [.surbReply r.2.2.2])
+      r.2.1
+    ⟨Array.replicate geom.forwardPayloadLength 0⟩ k i s c ss hki
+    (by rw [RSOR.path_size]; exact i.isLt.le)
+    (by rw [RSOR.path_size]; exact q.back.length_le) henc]
   rfl
 
 end BackKeyed
