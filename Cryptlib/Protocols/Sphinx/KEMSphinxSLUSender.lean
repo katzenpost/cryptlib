@@ -645,6 +645,329 @@ theorem swap_false_sub_keyedIdeal_le (names : Role → RSOR.Name) (A : (Protocol
           true]).toReal
   linarith
 
+/-! ## The MAC step at the sender -/
+
+/-- The bytes of the fresh onion's last layer which the sender's MAC covers, from the sender's
+keys other than its MAC key. -/
+def swapFreshM (names : Role → RSOR.Name) {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.swapPair
+        (Protocols.RSOR.freshSwap (S := 𝒮)) (replySwap kem cipher macS kdfS streamS geom hvalid
+        hmactag h16)) .sender names pk) (o : (RSOR.Randomness geom × RSOR.Msg geom × RSOR.Name ×
+        RSOR.Randomness geom)) (c : kem.Ciphertext)
+    (rest : RestKeys) : ByteArray :=
+  relayFrontAt kem cipher macS kdfS streamS geom (RSOR.path kem
+      (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1).fwd [.recipient
+      (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1).receiver]) o.2.2.2.1 (RSOR.body
+      kem macS kdfS streamS geom (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1)
+      o.2.2.2) ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c))
+      (ksOf streamS geom (withMAC rest default))
+
+/-- World 1 with the fresh onion, from the tag of those bytes. -/
+def swapFreshViewT (names : Role → RSOR.Name) {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.swapPair
+        (Protocols.RSOR.freshSwap (S := 𝒮)) (replySwap kem cipher macS kdfS streamS geom hvalid
+        hmactag h16)) .sender names pk) (o : (RSOR.Randomness geom × RSOR.Msg geom × RSOR.Name ×
+        RSOR.Randomness geom)) (c : kem.Ciphertext)
+    (rest : RestKeys) (tag : Vector UInt8 macS.tagSize) : Protocols.RSOR.World 𝒮 :=
+  Protocols.RSOR.BackwardChallenge.world1With ch.c
+    (RSOR.form kem cipher macS kdfS streamS geom ch.c.req o.1 ch.c.req.first)
+    (Protocols.RSOR.BackwardChallenge.ownAt ch.c o.1) (Protocols.RSOR.BackwardChallenge.exitAt ch.c
+        o.1)
+    (RSOR.split geom (wrapUp kem cipher macS kdfS streamS geom (RSOR.path kem
+        (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1).fwd [.recipient
+        (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1).receiver]) o.2.2.2.1 0
+        ((ch.c.req.back.drop ch.c.pos).hops.length - 1)
+      (swapFreshM kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o c rest
+        ++ ofVector tag
+        ++ relayBackAt kem cipher macS kdfS streamS geom (RSOR.path kem
+            (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1).fwd [.recipient
+            (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1).receiver]) o.2.2.2.1
+            (RSOR.body kem macS kdfS streamS geom (Protocols.RSOR.BackwardChallenge.swapReq ch.c
+            o.2.1 o.2.2.1) o.2.2.2) ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ksOf streamS
+            geom (withMAC rest default)) (encOf cipher (withMAC rest default)))))
+    (RSOR.split geom
+      (swapFreshM kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o c rest
+        ++ ofVector tag
+        ++ relayBackAt kem cipher macS kdfS streamS geom (RSOR.path kem
+            (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1).fwd [.recipient
+            (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1).receiver]) o.2.2.2.1
+            (RSOR.body kem macS kdfS streamS geom (Protocols.RSOR.BackwardChallenge.swapReq ch.c
+            o.2.1 o.2.2.1) o.2.2.2) ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ksOf streamS
+            geom (withMAC rest default)) (encOf cipher (withMAC rest default)))).1
+
+/-- The draws of the fresh onion's keyed game on which the onion is as the closed form says. -/
+def swapFreshGood {names : Role → RSOR.Name} {A : (Protocols.RSOR.swapPair
+    (Protocols.RSOR.freshSwap (S := 𝒮)) (replySwap kem cipher macS kdfS streamS geom hvalid hmactag
+    h16)).Adversary}
+    (d : KeyedDraw (swapFreshAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)) :
+        Prop :=
+  d.k.1.1 = kem.derivePublicKey d.k.2 ∧ kem.Reliable (kem.stateFromSeed d.s) ∧
+    (∃ pkt, RSOR.layer kem cipher macS kdfS streamS geom
+      (RSOR.path kem (Protocols.RSOR.BackwardChallenge.swapReq (propChOf d).c (propOthOf d).2.1
+          (propOthOf d).2.2.1).fwd [.recipient (Protocols.RSOR.BackwardChallenge.swapReq (propChOf
+          d).c (propOthOf d).2.1 (propOthOf d).2.2.1).receiver])
+      (setSeed geom (propOthOf d).2.2.2 (((propChOf d).c.req.back.drop (propChOf
+          d).c.pos).hops.length
+          - 1) d.s).1
+      (RSOR.body kem macS kdfS streamS geom (Protocols.RSOR.BackwardChallenge.swapReq (propChOf
+          d).c (propOthOf d).2.1 (propOthOf d).2.2.1)
+        (setSeed geom (propOthOf d).2.2.2 (((propChOf d).c.req.back.drop (propChOf
+            d).c.pos).hops.length - 1) d.s)) 0 = .ok pkt) ∧
+    ∀ m, m < (((propChOf d).c.req.back.drop (propChOf d).c.pos).hops.length - 1) →
+      kem.Reliable (kem.stateFromSeed (propOthOf d).2.2.2.1.1.toArray[m]!)
+
+omit [SampleableType kem.Plaintext] in
+set_option maxHeartbeats 2000000 in
+/-- On a good draw, the fresh onion's view uses the sender's MAC key for one tag, on bytes of
+the length of a header without its tag. -/
+theorem swapFreshGood_view (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair
+    (Protocols.RSOR.freshSwap (S := 𝒮)) (replySwap kem cipher macS kdfS streamS geom hvalid hmactag
+    h16)).Adversary)
+    (d : KeyedDraw (swapFreshAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)) (u
+        : KeyTuple)
+    (hg : swapFreshGood kem cipher macS kdfS streamS geom hvalid hmactag h16 d) :
+    (swapFreshSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names).view d.cs.1 d.o d.c
+        u
+        = swapFreshViewT kem cipher macS kdfS streamS geom hvalid hmactag h16 names (propChOf d)
+            (propOthOf d) d.c (restOf u)
+          (macS.mac (ofVector u.2.2.1)
+            (swapFreshM kem cipher macS kdfS streamS geom hvalid hmactag h16 names (propChOf d)
+                (propOthOf d) d.c (restOf u))) ∧
+      (swapFreshM kem cipher macS kdfS streamS geom hvalid hmactag h16 names (propChOf d)
+          (propOthOf d) d.c (restOf u)).size
+        = 2 + kem.ciphertextSize + geom.routingInfoLength := by
+  obtain ⟨hpk, hrel, ⟨pkt, hpkt⟩, hfront⟩ := hg
+  obtain ⟨ch, hch⟩ : ∃ ch, ch = propChOf d := ⟨_, rfl⟩
+  obtain ⟨o, ho⟩ : ∃ o, o = propOthOf d := ⟨_, rfl⟩
+  rw [← hch, ← ho] at hpkt hfront ⊢
+  have hv : (swapFreshSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names).view d.cs.1
+      d.o d.c u
+      = swapFreshView kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o d.c u := by
+    rw [hch, ho]
+    rfl
+  rw [hv]
+  have hj : ((ch.c.req.back.drop ch.c.pos).hops.length - 1) <
+      (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1).fwd.hops.length :=
+    Nat.sub_one_lt (Nat.ne_of_gt (List.length_pos_iff.2
+      (ch.c.req.back.drop_ne ch.c.pos.isLt)))
+  have hle : (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1).fwd.hops.length ≤
+      geom.nrHops := (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1).fwd.length_le
+  obtain ⟨ct, ss, henc⟩ := layer_zero_encap kem cipher macS kdfS streamS geom
+      (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1).fwd _ _ _ pkt hpkt
+      ((ch.c.req.back.drop ch.c.pos).hops.length - 1) hj
+  have hkey := dropLast_key kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch hj
+  have hs : (setSeed geom o.2.2.2 ((ch.c.req.back.drop ch.c.pos).hops.length - 1)
+      d.s).1.1.toArray[((ch.c.req.back.drop ch.c.pos).hops.length - 1)]! = d.s := by
+    simp [setSeed, lt_of_lt_of_le hj hle]
+  rw [hs] at henc
+  replace henc : kemEncap kem (ofVector (kem.encodePublicKey d.k.1.1)) d.s = .ok (ct, ss) :=
+    (congrArg (fun key : Key kem => kemEncap kem (ofVector (kem.encodePublicKey key.1)) d.s)
+      hkey).symm.trans henc
+  obtain ⟨rfl, rfl⟩ := kemEncap_encapOf kem d.k.1.1 d.s ct ss henc
+  obtain ⟨hz, hjj, hsize⟩ := onionK_parts kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.BackwardChallenge.swapReq ch.c o.2.1 o.2.2.1) o.2.2.2 ⟨((ch.c.req.back.drop
+      ch.c.pos).hops.length - 1), hj⟩
+    d.k.1 d.k.2 hkey hpk d.s hrel d.c _ pkt henc hpkt hfront u
+  refine ⟨?_, hsize⟩
+  unfold swapFreshView swapFreshViewT swapFreshM
+  rw [show onionK kem cipher macS kdfS streamS geom (Protocols.RSOR.BackwardChallenge.swapReq ch.c
+      o.2.1 o.2.2.1) o.2.2.2 ((ch.c.req.back.drop ch.c.pos).hops.length - 1) d.c u 0 = _ from hz,
+    show onionK kem cipher macS kdfS streamS geom (Protocols.RSOR.BackwardChallenge.swapReq ch.c
+        o.2.1 o.2.2.1) o.2.2.2 ((ch.c.req.back.drop ch.c.pos).hops.length - 1) d.c u
+        ((ch.c.req.back.drop ch.c.pos).hops.length - 1) = _ from hjj]
+  rfl
+
+/-- **The MAC step for the fresh onion.** With uniform keys at the sender, the sender may
+answer the challenge ciphertext under the onion's last header only, at the cost of a forgery
+against the MAC and of the draws that are not good. -/
+theorem swapFresh_keyedIdeal_sub_tagged_le (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair
+    (Protocols.RSOR.freshSwap (S := 𝒮)) (replySwap kem cipher macS kdfS streamS geom hvalid hmactag
+    h16)).Adversary) :
+    |(Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+        (swapFreshAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[x =
+            true]).toReal
+      - (Pr{let x ← (keyedGameH cipher macS kdfS streamS geom (swapFreshAdv kem cipher macS kdfS
+          streamS geom hvalid hmactag h16 names A)
+          (onlyHeader cipher macS streamS geom (tagged macS
+            (swapFreshM kem cipher macS kdfS streamS geom hvalid hmactag h16 names))))}[x =
+                true]).toReal|
+    ≤ (Pr{let x ← (Primitives.MAC.forgeExp macS (forgeAdv cipher macS kdfS streamS geom
+          (swapFreshAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) (swapFreshM
+              kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (swapFreshViewT kem cipher macS kdfS streamS geom hvalid hmactag h16 names)))}[x =
+              true]).toReal
+      + (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom
+          (swapFreshAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[¬
+              swapFreshGood kem cipher macS kdfS streamS geom hvalid hmactag h16 d]).toReal :=
+  keyedIdeal_sub_tagged_le cipher macS kdfS streamS geom (swapFreshAdv kem cipher macS kdfS streamS
+      geom hvalid hmactag h16 names A) hmactag
+    (swapFreshM kem cipher macS kdfS streamS geom hvalid hmactag h16 names) (swapFreshViewT kem
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (swapFreshGood kem cipher macS kdfS
+        streamS geom hvalid hmactag h16)
+    (fun d r hg => (swapFreshGood_view kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+        d (withMAC r default) hg).2)
+    (fun d u hg => (swapFreshGood_view kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+        d u hg).1)
+    (fun _ _ _ _ _ => rfl)
+
+/-- The bytes of the last layer of the header sent on in world 1′ which the sender's MAC
+covers, from the sender's keys other than its MAC key. -/
+def swapReplyM (names : Role → RSOR.Name) {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.swapPair
+        (Protocols.RSOR.freshSwap (S := 𝒮)) (replySwap kem cipher macS kdfS streamS geom hvalid
+        hmactag h16)) .sender names pk) (o : (RSOR.Randomness geom × RSOR.Randomness geom × Block
+        geom)) (c : kem.Ciphertext)
+    (rest : RestKeys) : ByteArray :=
+  relayFrontAt kem default macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop ch.c.pos)
+      [.surbReply o.2.1.2.2.2]) o.2.1.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩
+      ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c)) (ksOf
+      streamS geom (withMAC rest default))
+
+/-- World 1′, from the tag of those bytes. -/
+def swapReplyViewT (names : Role → RSOR.Name) {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.swapPair
+        (Protocols.RSOR.freshSwap (S := 𝒮)) (replySwap kem cipher macS kdfS streamS geom hvalid
+        hmactag h16)) .sender names pk) (o : (RSOR.Randomness geom × RSOR.Randomness geom × Block
+        geom)) (c : kem.Ciphertext)
+    (rest : RestKeys) (tag : Vector UInt8 macS.tagSize) : Protocols.RSOR.World 𝒮 :=
+  Protocols.RSOR.BackwardChallenge.world1With ch.c
+    (RSOR.form kem cipher macS kdfS streamS geom ch.c.req o.1 ch.c.req.first)
+    (Protocols.RSOR.BackwardChallenge.ownAt ch.c o.1) (Protocols.RSOR.BackwardChallenge.exitAt ch.c
+        o.1)
+    ((RSOR.split geom (wrapUp kem default macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop
+        ch.c.pos) [.surbReply o.2.1.2.2.2]) o.2.1.1 0 ((ch.c.req.back.drop ch.c.pos).hops.length -
+        1)
+      (swapReplyM kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o c rest
+        ++ ofVector tag
+        ++ relayBackAt kem default macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop
+            ch.c.pos) [.surbReply o.2.1.2.2.2]) o.2.1.1 ⟨Array.replicate geom.forwardPayloadLength
+            0⟩ ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ksOf streamS geom (withMAC rest
+            default)) id))).1, o.2.2)
+    (RSOR.split geom
+      (swapReplyM kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o c rest
+        ++ ofVector tag
+        ++ relayBackAt kem default macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop
+            ch.c.pos) [.surbReply o.2.1.2.2.2]) o.2.1.1 ⟨Array.replicate geom.forwardPayloadLength
+            0⟩ ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ksOf streamS geom (withMAC rest
+            default)) id)).1
+
+/-- The draws of world 1′'s keyed game on which the header sent on is as the closed form
+says. -/
+def swapReplyGood {names : Role → RSOR.Name} {A : (Protocols.RSOR.swapPair
+    (Protocols.RSOR.freshSwap (S := 𝒮)) (replySwap kem cipher macS kdfS streamS geom hvalid hmactag
+    h16)).Adversary}
+    (d : KeyedDraw (swapReplyAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)) :
+        Prop :=
+  d.k.1.1 = kem.derivePublicKey d.k.2 ∧ kem.Reliable (kem.stateFromSeed d.s) ∧
+    (∃ pkt, RSOR.layer kem default macS kdfS streamS geom (RSOR.path kem ((propChOf
+        d).c.req.back.drop (propChOf d).c.pos) [.surbReply (propOthOf d).2.1.2.2.2])
+      (setSeed geom (propOthOf d).2.1 (((propChOf d).c.req.back.drop (propChOf
+          d).c.pos).hops.length - 1) d.s).1 ⟨Array.replicate geom.forwardPayloadLength 0⟩ 0 = .ok
+          pkt) ∧
+    ∀ m, m < (((propChOf d).c.req.back.drop (propChOf d).c.pos).hops.length - 1) → kem.Reliable
+        (kem.stateFromSeed (propOthOf d).2.1.1.1.toArray[m]!)
+
+omit [SampleableType kem.Plaintext] in
+set_option maxHeartbeats 2000000 in
+/-- On a good draw, world 1′'s view uses the sender's MAC key for one tag, on bytes of the
+length of a header without its tag. -/
+theorem swapReplyGood_view (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair
+    (Protocols.RSOR.freshSwap (S := 𝒮)) (replySwap kem cipher macS kdfS streamS geom hvalid hmactag
+    h16)).Adversary)
+    (d : KeyedDraw (swapReplyAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)) (u
+        : KeyTuple)
+    (hg : swapReplyGood kem cipher macS kdfS streamS geom hvalid hmactag h16 d) :
+    (swapReplySetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names).view d.cs.1 d.o d.c
+        u
+        = swapReplyViewT kem cipher macS kdfS streamS geom hvalid hmactag h16 names (propChOf d)
+            (propOthOf d) d.c (restOf u)
+          (macS.mac (ofVector u.2.2.1)
+            (swapReplyM kem cipher macS kdfS streamS geom hvalid hmactag h16 names (propChOf d)
+                (propOthOf d) d.c (restOf u))) ∧
+      (swapReplyM kem cipher macS kdfS streamS geom hvalid hmactag h16 names (propChOf d)
+          (propOthOf d) d.c (restOf u)).size
+        = 2 + kem.ciphertextSize + geom.routingInfoLength := by
+  obtain ⟨hpk, hrel, ⟨pkt, hpkt⟩, hfront⟩ := hg
+  obtain ⟨ch, hch⟩ : ∃ ch, ch = propChOf d := ⟨_, rfl⟩
+  obtain ⟨o, ho⟩ : ∃ o, o = propOthOf d := ⟨_, rfl⟩
+  rw [← hch, ← ho] at hpkt hfront ⊢
+  have hv : (swapReplySetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names).view d.cs.1
+      d.o d.c u
+      = swapReplyView kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o d.c u := by
+    rw [hch, ho]
+    rfl
+  rw [hv]
+  have hj : ((ch.c.req.back.drop ch.c.pos).hops.length - 1) < (ch.c.req.back.drop
+      ch.c.pos).hops.length :=
+    Nat.sub_one_lt (Nat.ne_of_gt (List.length_pos_iff.2
+      (ch.c.req.back.drop_ne ch.c.pos.isLt)))
+  have hle : (ch.c.req.back.drop ch.c.pos).hops.length ≤ geom.nrHops :=
+    (ch.c.req.back.drop ch.c.pos).length_le
+  obtain ⟨ct, ss, henc⟩ := layer_zero_encap kem default macS kdfS streamS geom (ch.c.req.back.drop
+      ch.c.pos) _ _ _ pkt
+    hpkt ((ch.c.req.back.drop ch.c.pos).hops.length - 1) hj
+  have hkey := dropLast_key kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch hj
+  have hs : (setSeed geom o.2.1 ((ch.c.req.back.drop ch.c.pos).hops.length - 1)
+      d.s).1.1.toArray[((ch.c.req.back.drop ch.c.pos).hops.length - 1)]! = d.s := by
+    simp [setSeed, lt_of_lt_of_le hj hle]
+  rw [hs] at henc
+  replace henc : kemEncap kem (ofVector (kem.encodePublicKey d.k.1.1)) d.s = .ok (ct, ss) :=
+    (congrArg (fun key : Key kem => kemEncap kem (ofVector (kem.encodePublicKey key.1)) d.s)
+      hkey).symm.trans henc
+  obtain ⟨rfl, rfl⟩ := kemEncap_encapOf kem d.k.1.1 d.s ct ss henc
+  obtain ⟨hz, hsize, hjj⟩ := routeK_parts kem default macS kdfS streamS geom hvalid hmactag h16
+      (ch.c.req.back.drop ch.c.pos)
+    [.surbReply o.2.1.2.2.2]
+    (fun x hx => by
+      rw [List.mem_singleton.1 hx]
+      exact ⟨by simp, by simp⟩)
+    o.2.1.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩ ((ch.c.req.back.drop
+        ch.c.pos).hops.length - 1) hj d.k.1 d.k.2 hkey hpk d.s hrel d.c _ pkt henc hpkt hfront u
+  refine ⟨?_, hsize⟩
+  unfold swapReplyView swapReplyViewT swapReplyM headerF
+  rw [layerF_id, layerF_id,
+    show layerPK kem default macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop ch.c.pos)
+        [.surbReply o.2.1.2.2.2]) o.2.1.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩
+        ((ch.c.req.back.drop ch.c.pos).hops.length - 1)
+      (ofVector (kem.encodeCiphertext d.c)) u 0 = _ from hz,
+    show layerPK kem default macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop ch.c.pos)
+        [.surbReply o.2.1.2.2.2]) o.2.1.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩
+        ((ch.c.req.back.drop ch.c.pos).hops.length - 1)
+      (ofVector (kem.encodeCiphertext d.c)) u ((ch.c.req.back.drop ch.c.pos).hops.length - 1) = _
+          from hjj]
+  rfl
+
+/-- **The MAC step for world 1′.** -/
+theorem swapReply_keyedIdeal_sub_tagged_le (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair
+    (Protocols.RSOR.freshSwap (S := 𝒮)) (replySwap kem cipher macS kdfS streamS geom hvalid hmactag
+    h16)).Adversary) :
+    |(Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+        (swapReplyAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[x =
+            true]).toReal
+      - (Pr{let x ← (keyedGameH cipher macS kdfS streamS geom (swapReplyAdv kem cipher macS kdfS
+          streamS geom hvalid hmactag h16 names A)
+          (onlyHeader cipher macS streamS geom (tagged macS
+            (swapReplyM kem cipher macS kdfS streamS geom hvalid hmactag h16 names))))}[x =
+                true]).toReal|
+    ≤ (Pr{let x ← (Primitives.MAC.forgeExp macS (forgeAdv cipher macS kdfS streamS geom
+          (swapReplyAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) (swapReplyM
+              kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (swapReplyViewT kem cipher macS kdfS streamS geom hvalid hmactag h16 names)))}[x =
+              true]).toReal
+      + (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom
+          (swapReplyAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[¬
+              swapReplyGood kem cipher macS kdfS streamS geom hvalid hmactag h16 d]).toReal :=
+  keyedIdeal_sub_tagged_le cipher macS kdfS streamS geom (swapReplyAdv kem cipher macS kdfS streamS
+      geom hvalid hmactag h16 names A) hmactag
+    (swapReplyM kem cipher macS kdfS streamS geom hvalid hmactag h16 names) (swapReplyViewT kem
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (swapReplyGood kem cipher macS kdfS
+        streamS geom hvalid hmactag h16)
+    (fun d r hg => (swapReplyGood_view kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+        d (withMAC r default) hg).2)
+    (fun d u hg => (swapReplyGood_view kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+        d u hg).1)
+    (fun _ _ _ _ _ => rfl)
+
 /-- **Telling the two onions apart, with uniform keys at the sender.** The advantage is at most
 the chance of a bad draw with each onion, the cost of replacing the sender's keys with each (KEM
 and KDF), and the distance between the two keyed games with uniform keys. -/
