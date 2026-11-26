@@ -1550,6 +1550,205 @@ theorem nextDrawn_eq_last (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Ad
     (nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch (U, km, s, (r, msg,
         nm, r'), u, v) (ofVector U')).1.onion)).run' st.2.1) H
 
+/-! ## The two worlds over their draws -/
+
+/-- World 0 after its draws: the ideal game with the relay's MAC key, its header keystream,
+the seed of its ciphertext, the challenger's randomness and the ideal cipher's two blocks. -/
+def run0 (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (k : Key kem × kem.PrivateKey)
+    (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1)
+    (st : A.State × Protocols.RSOR.Log 𝒮 × (Role → kem.PrivateKey))
+    (U : Keystream geom) (km s : Vector UInt8 32) (r : RSOR.Randomness geom)
+    (u v : Block geom) : ProbComp Bool :=
+  forwardRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+    (RSOR.Randomness geom) ($ᵗ RSOR.Randomness geom)
+    (fun ch r c t =>
+      { onion := onionK kem cipher macS kdfS streamS geom ch.c.req r ch.c.pos c t 0 }) A
+    (forwardMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+    (forwardBlockU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+    (forwardViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+    km (ofVector U) ⟨k, (ch, st), s, r⟩ u v
+
+set_option maxHeartbeats 2000000 in
+/-- **World 1's draws, relabelled, are world 0's draws, before the end of the path.** -/
+theorem relabel_forward (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (k : Key kem × kem.PrivateKey)
+    (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1)
+    (st : A.State × Protocols.RSOR.Log 𝒮 × (Role → kem.PrivateKey))
+    (hn : ch.c.pos + 1 < ch.c.req.fwd.hops.length) :
+    (do
+      let U' ← $ᵗ (Keystream geom)
+      let x ← nextDraw geom
+      let g ← $ᵗ (Block geom)
+      run0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A k ch st
+        (Util.Bytes.toVecN _ (shiftStream geom kem kdfS streamS
+          (RSOR.path kem ch.c.req.fwd [.recipient ch.c.req.receiver])
+          (RSOR.path kem (ch.c.req.fwd.take (ch.c.pos + 1)) [.recipient x.2.2.2.1.2.2.1])
+          x.2.2.2.1.1.1 (RSOR.mixSeeds geom x.2.2.2.1.1 x.2.2.2.1.2.2.2 ch.c.pos).1
+          x.2.2.2.1.2.2.2.1 ch.c.pos
+          (ofVector (kem.encodeCiphertext (encapOf kem k.1.1 x.2.2.1).1)) (ofVector x.1)
+          (ofVector U')
+          (match layerPast kem cipher macS kdfS streamS geom
+              (RSOR.path kem ch.c.req.fwd [.recipient ch.c.req.receiver]) x.2.2.2.1.1.1
+              (RSOR.body kem macS kdfS streamS geom ch.c.req x.2.2.2.1.1) ch.c.pos (ofVector U')
+              (ch.c.pos + 1) with
+            | .ok f => f
+            | .error _ => ByteArray.empty)))
+        x.2.1 x.2.2.1 (RSOR.mixSeeds geom x.2.2.2.1.1 x.2.2.2.1.2.2.2 ch.c.pos) x.2.2.2.2.1 g)
+      =ᵈ (do
+        let U ← $ᵗ (Keystream geom)
+        let km ← $ᵗ (Vector UInt8 32)
+        let s ← $ᵗ (Vector UInt8 32)
+        let r ← $ᵗ (RSOR.Randomness geom)
+        let u ← $ᵗ (Block geom)
+        let v ← $ᵗ (Block geom)
+        run0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A k ch st U km s r u v) :=
+            by
+  simp only [nextDraw, shortDraw, bind_assoc, pure_bind]
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun
+      _ => EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right
+      _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_const _ _) ?_
+  refine EvalDistEq.trans (
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun
+      _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun
+      _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun
+      _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun km => EvalDistEq.bind_right _ fun s =>
+    EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun nm =>
+    RSOR.evalDistEq_shiftStream kem cipher macS kdfS streamS geom hvalid ch.c.req.fwd
+      [.recipient ch.c.req.receiver] [.recipient nm]
+      (fun r => RSOR.body kem macS kdfS streamS geom ch.c.req r) ch.c.pos hn
+      (ofVector (kem.encodeCiphertext (encapOf kem k.1.1 s).1))
+      (fun U₀ r₀ => $ᵗ (Block geom) >>= fun u => $ᵗ (Block geom) >>= fun g =>
+        run0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A k ch st U₀ km s r₀ u g))
+            ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_const _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_const _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact EvalDistEq.rfl
+
+set_option maxHeartbeats 2000000 in
+/-- **World 1's draws, relabelled, are world 0's draws, at the end of the path.** -/
+theorem relabel_last (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (k : Key kem × kem.PrivateKey)
+    (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1)
+    (st : A.State × Protocols.RSOR.Log 𝒮 × (Role → kem.PrivateKey)) :
+    (do
+      let _ ← $ᵗ (Keystream geom)
+      let x ← nextDraw geom
+      let _ ← $ᵗ (Block geom)
+      run0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A k ch st
+        (Util.Bytes.toVecN _ (lastShift geom kem kdfS streamS
+          (RSOR.path kem ch.c.req.fwd [.recipient ch.c.req.receiver])
+          (RSOR.path kem (ch.c.req.fwd.take (ch.c.pos + 1)) [.recipient x.2.2.2.1.2.2.1])
+          (RSOR.mixSeeds geom x.2.2.2.1.1 x.2.2.2.1.2.2.2 ch.c.pos).1
+          x.2.2.2.1.2.2.2.1 ch.c.pos
+          (ofVector (kem.encodeCiphertext (encapOf kem k.1.1 x.2.2.1).1)) (ofVector x.1)))
+        x.2.1 x.2.2.1 (RSOR.mixSeeds geom x.2.2.2.1.1 x.2.2.2.1.2.2.2 ch.c.pos) x.2.2.2.2.1
+        x.2.2.2.2.2)
+      =ᵈ (do
+        let U ← $ᵗ (Keystream geom)
+        let km ← $ᵗ (Vector UInt8 32)
+        let s ← $ᵗ (Vector UInt8 32)
+        let r ← $ᵗ (RSOR.Randomness geom)
+        let u ← $ᵗ (Block geom)
+        let v ← $ᵗ (Block geom)
+        run0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A k ch st U km s r u v) :=
+            by
+  simp only [nextDraw, shortDraw, bind_assoc, pure_bind]
+  refine EvalDistEq.trans (
+    OracleComp.EvalDistEq.bind_const _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun
+      _ => EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right
+      _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_const _ _) ?_
+  refine EvalDistEq.trans (
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun
+      _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun km => EvalDistEq.bind_right _ fun s =>
+    EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun nm =>
+    RSOR.evalDistEq_lastShift kem kdfS streamS geom hvalid ch.c.req.fwd
+      [.recipient ch.c.req.receiver] [.recipient nm] ch.c.pos ch.c.pos.isLt
+      (ofVector (kem.encodeCiphertext (encapOf kem k.1.1 s).1))
+      (fun U₀ r₀ => $ᵗ (Block geom) >>= fun u => $ᵗ (Block geom) >>= fun v =>
+        run0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A k ch st U₀ km s r₀ u v))
+            ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_const _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_const _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact EvalDistEq.rfl
+
 end ForwardFinal
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
