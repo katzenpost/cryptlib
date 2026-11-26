@@ -116,9 +116,25 @@ has processed, which is why the oracle remembers its block instead of answering 
 For this step a draw is good only if the sender's block at the relay has a payload's length.
 That it always has, when the onion can be built, is not proved yet.
 
-Not proved yet: that those two games agree, up to the chance that the adversary sends the
-original's ciphertext, which it is never shown, and the chance that a uniform block passes the
-payload's tag check; a bound on the bad draws;
+The last comparison is in progress (`KEMSphinxTLUFinal.lean`, `KEMSphinxPad.lean`). Proved so
+far:
+
+- Rejecting the original's ciphertext, which the adversary is never shown, costs the chance
+  that it sends that ciphertext (`next_hidden_le`). That chance is left as a probability
+  (`nextHidden`): the KEM type has no statement yet that a ciphertext is hard to guess.
+- World 1 after its draws is a relay that answers one header (`nextOwn_run`), as world 0 is.
+- The payload the challenger draws when it answers a changed onion may be drawn before the game,
+  because a relay processes a header once (`oracle_draw`, `patchWith_draw`).
+- What the relay does with its own header for any keystream: before the end of the path it
+  forwards the next layer's header with the payload it is given (`stepOf_relayFront`), at the
+  end it delivers when the payload begins with the zero tag (`stepOf_relayFrontLast`).
+- The relay's header on a path that goes on is its header on a path that ends at it, once the
+  head of its keystream is shifted (`relayFront_eq_last`). The next layer built with other hops
+  in front is the same layer once the tail of the keystream is shifted (`layerPast_shift`).
+  The layers in front read only the hops in front (`wrapUp_congr`).
+
+Not proved yet: the equality of the two games from these pieces, up to the chance that a
+uniform block passes the payload's tag check; a bound on the bad draws;
 SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx.
 
 ## How the bounds are built

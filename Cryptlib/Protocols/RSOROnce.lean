@@ -341,4 +341,52 @@ theorem oracle_pure_patch (P : Patch S)
     rw [oracle_answer_run, oracle_answer_run]
     simp [hr]
 
+namespace ForwardChallenge
+
+variable {hon : Honest S} (c : ForwardChallenge hon)
+
+/-- `patchWith` with the random payload `g` given: what the honest relay answers in the second
+world of TLU→ when the payload it draws for a changed onion is `g`. -/
+def patchDrawn (next : S.Onion) (r : S.Randomness) (mine : S.Onion) (g : S.Payload) : Patch S where
+  proc h o out := pure <|
+    if h = .relay ∧ o.1 = mine.1 then
+      if hn : c.pos + 1 < c.req.fwd.hops.length then
+        some (.forward c.req.fwd.hops[c.pos.val + 1].name
+          (if o.2 = mine.2 then next else (next.1, g)))
+      else out.map fun _ => .deliver c.req.msg c.req.receiver
+    else out
+  reply := (c.patchWith next r mine).reply
+
+/-- **The second world of TLU→ may draw its random payload first.** The relay answers the
+replacement's header once, so the payload it draws for a changed onion can be drawn before the
+game. -/
+theorem patchWith_draw (next : S.Onion) (r : S.Randomness) (mine : S.Onion)
+    (procM : Role → S.Onion → ProbComp (Option S.Step))
+    (replyM : Role → S.Msg → S.Onion → ProbComp (Option (S.Name × S.Onion)))
+    {α : Type} (oa : OracleComp (oracleSpec S) α) (log : Log S) :
+    (simulateQ (oracle procM replyM (c.patchWith next r mine)) oa).run log
+      =ᵈ $ᵗ S.Payload >>= fun g =>
+        (simulateQ (oracle procM replyM (c.patchDrawn next r mine g)) oa).run log := by
+  refine oracle_draw mine.1 ($ᵗ S.Payload) (c.patchWith next r mine)
+    (c.patchDrawn next r mine) procM replyM (fun h o out => ?_)
+    (fun g g' h o out hne => ?_) (fun _ => rfl) oa log
+  · unfold patchWith patchDrawn
+    dsimp only
+    by_cases hc : h = Role.relay ∧ o.1 = mine.1
+    · rw [if_pos hc]
+      simp only [hc, and_self, ↓reduceIte]
+      split_ifs with hn ho
+      · exact (OracleComp.EvalDistEq.bind_const _ _).symm
+      · simp only [bind_pure_comp]
+        exact EvalDistEq.rfl
+      · exact (OracleComp.EvalDistEq.bind_const _ _).symm
+    · rw [if_neg hc]
+      simp only [hc, ↓reduceIte]
+      exact (OracleComp.EvalDistEq.bind_const _ _).symm
+  · unfold patchDrawn
+    dsimp only
+    rw [if_neg hne, if_neg hne]
+
+end ForwardChallenge
+
 end Cryptlib.Protocols.RSOR
