@@ -585,18 +585,24 @@ theorem nextIdeal_sub_reject_le
 /-! ## The keystream of the original's layer at the relay -/
 
 /-- The adversary against the keystream generator that plays world 1 from the header keystream
-of the original's layer at the relay, with the relay rejecting that layer's ciphertext. -/
-def nextStreamAdv (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+of the original's layer at the relay, with the relay answering that layer's ciphertext by
+`f`. -/
+def nextStreamAdvF (f : kem.PrivateKey → ByteArray → ProcResult)
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
     PRGScheme.PRGAdversary (Keystream geom) := fun U' => do
   let k ← keygen kem
   let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
     ((nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).pre k.1)
   let s' ← $ᵗ (Vector UInt8 32)
   let x ← nextDraw geom
-  simulateQ (procImplF kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s').1
-      (fun _ => none))
+  simulateQ (procImplF kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s').1 (f k.2))
     ((nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).post cs.2
       (nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names cs.1 x (ofVector U')))
+
+/-- That adversary with the relay rejecting that layer's ciphertext. -/
+def nextStreamAdv (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    PRGScheme.PRGAdversary (Keystream geom) :=
+  nextStreamAdvF kem cipher macS kdfS streamS geom hvalid hmactag h16 names (fun _ _ => none) A
 
 omit [SampleableType kem.Plaintext] in
 /-- **The stream cipher step for the original's layer.** Once the relay rejects that layer's
@@ -621,7 +627,7 @@ theorem nextReject_eq_prg (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Ad
         (fun _ _ _ _ _ => none)
       = $ᵗ KeyTuple >>= fun u => K u.2.1 u.2.2.2 := by
     unfold keyedGameH
-    simp only [K, nextStreamAdv, nextSetup, nextView, ksOf, keystreamPRG, id_map',
+    simp only [K, nextStreamAdv, nextStreamAdvF, nextSetup, nextView, ksOf, keystreamPRG, id_map',
       Cryptlib.Util.Bytes.ofVector_toVecN _ (streamS.keystream_size _ _ _)]
   have hR : PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
         (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
