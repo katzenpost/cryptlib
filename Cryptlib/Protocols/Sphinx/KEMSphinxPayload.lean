@@ -95,7 +95,7 @@ def headerRelays (sk : Role → kem.PrivateKey) (c : kem.Ciphertext) (km : Vecto
         (Protocols.RSOR.Log (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
         ProbComp) :=
   Protocols.RSOR.withDec (S := sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)
-    Hv (fun o => o.2)
+    .relay Hv (fun o => o.2)
     (fun o x => RSOR.stepOf geom
       (procKeysD kem macS geom km ks (ofVector x) (RSOR.join o)))
     (fun msg o x => RSOR.replyOf cipher geom msg
@@ -306,7 +306,7 @@ def adv : Primitives.WideBlockCipher.OneQueryAdversary
   choose iv := (fun x => (G.plain x, x)) <$> G.draw iv
   guess st e :=
     (simulateQ (Protocols.RSOR.viaDec (S := 𝒮)
-        (G.header st) (fun o => o.2)
+        .relay (G.header st) (fun o => o.2)
         (fun o x => RSOR.stepOf geom
           (procKeysD kem macS geom (G.macKey st) (G.ks st) (ofVector x)
             (RSOR.join o)))
@@ -330,7 +330,7 @@ theorem exp_eq (hwf : ∀ iv, ∀ x ∈ support (G.draw iv), (G.log x).WF) (b : 
   simp only [bind_map_left]
   refine bind_congr fun kp => bind_congr fun iv =>
     bind_congr_of_forall_mem_support _ fun x hx => bind_congr fun u => bind_congr fun v => ?_
-  exact (Protocols.RSOR.viaDec_decOnce _ _ _ _ _ _ _ _ _ _ (hwf iv x hx)).symm
+  exact (Protocols.RSOR.viaDec_decOnce _ _ _ _ _ _ _ _ _ _ _ (hwf iv x hx)).symm
 
 end PayloadGame
 

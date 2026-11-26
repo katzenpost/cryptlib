@@ -20,32 +20,32 @@ open OracleComp OracleSpec
 open Cryptlib.Primitives.WideBlockCipher (decSpec decOnce decFirst simulateQ_decOnce_liftM
   simulateQ_decOnce_query)
 
-variable {S : Scheme} {L : Nat} (H : S.Header) (key : S.Onion → Vector UInt8 L)
+variable {S : Scheme} {L : Nat} (ρ : Role) (H : S.Header) (key : S.Onion → Vector UInt8 L)
   (step : S.Onion → Vector UInt8 L → Option S.Step)
   (rep : S.Msg → S.Onion → Vector UInt8 L → Option (S.Name × S.Onion))
   (proc : Role → S.Onion → Option S.Step)
   (reply : Role → S.Msg → S.Onion → Option (S.Name × S.Onion))
 
-/-- The honest relays, with `.relay` asking a decryption oracle under the header `H`. -/
+/-- The honest relays, with the relay `ρ` asking a decryption oracle under the header `H`. -/
 def viaDec (patch : Patch S) :
     QueryImpl (oracleSpec S) (StateT (Log S) (OracleComp (decSpec L))) :=
   oracle
-    (fun h o => if h = .relay ∧ o.1 = H then
+    (fun h o => if h = ρ ∧ o.1 = H then
         step o <$> (liftM ((Vector UInt8 L →ₒ Vector UInt8 L).query (key o)) :
           OracleComp (decSpec L) _)
       else pure (proc h o))
-    (fun h msg o => if h = .relay ∧ o.1 = H then
+    (fun h msg o => if h = ρ ∧ o.1 = H then
         rep msg o <$> (liftM ((Vector UInt8 L →ₒ Vector UInt8 L).query (key o)) :
           OracleComp (decSpec L) _)
       else pure (reply h msg o))
     patch
 
-/-- The honest relays, with `.relay` decrypting by `dec` under the header `H`. -/
+/-- The honest relays, with the relay `ρ` decrypting by `dec` under the header `H`. -/
 def withDec (dec : Vector UInt8 L → Vector UInt8 L) (patch : Patch S) :
     QueryImpl (oracleSpec S) (StateT (Log S) ProbComp) :=
   oracle
-    (fun h o => pure (if h = .relay ∧ o.1 = H then step o (dec (key o)) else proc h o))
-    (fun h msg o => pure (if h = .relay ∧ o.1 = H then rep msg o (dec (key o))
+    (fun h o => pure (if h = ρ ∧ o.1 = H then step o (dec (key o)) else proc h o))
+    (fun h msg o => pure (if h = ρ ∧ o.1 = H then rep msg o (dec (key o))
       else reply h msg o))
     patch
 
@@ -54,16 +54,16 @@ decrypts one block only is a relay that decrypts by itself. -/
 theorem viaDec_decOnce (dec : Vector UInt8 L → Vector UInt8 L) (patch : Patch S) {α : Type}
     (oa : OracleComp (oracleSpec S) α) (log : Log S) (hw : log.WF) :
     (simulateQ (decOnce dec)
-        ((simulateQ (viaDec H key step rep proc reply patch) oa).run' log)).run' none
-      = (simulateQ (withDec H key step rep proc reply dec patch) oa).run' log := by
+        ((simulateQ (viaDec ρ H key step rep proc reply patch) oa).run' log)).run' none
+      = (simulateQ (withDec ρ H key step rep proc reply dec patch) oa).run' log := by
   let inv : Log S × Option (Vector UInt8 L) → Prop := fun s =>
     s.1.WF ∧ ∀ x, s.2 = some x →
-      (Role.relay, H) ∈ s.1.seen ∧ ∀ o, (Role.relay, o) ∈ s.1.held → o.1 = H → key o = x
+      (ρ, H) ∈ s.1.seen ∧ ∀ o, (ρ, o) ∈ s.1.held → o.1 = H → key o = x
   let combined : QueryImpl (oracleSpec S) (StateT (Log S × Option (Vector UInt8 L)) ProbComp) :=
     fun q => StateT.mk fun s =>
       (fun r : (_ × Log S) × Option (Vector UInt8 L) => (r.1.1, r.1.2, r.2)) <$>
-        (simulateQ (decOnce dec) ((viaDec H key step rep proc reply patch q).run s.1)).run s.2
-  have hc := simulateQ_StateT_StateT_compose (viaDec H key step rep proc reply patch)
+        (simulateQ (decOnce dec) ((viaDec ρ H key step rep proc reply patch q).run s.1)).run s.2
+  have hc := simulateQ_StateT_StateT_compose (viaDec ρ H key step rep proc reply patch)
     (decOnce dec) combined (fun q s c => by
       simp only [combined, StateT.run, StateT.mk, Functor.map_map]
       exact (id_map _).symm) oa log none
@@ -81,7 +81,7 @@ theorem viaDec_decOnce (dec : Vector UInt8 L → Vector UInt8 L) (patch : Patch 
       · simp [combined, viaDec, oracle, process, hseen] at hy
         subst hy
         exact hs
-      · by_cases hr : h = Role.relay ∧ o.1 = H
+      · by_cases hr : h = ρ ∧ o.1 = H
         · cases memo with
           | some x =>
             obtain ⟨rfl, rfl⟩ := hr
@@ -109,7 +109,7 @@ theorem viaDec_decOnce (dec : Vector UInt8 L → Vector UInt8 L) (patch : Patch 
             exact absurd ⟨rfl, he⟩ hr
           · exact h2 o' hm he
     · by_cases hheld : (h, o) ∈ log.held
-      · by_cases hr : h = Role.relay ∧ o.1 = H
+      · by_cases hr : h = ρ ∧ o.1 = H
         · cases memo with
           | some x =>
             obtain ⟨rfl, rfl⟩ := hr
@@ -134,14 +134,14 @@ theorem viaDec_decOnce (dec : Vector UInt8 L → Vector UInt8 L) (patch : Patch 
         subst hy
         exact hs
   have hproj : ∀ t s, inv s → Prod.map id Prod.fst <$> (combined t).run s
-      = (withDec H key step rep proc reply dec patch t).run (Prod.fst s) := by
+      = (withDec ρ H key step rep proc reply dec patch t).run (Prod.fst s) := by
     intro t s hs
     obtain ⟨log, memo⟩ := s
     rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
     · simp [combined, viaDec, withDec, oracle, simulateQ_decOnce_liftM]
     · by_cases hseen : (h, o.1) ∈ log.seen
       · simp [combined, viaDec, withDec, oracle, process, hseen]
-      · by_cases hr : h = Role.relay ∧ o.1 = H
+      · by_cases hr : h = ρ ∧ o.1 = H
         · cases memo with
           | some x =>
             obtain ⟨rfl, rfl⟩ := hr
@@ -153,7 +153,7 @@ theorem viaDec_decOnce (dec : Vector UInt8 L → Vector UInt8 L) (patch : Patch 
         · simp [combined, viaDec, withDec, oracle, process, hseen, hr,
             simulateQ_decOnce_liftM]
     · by_cases hheld : (h, o) ∈ log.held
-      · by_cases hr : h = Role.relay ∧ o.1 = H
+      · by_cases hr : h = ρ ∧ o.1 = H
         · cases memo with
           | some x =>
             obtain ⟨rfl, rfl⟩ := hr
@@ -167,7 +167,7 @@ theorem viaDec_decOnce (dec : Vector UInt8 L → Vector UInt8 L) (patch : Patch 
         · simp [combined, viaDec, withDec, oracle, answer, hheld, hr]
       · simp [combined, viaDec, withDec, oracle, answer, hheld]
   have hp := map_run_simulateQ_eq_of_query_map_eq_inv' combined
-    (withDec H key step rep proc reply dec patch) inv Prod.fst hinv hproj oa (log, none)
+    (withDec ρ H key step rep proc reply dec patch) inv Prod.fst hinv hproj oa (log, none)
     ⟨hw, fun x hx => by cases hx⟩
   simp only [StateT.run'_eq, simulateQ_map, StateT.run_map, Functor.map_map]
   rw [hc, ← hp]
@@ -175,7 +175,7 @@ theorem viaDec_decOnce (dec : Vector UInt8 L → Vector UInt8 L) (patch : Patch 
 
 /-! ## A patch that draws once
 
-A relay processes a header once. So a patch that draws only under one header at `.relay` may
+A relay processes a header once. So a patch that draws only under one header at the relay `ρ` may
 draw before the game starts. -/
 
 section Draw
@@ -207,7 +207,7 @@ theorem oracle_answer_run (h : Role) (msg : S.Msg) (o : S.Onion) (log : Log S) :
   · simp [oracle, answer, hs]
 
 variable (hP : ∀ h o out, P.proc h o out =ᵈ D >>= fun g => (Pe g).proc h o out)
-  (hH : ∀ g g' h o out, ¬ (h = Role.relay ∧ o.1 = H) →
+  (hH : ∀ g g' h o out, ¬ (h = ρ ∧ o.1 = H) →
     (Pe g).proc h o out = (Pe g').proc h o out)
   (hR : ∀ g, (Pe g).reply = P.reply)
 
@@ -235,11 +235,11 @@ theorem oracle_draw_query (t : (oracleSpec S).Domain) (log : Log S) :
 include hH hR in
 /-- Once the relay has seen the header, the draw is not used. -/
 theorem oracle_draw_seen (g g' : X) {α : Type} (oa : OracleComp (oracleSpec S) α) (log : Log S)
-    (hs : (Role.relay, H) ∈ log.seen) :
+    (hs : (ρ, H) ∈ log.seen) :
     (simulateQ (oracle procM replyM (Pe g)) oa).run log
       = (simulateQ (oracle procM replyM (Pe g')) oa).run log := by
   have h := map_run_simulateQ_eq_of_query_map_eq_inv' (oracle procM replyM (Pe g))
-    (oracle procM replyM (Pe g')) (fun s : Log S => (Role.relay, H) ∈ s.seen) id
+    (oracle procM replyM (Pe g')) (fun s : Log S => (ρ, H) ∈ s.seen) id
     (fun t s hs y hy => by
       rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
       · simp [oracle] at hy
@@ -267,7 +267,7 @@ theorem oracle_draw_seen (g g' : X) {α : Type} (oa : OracleComp (oracleSpec S) 
       · rw [oracle_process_run, oracle_process_run]
         by_cases hseen : (h, o.1) ∈ s.seen
         · simp [hseen]
-        · have hne : ¬ (h = Role.relay ∧ o.1 = H) := fun hc => hseen (by rw [hc.1, hc.2]; exact hs)
+        · have hne : ¬ (h = ρ ∧ o.1 = H) := fun hc => hseen (by rw [hc.1, hc.2]; exact hs)
           simp [hseen, hH g g' h o _ hne]
       · rw [oracle_answer_run, oracle_answer_run, hR g, hR g']
         simp)
@@ -276,7 +276,7 @@ theorem oracle_draw_seen (g g' : X) {α : Type} (oa : OracleComp (oracleSpec S) 
 
 include hP hH hR in
 /-- **A patch that draws under one header may draw first.** If the patch `P` answers as
-`Pe g` does for a fresh draw `g`, and `Pe g` uses `g` only at `.relay` under the header `H`,
+`Pe g` does for a fresh draw `g`, and `Pe g` uses `g` only at the relay `ρ` under the header `H`,
 then the game with `P` is the game that draws `g` first and plays with `Pe g`. -/
 theorem oracle_draw {α : Type} (oa : OracleComp (oracleSpec S) α) (log : Log S) :
     (simulateQ (oracle procM replyM P) oa).run log
@@ -291,19 +291,19 @@ theorem oracle_draw {α : Type} (oa : OracleComp (oracleSpec S) α) (log : Log S
     refine EvalDistEq.trans (EvalDistEq.bind_right _ fun p => ih p.1 p.2) ?_
     refine EvalDistEq.trans ((oracle_draw_query D P Pe procM replyM hP hR t log).bind_left _) ?_
     simp only [bind_assoc]
-    by_cases hc : ∃ o : S.Onion, t = .inl (.inr (Role.relay, o)) ∧ o.1 = H
-        ∧ (Role.relay, o.1) ∉ log.seen
+    by_cases hc : ∃ o : S.Onion, t = .inl (.inr (ρ, o)) ∧ o.1 = H
+        ∧ (ρ, o.1) ∉ log.seen
     · obtain ⟨o, rfl, ho, hseen⟩ := hc
       refine EvalDistEq.bind_right _ fun g => ?_
       simp only [oracle_process_run, hseen, ↓reduceIte, bind_assoc, bind_map_left]
       refine EvalDistEq.bind_right _ fun out => EvalDistEq.bind_right _ fun a => ?_
-      have hs : (Role.relay, H) ∈ (Role.relay, o.1) :: log.seen := by
+      have hs : (ρ, H) ∈ (ρ, o.1) :: log.seen := by
         rw [ho]
         exact List.mem_cons_self
       refine EvalDistEq.trans (EvalDistEq.bind_right _ fun g' => ?_)
         (OracleComp.EvalDistEq.bind_const D _)
-      rw [oracle_draw_seen H P Pe procM replyM hH hR g' g (k a)
-        ⟨(Role.relay, o.1) :: log.seen, (Role.relay, o) :: log.held⟩ hs]
+      rw [oracle_draw_seen ρ H P Pe procM replyM hH hR g' g (k a)
+        ⟨(ρ, o.1) :: log.seen, (ρ, o) :: log.held⟩ hs]
     · have hind : ∀ g g', (oracle procM replyM (Pe g) t).run log
           = (oracle procM replyM (Pe g') t).run log := fun g g' => by
         rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
@@ -311,7 +311,7 @@ theorem oracle_draw {α : Type} (oa : OracleComp (oracleSpec S) α) (log : Log S
         · rw [oracle_process_run, oracle_process_run]
           by_cases hseen : (h, o.1) ∈ log.seen
           · simp [hseen]
-          · have hne : ¬ (h = Role.relay ∧ o.1 = H) := fun hx =>
+          · have hne : ¬ (h = ρ ∧ o.1 = H) := fun hx =>
               hc ⟨o, by rw [hx.1], hx.2, by rw [← hx.1]; exact hseen⟩
             simp [hseen, hH g g' h o _ hne]
         · rw [oracle_answer_run, oracle_answer_run, hR g, hR g']
@@ -367,7 +367,7 @@ theorem patchWith_draw (next : S.Onion) (r : S.Randomness) (mine : S.Onion)
     (simulateQ (oracle procM replyM (c.patchWith next r mine)) oa).run log
       =ᵈ $ᵗ S.Payload >>= fun g =>
         (simulateQ (oracle procM replyM (c.patchDrawn next r mine g)) oa).run log := by
-  refine oracle_draw mine.1 ($ᵗ S.Payload) (c.patchWith next r mine)
+  refine oracle_draw .relay mine.1 ($ᵗ S.Payload) (c.patchWith next r mine)
     (c.patchDrawn next r mine) procM replyM (fun h o out => ?_)
     (fun g g' h o out hne => ?_) (fun _ => rfl) oa log
   · unfold patchWith patchDrawn
