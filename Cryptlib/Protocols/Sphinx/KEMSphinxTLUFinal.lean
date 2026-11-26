@@ -778,6 +778,44 @@ theorem evalDistEq_shiftStream {δ : Type} (R : Protocols.RSOR.Route geom.nrHops
     evalDistEq_mixSeeds geom j (K U₀)) ?_
   exact OracleComp.EvalDistEq.bind_bind_swap _ _ fun U₀ r => K U₀ r
 
+omit hmactag h16 in
+include hvalid in
+/-- **The relabelled draws are uniform, at the end of the path.** A game that reads the two
+randomness draws through their mix, and the keystream with its head shifted, reads one
+randomness draw and one keystream. -/
+theorem evalDistEq_lastShift {δ : Type} (R : Protocols.RSOR.Route geom.nrHops Name (Key kem))
+    (last last' : List RoutingCommand) (j : ℕ) (hj : j < R.hops.length) (c : ByteArray)
+    (K : Keystream geom → Randomness geom → ProbComp δ) :
+    (do
+      let r ← $ᵗ (Randomness geom)
+      let r' ← $ᵗ (Randomness geom)
+      let U ← $ᵗ (Keystream geom)
+      K (Util.Bytes.toVecN _ (lastShift geom kem kdfS streamS (path kem R last)
+          (path kem (R.take (j + 1)) last') (mixSeeds geom r r' j).1 r'.1 j c (ofVector U)))
+        (mixSeeds geom r r' j))
+      =ᵈ (do
+        let r ← $ᵗ (Randomness geom)
+        let U ← $ᵗ (Keystream geom)
+        K U r) := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hle := R.length_le
+  have hjp : (j + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
+    exact Nat.mul_le_mul_right _ (by omega)
+  rw [Nat.succ_mul] at hjp
+  have hht : geom.routingInfoLength - j * geom.perHopRoutingInfoLength
+      + (j * geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength)
+      = geom.routingInfoLength + geom.perHopRoutingInfoLength := by omega
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun r => EvalDistEq.bind_right _ fun r' =>
+    evalDistEq_headPad hht _ (fun U₀ => K U₀ (mixSeeds geom r r' j))) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun r =>
+    OracleComp.EvalDistEq.bind_bind_swap _ _ fun r' U₀ => K U₀ (mixSeeds geom r r' j)) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _
+    fun r U₀ => $ᵗ (Randomness geom) >>= fun r' => K U₀ (mixSeeds geom r r' j)) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun U₀ =>
+    evalDistEq_mixSeeds geom j (K U₀)) ?_
+  exact OracleComp.EvalDistEq.bind_bind_swap _ _ fun U₀ r => K U₀ r
+
 end RSOR
 
 /-! ## The exit relay's reply -/
