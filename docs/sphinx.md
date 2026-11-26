@@ -303,7 +303,16 @@ Proved so far for the second point, on the backward path (`KEMSphinxSLURelay.lea
   next layer or the first layer over the rest of the path cannot be built (`back_fixed_le`,
   `backGoodF`).
 
-Not proved yet there: the exit case, and the bound over the whole game.
+At the exit the relay builds the reply from the SURB in its payload: the reply's payload is one
+encryption of the adversary's message under the SURB's payload key. The adversary picks that
+message during the game, so this step rests on a second cipher assumption, `oneEncExp`: one
+encryption asked during the game, under a uniform key and IV, against a uniform block. David
+agreed to this assumption on 2026-11-26. Proved so far for the exit: a relay that asks an oracle
+only for its reply under one header asks once (`viaEnc_once`), and what the exit relay does
+under its own header (`exitRelay`, `replyOf_body_enc`).
+
+Not proved yet there: the exit game as the encrypt-once game, its comparison with the world
+where an onion is sent on, and the bound over the whole game.
 
 ## How the bounds are built
 
