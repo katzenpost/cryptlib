@@ -3484,6 +3484,99 @@ theorem exit_real_le (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardW
           hq hb r b U u v hr hbody hv
   simpa only [bind_assoc, pure_bind] using h
 
+omit kem cipher macS kdfS streamS geom hvalid hmactag h16 in
+/-- A draw may move in front of two others. -/
+theorem evalDistEq_bind_swap3 {α β γ δ : Type} (ma : ProbComp α) (mb : ProbComp β)
+    (mc : ProbComp γ) (f : α → β → γ → ProbComp δ) :
+    (do let a ← ma; let b ← mb; let c ← mc; f a b c)
+      =ᵈ (do let c ← mc; let a ← ma; let b ← mb; f a b c) :=
+  (EvalDistEq.bind_right _ fun _ => OracleComp.EvalDistEq.bind_bind_swap _ _ _).trans
+    (OracleComp.EvalDistEq.bind_bind_swap _ _ _)
+
+set_option maxHeartbeats 4000000 in
+/-- **At the exit, the game with one encryption under the SURB's payload key is the
+encrypt-once game with the cipher.** The key and the IV are the two parts of the SURB's key
+material, which nothing else in the game reads. -/
+theorem exit_real_evalDistEq (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith
+    (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary)
+    (km : Vector UInt8 32) (k : Key kem × kem.PrivateKey)
+    (cs : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith
+        (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)) .relay names k.1
+      × (A.State × Protocols.RSOR.Log 𝒮 × (Role → kem.PrivateKey)))
+    (s : Vector UInt8 32)
+    (q : RSOR.Request kem geom) (hb : 0 < q.back.hops.length)
+    (hw : cs.2.2.1.WF) (hn : cs.2.2.1.held.Nodup) :
+    (do
+      let r ← $ᵗ (RSOR.Randomness geom)
+      let U ← $ᵗ (Keystream geom)
+      let _ ← $ᵗ (Block geom)
+      let u ← $ᵗ (Block geom)
+      let _ ← $ᵗ (Block geom)
+      exitEnc kem cipher macS kdfS streamS geom hvalid hmactag h16 names A km k cs s q hb
+        (fun x : Block geom => Util.Bytes.toVecN (geom.payloadTagLength + geom.forwardPayloadLength)
+          (cipher.encrypt ((ofVector r.2.2.1).extract 0 48).data ((ofVector r.2.2.1).extract 48 64)
+            (ofVector x))) r.1 r.2.1 r.2.2.2 U u)
+      =ᵈ (do
+        let k' ← $ᵗ (Vector UInt8 48)
+        let iv ← $ᵗ (Vector UInt8 16)
+        let d₁ ← $ᵗ (RSOR.Draw geom)
+        let d₂ ← $ᵗ (RSOR.Draw geom)
+        let i ← $ᵗ (Vector UInt8 16)
+        let U ← $ᵗ (Keystream geom)
+        let u ← $ᵗ (Block geom)
+        (simulateQ (Primitives.WideBlockCipher.decOnce
+            (fun x : Block geom => Util.Bytes.toVecN (geom.payloadTagLength +
+                geom.forwardPayloadLength)
+          (cipher.encrypt k'.toArray (ofVector iv) (ofVector x))))
+          (exitOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 names A km k cs s q hb
+              d₁ d₂ i U u)).run' none) := by
+  simp only [exitOracle_once kem cipher macS kdfS streamS geom hvalid hmactag h16 names A km k cs s
+      q hb _ _ _ _ _ _ hw hn]
+  have hid : ∀ (α β : Type), Function.Bijective (Function.uncurry fun (x : α) (y : β) => (x, y)) :=
+    fun _ _ => Function.bijective_id
+  -- the two blocks the game does not read
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun r => EvalDistEq.bind_right _ fun U =>
+    (OracleComp.EvalDistEq.bind_const _ _).trans (EvalDistEq.bind_right _ fun u =>
+      OracleComp.EvalDistEq.bind_const _ _)) ?_
+  -- the randomness in its four parts
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective (hid (RSOR.Draw geom) (RSOR.Draw geom ×
+      Vector UInt8 64
+      × Vector UInt8 16)) (fun r : RSOR.Randomness geom =>
+    $ᵗ (Keystream geom) >>= fun U => $ᵗ (Block geom) >>= fun u =>
+      exitEnc kem cipher macS kdfS streamS geom hvalid hmactag h16 names A km k cs s q hb
+        (fun x : Block geom => Util.Bytes.toVecN (geom.payloadTagLength + geom.forwardPayloadLength)
+          (cipher.encrypt ((ofVector r.2.2.1).extract 0 48).data ((ofVector r.2.2.1).extract 48 64)
+            (ofVector x))) r.1 r.2.1 r.2.2.2 U u)).symm ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun d₁ =>
+    (evalDistEq_pair_of_bijective (hid (RSOR.Draw geom) (Vector UInt8 64 × Vector UInt8 16))
+      (fun y : RSOR.Draw geom × Vector UInt8 64 × Vector UInt8 16 =>
+        $ᵗ (Keystream geom) >>= fun U => $ᵗ (Block geom) >>= fun u =>
+          exitEnc kem cipher macS kdfS streamS geom hvalid hmactag h16 names A km k cs s q hb
+            (fun x : Block geom => Util.Bytes.toVecN (geom.payloadTagLength +
+                geom.forwardPayloadLength)
+          (cipher.encrypt ((ofVector y.2.1).extract 0 48).data ((ofVector y.2.1).extract 48 64)
+            (ofVector x))) d₁ y.1 y.2.2 U u)).symm) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun d₁ => EvalDistEq.bind_right _ fun d₂ =>
+    (evalDistEq_pair_of_bijective (hid (Vector UInt8 64) (Vector UInt8 16))
+      (fun y : Vector UInt8 64 × Vector UInt8 16 =>
+        $ᵗ (Keystream geom) >>= fun U => $ᵗ (Block geom) >>= fun u =>
+          exitEnc kem cipher macS kdfS streamS geom hvalid hmactag h16 names A km k cs s q hb
+            (fun x : Block geom => Util.Bytes.toVecN (geom.payloadTagLength +
+                geom.forwardPayloadLength)
+          (cipher.encrypt ((ofVector y.1).extract 0 48).data ((ofVector y.1).extract 48 64)
+            (ofVector x))) d₁ d₂ y.2 U u)).symm) ?_
+  -- the key material in its two parts
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun d₁ => EvalDistEq.bind_right _ fun d₂ =>
+    evalDistEq_split (show 48 + 16 = 64 from rfl) fun X Y =>
+      $ᵗ (Vector UInt8 16) >>= fun i => $ᵗ (Keystream geom) >>= fun U =>
+        $ᵗ (Block geom) >>= fun u =>
+          exitEnc kem cipher macS kdfS streamS geom hvalid hmactag h16 names A km k cs s q hb
+            (fun x : Block geom => Util.Bytes.toVecN (geom.payloadTagLength +
+                geom.forwardPayloadLength)
+          (cipher.encrypt (X).data (Y) (ofVector x))) d₁ d₂ i U u) ?_
+  refine EvalDistEq.trans (evalDistEq_bind_swap3 _ _ _ _) ?_
+  exact EvalDistEq.bind_right _ fun k' => evalDistEq_bind_swap3 _ _ _ _
+
 end BackRelay
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
