@@ -296,7 +296,14 @@ Proved so far for the second point, on the backward path (`KEMSphinxSLURelay.lea
 - A relay processes a header once, so the ideal cipher's one answer under its header is a
   fresh block (`withDec_fresh`).
 
-Not proved yet there: the two games are the same run at the relabelled draws; the exit case.
+- World 1′'s patched relay is world 0's relay handing on one fresh block
+  (`headerRelays_back_eq`), so at the relabelled draws the two games are the same
+  (`backRun_evalDistEq`).
+- For fixed keys and challenge the two games differ by at most the chance that the reply's
+  next layer or the first layer over the rest of the path cannot be built (`back_fixed_le`,
+  `backGoodF`).
+
+Not proved yet there: the exit case, and the bound over the whole game.
 
 ## How the bounds are built
 
