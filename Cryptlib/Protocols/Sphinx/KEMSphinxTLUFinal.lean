@@ -326,7 +326,7 @@ theorem nextOwn_run (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversar
         (ownAns kem cipher macS kdfS streamS geom k.2))
       ((nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).post st
         (nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x U'))
-    = (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+    = (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
           (fun h => if h = .relay then k.2 else st.2.2 h) (encapOf kem k.1.1 x.2.2.1).1 x.2.1
           (ofVector x.1)
           (Util.Bytes.toVecN _
@@ -405,7 +405,7 @@ theorem nextOwn_run (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversar
     rw [hrel']
     exact relayAns_headerHand kem cipher macS kdfS streamS geom hvalid k.2 _ km (ofVector U) Hv Dd
       hcar o'
-  have hvo := viaOracle_header kem cipher macS kdfS streamS geom hvalid hmactag h16 skf
+  have hvo := viaOracle_header kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay skf
     (encapOf kem k.1.1 s).1 (headerHand kem macS geom km (ofVector U) Hv Dd) km (ofVector U)
     Hv Dd hf W.1.patch (A.guess st.1 W.1.onion) st.2.1
   rw [hrel'] at hvo
@@ -425,10 +425,12 @@ theorem headerRelays_patchWith_draw {pk kb ks : Key kem} (names : Role → RSOR.
     (Hv : Vector UInt8 geom.headerLength) (D : Block geom → Block geom)
     {α : Type} (oa : OracleComp (Protocols.RSOR.oracleSpec 𝒮) α)
     (log : Protocols.RSOR.Log 𝒮) :
-    (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U Hv D
+    (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+        .relay sk ct km U Hv D
         (c.patchWith next r mine)) oa).run' log
       =ᵈ $ᵗ (Block geom) >>= fun g =>
-        (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U Hv
+        (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+            .relay sk ct km U Hv
           D
           (c.patchDrawn next r mine g)) oa).run' log := by
   have h := c.patchWith_draw next r mine
@@ -473,8 +475,9 @@ theorem headerRelays_patch_eq (sk : Role → kem.PrivateKey) (ct : kem.Ciphertex
       patch.proc h o out = pure out)
     (hreply : ∀ (h : Role) (m : RSOR.Msg geom) (o : RSOR.Onion geom) out,
       ¬ (h = .relay ∧ o.1 = Hv) → patch.reply h m o out = out) :
-    headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U₁ Hv D₁ patch
-      = headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U₀ Hv D₀ {} := by
+    headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay sk ct km U₁ Hv D₁ patch
+      = headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+          .relay sk ct km U₀ Hv D₀ {} := by
   refine Protocols.RSOR.oracle_pure_patch (S := 𝒮) patch _ _ _ _ (fun h o => ?_)
     (fun h m o => ?_)
   · by_cases hc : h = Role.relay ∧ o.1 = Hv
@@ -996,9 +999,9 @@ theorem headerRelays_forward_eq {pk kb ks : Key kem} (names : Role → RSOR.Name
     (hrep : ∀ (m : RSOR.Msg geom) (o : RSOR.Onion geom), o.1 = mine.1 →
       RSOR.replyOf cipher geom m
         (procKeysD kem macS geom km U₁ (ofVector (D₁ o.2)) (RSOR.join o)) = none) :
-    headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U₁ mine.1 D₁
+    headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay sk ct km U₁ mine.1 D₁
         (c.patchDrawn (RSOR.split geom fwd) r mine g)
-      = headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U₀ mine.1
+      = headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay sk ct km U₀ mine.1
         (fun y => if y = mine.2 then (RSOR.split geom fwd).2 else g) {} := by
   obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
   have had : adLength = 2 := rfl
@@ -1086,9 +1089,9 @@ theorem headerRelays_last_eq {pk kb ks : Key kem} (names : Role → RSOR.Name)
       = RSOR.body kem macS kdfS streamS geom c.req r)
     (hmsg : RSOR.msgOf geom (RSOR.body kem macS kdfS streamS geom c.req r) = c.req.msg)
     (hr : RSOR.Reliable kem cipher macS kdfS streamS geom c.req r) :
-    headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U₁ mine.1
+    headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay sk ct km U₁ mine.1
         (fun y => if y = mine.2 then B₁ else v) (c.patchDrawn next r mine g)
-      = headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U₀ mine.1
+      = headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay sk ct km U₀ mine.1
         (fun y => if y = mine.2 then B₀ else v) {} := by
   have hx : 0 < geom.payloadTagLength + geom.forwardPayloadLength := by omega
   have hjlt : 0 < c.req.back.hops.length :=
@@ -1236,7 +1239,7 @@ theorem nextDrawn_eq_forward (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮))
         (ch.c.short x.2.2.2.1.2.1 x.2.2.2.1.2.2.1) x.2.2.2.1.2.2.2).size
       = geom.forwardPayloadLength)
     (hv : ¬ ((ofVector x.2.2.2.2.2).extract 0 geom.payloadTagLength).data.all (· == 0) = true) :
-    (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+    (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
           (fun h => if h = .relay then k.2 else st.2.2 h) (encapOf kem k.1.1 x.2.2.1).1 x.2.1
           (ofVector x.1)
           (Util.Bytes.toVecN _
@@ -1448,7 +1451,7 @@ theorem nextDrawn_eq_last (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Ad
       = geom.forwardPayloadLength)
     (hr : RSOR.Reliable kem cipher macS kdfS streamS geom ch.c.req x.2.2.2.1.1)
     (hv : ¬ ((ofVector x.2.2.2.2.2).extract 0 geom.payloadTagLength).data.all (· == 0) = true) :
-    (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+    (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
           (fun h => if h = .relay then k.2 else st.2.2 h) (encapOf kem k.1.1 x.2.2.1).1 x.2.1
           (ofVector x.1)
           (Util.Bytes.toVecN _
@@ -1879,7 +1882,7 @@ def run1g (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
     (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1)
     (st : A.State × Protocols.RSOR.Log 𝒮 × (Role → kem.PrivateKey))
     (x : NextOth geom) (U' : Keystream geom) (g : Block geom) : ProbComp Bool :=
-  (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+  (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
       (fun h => if h = .relay then k.2 else st.2.2 h) (encapOf kem k.1.1 x.2.2.1).1 x.2.1
       (ofVector x.1)
       (Util.Bytes.toVecN _

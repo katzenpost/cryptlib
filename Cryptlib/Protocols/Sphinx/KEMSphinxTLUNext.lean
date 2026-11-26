@@ -265,7 +265,7 @@ theorem nextReal_run (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversa
     rw [hrel']
     exact relayAns_headerHand kem cipher macS kdfS streamS geom hvalid k.2 _ km (ofVector U) Hv Dd
       hcar o'
-  have hvo := viaOracle_header kem cipher macS kdfS streamS geom hvalid hmactag h16 skf
+  have hvo := viaOracle_header kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay skf
     (encapOf kem k.1.1 s).1 (headerHand kem macS geom km (ofVector U) Hv Dd) km (ofVector U)
     Hv Dd hf W.1.patch (A.guess st.1 W.1.onion) st.2.1
   rw [hrel'] at hvo

@@ -84,7 +84,7 @@ keystream `U`: `MU` are the header bytes, `plU` the sender's block and `viewU` t
 functions of the keystream. -/
 def forwardRunU (km : Vector UInt8 32) (U : ByteArray) (d : KeyedDraw 𝒜) (u v : Block geom) :
     ProbComp Bool :=
-  (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+  (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
       (fun h => if h = .relay then d.k.2 else d.cs.2.2.2 h) d.c km U
       (Util.Bytes.toVecN _ (MU d.cs.1 d.o d.c U
         ++ ofVector (macS.mac (ofVector km) (MU d.cs.1 d.o d.c U))))
@@ -144,7 +144,7 @@ theorem forwardPayload_exp_false_eq_prg
           (geom.routingInfoLength + geom.perHopRoutingInfoLength)) d u v
   have hbody : ∀ (iv : Vector UInt8 16) (km ke : Vector UInt8 32) (d : KeyedDraw 𝒜)
       (u v : Block geom),
-      (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
           (fun h => if h = .relay then d.k.2 else d.cs.2.2.2 h) d.c km
           (streamS.keystream (ofVector ke) (ofVector iv)
           (geom.routingInfoLength + geom.perHopRoutingInfoLength))

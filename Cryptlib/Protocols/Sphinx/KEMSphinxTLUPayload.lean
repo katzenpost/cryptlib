@@ -130,7 +130,7 @@ theorem forward_tagged_sub_payload_le
       𝒜
       (onlyHeader cipher macS streamS geom (tagged macS M)) z.2.2 (z.1, z.2.1)
   let Gf : Vector UInt8 48 × G.X → ProbComp Bool := fun z =>
-    (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+    (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
         (G.sk z.2) (G.c z.2)
         (G.macKey z.2) (G.ks z.2) (G.header z.2)
         (fun y => Util.Bytes.toVecN _
@@ -211,7 +211,7 @@ theorem forward_tagged_sub_payload_le
     have hrel : G.sk ((iv, r), d) .relay = d.k.2 := by
       simp [G, forwardPayloadGame]
     have hvo := fun patch oa =>
-      viaOracle_onlyHeader kem cipher macS kdfS streamS geom hvalid hmactag h16
+      viaOracle_onlyHeader kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
       (G.sk ((iv, r), d)) d.c (kp, iv, r) (G.header ((iv, r), d)) hcar patch (α := Bool) oa
       d.cs.2.2.1
     simp only [hrel] at hvo

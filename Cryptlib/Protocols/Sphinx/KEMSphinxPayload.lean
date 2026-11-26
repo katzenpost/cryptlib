@@ -79,7 +79,9 @@ open Cryptlib.Protocols.RSOR (Role)
 variable (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
   (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
 
-/-- The honest relays of a game where `.relay` answers the ciphertext `c` under the header `Hv`
+variable (ρ : Role)
+
+/-- The honest relays of a game where the relay `ρ` answers the ciphertext `c` under the header `Hv`
 only, with the MAC key `km` and the header keystream `ks`, and with the payload under that
 header decrypted by `dec`. -/
 def headerRelays (sk : Role → kem.PrivateKey) (c : kem.Ciphertext) (km : Vector UInt8 32)
@@ -95,18 +97,18 @@ def headerRelays (sk : Role → kem.PrivateKey) (c : kem.Ciphertext) (km : Vecto
         (Protocols.RSOR.Log (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
         ProbComp) :=
   Protocols.RSOR.withDec (S := sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)
-    .relay Hv (fun o => o.2)
+    ρ Hv (fun o => o.2)
     (fun o x => RSOR.stepOf geom
       (procKeysD kem macS geom km ks (ofVector x) (RSOR.join o)))
     (fun msg o x => RSOR.replyOf cipher geom msg
       (procKeysD kem macS geom km ks (ofVector x) (RSOR.join o)))
-    (fun h o => if h = .relay then
+    (fun h o => if h = ρ then
         RSOR.stepOf geom
-          (relayAns kem cipher macS kdfS streamS geom (sk .relay) c (fun _ => none) (RSOR.join o))
+          (relayAns kem cipher macS kdfS streamS geom (sk ρ) c (fun _ => none) (RSOR.join o))
       else RSOR.proc kem cipher macS kdfS streamS geom (sk h) o)
-    (fun h msg o => if h = .relay then
+    (fun h msg o => if h = ρ then
         RSOR.replyOf cipher geom msg
-          (relayAns kem cipher macS kdfS streamS geom (sk .relay) c (fun _ => none) (RSOR.join o))
+          (relayAns kem cipher macS kdfS streamS geom (sk ρ) c (fun _ => none) (RSOR.join o))
       else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o)
     dec patch
 
@@ -120,9 +122,9 @@ theorem viaOracle_header (sk : Role → kem.PrivateKey) (c : kem.Ciphertext)
     (D : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
       → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
     (hf : ∀ o : RSOR.Onion geom,
-      relayAns kem cipher macS kdfS streamS geom (sk .relay) c f (RSOR.join o)
+      relayAns kem cipher macS kdfS streamS geom (sk ρ) c f (RSOR.join o)
         = if o.1 = Hv then procKeysD kem macS geom km U (ofVector (D o.2)) (RSOR.join o)
-          else relayAns kem cipher macS kdfS streamS geom (sk .relay) c (fun _ => none)
+          else relayAns kem cipher macS kdfS streamS geom (sk ρ) c (fun _ => none)
             (RSOR.join o))
     (patch : Protocols.RSOR.Patch
       (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
@@ -130,41 +132,42 @@ theorem viaOracle_header (sk : Role → kem.PrivateKey) (c : kem.Ciphertext)
     (oa : OracleComp
       (Protocols.RSOR.oracleSpec (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) α)
     (log : Protocols.RSOR.Log (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) :
-    simulateQ (relayImpl (relayAns kem cipher macS kdfS streamS geom (sk .relay) c f))
-        ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay sk patch)
+    simulateQ (relayImpl (relayAns kem cipher macS kdfS streamS geom (sk ρ) c f))
+        ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk patch)
           oa).run log)
-      = (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk c km U Hv D
+      = (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+          ρ sk c km U Hv D
           patch) oa).run log := by
   have hstep : ∀ (h : Role) (o : RSOR.Onion geom),
-      (if h = .relay then
+      (if h = ρ then
           RSOR.stepOf geom
-            (relayAns kem cipher macS kdfS streamS geom (sk .relay) c f (RSOR.join o))
+            (relayAns kem cipher macS kdfS streamS geom (sk ρ) c f (RSOR.join o))
         else RSOR.proc kem cipher macS kdfS streamS geom (sk h) o)
-      = if h = .relay ∧ o.1 = Hv then
+      = if h = ρ ∧ o.1 = Hv then
           RSOR.stepOf geom (procKeysD kem macS geom km U (ofVector (D o.2)) (RSOR.join o))
-        else if h = .relay then
+        else if h = ρ then
           RSOR.stepOf geom
-            (relayAns kem cipher macS kdfS streamS geom (sk .relay) c (fun _ => none) (RSOR.join o))
+            (relayAns kem cipher macS kdfS streamS geom (sk ρ) c (fun _ => none) (RSOR.join o))
         else RSOR.proc kem cipher macS kdfS streamS geom (sk h) o := by
     intro h o
-    by_cases hr : h = .relay
+    by_cases hr : h = ρ
     · subst hr
       rw [hf o]
       by_cases ho : o.1 = Hv <;> simp [ho]
     · simp [hr]
   have hreply : ∀ (h : Role) (msg : RSOR.Msg geom) (o : RSOR.Onion geom),
-      (if h = .relay then RSOR.replyOf cipher geom msg
-          (relayAns kem cipher macS kdfS streamS geom (sk .relay) c f (RSOR.join o))
+      (if h = ρ then RSOR.replyOf cipher geom msg
+          (relayAns kem cipher macS kdfS streamS geom (sk ρ) c f (RSOR.join o))
         else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o)
-      = if h = .relay ∧ o.1 = Hv then
+      = if h = ρ ∧ o.1 = Hv then
           RSOR.replyOf cipher geom msg
             (procKeysD kem macS geom km U (ofVector (D o.2)) (RSOR.join o))
-        else if h = .relay then
+        else if h = ρ then
           RSOR.replyOf cipher geom msg
-            (relayAns kem cipher macS kdfS streamS geom (sk .relay) c (fun _ => none) (RSOR.join o))
+            (relayAns kem cipher macS kdfS streamS geom (sk ρ) c (fun _ => none) (RSOR.join o))
         else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o := by
     intro h msg o
-    by_cases hr : h = .relay
+    by_cases hr : h = ρ
     · subst hr
       rw [hf o]
       by_cases ho : o.1 = Hv <;> simp [ho]
@@ -189,19 +192,19 @@ theorem viaOracle_onlyHeader (sk : Role → kem.PrivateKey) (c : kem.Ciphertext)
     (oa : OracleComp
       (Protocols.RSOR.oracleSpec (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) α)
     (log : Protocols.RSOR.Log (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) :
-    simulateQ (relayImpl (relayAns kem cipher macS kdfS streamS geom (sk .relay) c
+    simulateQ (relayImpl (relayAns kem cipher macS kdfS streamS geom (sk ρ) c
           (fun pkt => if pkt.extract 0 (payloadOffset kem geom) = ofVector Hv
             then procKeys kem cipher macS streamS geom u pkt else none)))
-        ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay sk patch)
+        ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk patch)
           oa).run log)
-      = (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk c
+      = (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk c
           u.2.2.1 (streamS.keystream (ofVector u.2.2.2) (ofVector u.2.1)
             (geom.routingInfoLength + geom.perHopRoutingInfoLength)) Hv
           (fun x => Util.Bytes.toVecN _
             (cipher.decrypt u.1.toArray (ofVector u.2.1) (ofVector x)))
           patch) oa).run log :=
-  viaOracle_header kem cipher macS kdfS streamS geom hvalid hmactag h16 sk c _ _ _ Hv _
-    (relayAns_header kem cipher macS kdfS streamS geom hvalid (sk .relay) c u Hv hcar) patch oa log
+  viaOracle_header kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk c _ _ _ Hv _
+    (relayAns_header kem cipher macS kdfS streamS geom hvalid (sk ρ) c u Hv hcar) patch oa log
 
 /-- The relay's answers under the header `Hv` only, from its MAC key, its header keystream and
 a decryption `D` of the payload. -/
@@ -262,6 +265,8 @@ abbrev Block (geom : Geometry) := Vector UInt8 (geom.payloadTagLength + geom.for
 cut where its payload key is used: everything drawn besides that key, given the IV; the block
 the sender encrypts under it; and how the game goes on from the encrypted block. -/
 structure PayloadGame where
+  /-- The honest relay that answers one header. -/
+  role : Role := .relay
   X : Type
   draw : Vector UInt8 16 → ProbComp X
   sk : X → Role → kem.PrivateKey
@@ -291,7 +296,8 @@ def exp (b : Bool) : ProbComp Bool := do
   let v ← $ᵗ (Block geom)
   let e := if b then
     Util.Bytes.toVecN _ (cipher.encrypt kp.toArray (ofVector iv) (ofVector (G.plain x))) else u
-  (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 (G.sk x) (G.c x)
+  (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+      G.role (G.sk x) (G.c x)
       (G.macKey x) (G.ks x) (G.header x)
       (fun y => if b then
           Util.Bytes.toVecN _ (cipher.decrypt kp.toArray (ofVector iv) (ofVector y))
@@ -306,20 +312,20 @@ def adv : Primitives.WideBlockCipher.OneQueryAdversary
   choose iv := (fun x => (G.plain x, x)) <$> G.draw iv
   guess st e :=
     (simulateQ (Protocols.RSOR.viaDec (S := 𝒮)
-        .relay (G.header st) (fun o => o.2)
+        G.role (G.header st) (fun o => o.2)
         (fun o x => RSOR.stepOf geom
           (procKeysD kem macS geom (G.macKey st) (G.ks st) (ofVector x)
             (RSOR.join o)))
         (fun msg o x => RSOR.replyOf cipher geom msg
           (procKeysD kem macS geom (G.macKey st) (G.ks st) (ofVector x)
             (RSOR.join o)))
-        (fun h o => if h = .relay then
+        (fun h o => if h = G.role then
             RSOR.stepOf geom (relayAns kem cipher macS kdfS streamS geom
-              (G.sk st .relay) (G.c st) (fun _ => none) (RSOR.join o))
+              (G.sk st G.role) (G.c st) (fun _ => none) (RSOR.join o))
           else RSOR.proc kem cipher macS kdfS streamS geom (G.sk st h) o)
-        (fun h msg o => if h = .relay then
+        (fun h msg o => if h = G.role then
             RSOR.replyOf cipher geom msg (relayAns kem cipher macS kdfS streamS geom
-              (G.sk st .relay) (G.c st) (fun _ => none) (RSOR.join o))
+              (G.sk st G.role) (G.c st) (fun _ => none) (RSOR.join o))
           else RSOR.reply kem cipher macS kdfS streamS geom (G.sk st h) msg o)
         (G.patch st e)) (G.rest st e)).run' (G.log st)
 
