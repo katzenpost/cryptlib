@@ -4261,6 +4261,201 @@ theorem oneEnc_exitAdv_false (names : Role → RSOR.Name) (A : (Protocols.RSOR.b
     exact (OracleComp.EvalDistEq.bind_const _ _).trans
       ((OracleComp.EvalDistEq.bind_const _ _).trans (OracleComp.EvalDistEq.bind_const _ _))
 
+/-- After the first phase the relays' log is well-formed and holds no onion twice. -/
+theorem backPre_log (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith (replySwap kem
+    cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    ∀ x ∈ support (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A),
+        x.cs.2.2.1.WF ∧ x.cs.2.2.1.held.Nodup := by
+  intro x hx
+  unfold backPre at hx
+  simp only [propAdv_pre, mem_support_bind_iff, support_pure, Set.mem_singleton_iff] at hx
+  obtain ⟨km, -, k, -, cs, ⟨kb, -, ks, -, out, hout, rfl⟩, s, -, rfl⟩ := hx
+  exact simulateQ_run_preserves_inv_of_query _
+    (fun log : Protocols.RSOR.Log 𝒮 => log.WF ∧ log.held.Nodup)
+    (fun t log hw => fun y hy => ⟨Protocols.RSOR.oracle_wf _ _ _ t log hw.1 y hy,
+      Protocols.RSOR.oracle_held_nodup _ _ _ t log hw.1 hw.2 y hy⟩) _ _
+    ⟨⟨fun _ _ h => absurd h List.not_mem_nil, fun _ _ _ h => absurd h List.not_mem_nil⟩,
+      List.nodup_nil⟩ out hout
+
+set_option maxHeartbeats 4000000 in
+/-- **World 0 and the encrypt-once game with the cipher.** They differ by at most the chance
+that the relay is the exit and the draws there are not good. -/
+theorem hybrid_exit_real_le (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith (replySwap
+    kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    |(Pr{let y ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>=
+        backInner0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[y = true]).toReal
+      - (Pr{let y ← (Primitives.WideBlockCipher.oneEncExp cipher (geom.payloadTagLength +
+          geom.forwardPayloadLength) (exitAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
+          names A) true)}[y = true]).toReal|
+    ≤ (Pr{let z ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+          (fun p => (x, p)) <$> (do
+          let r ← $ᵗ (RSOR.Randomness geom)
+          let U ← $ᵗ (Keystream geom)
+          let b ← $ᵗ (Block geom)
+          let u ← $ᵗ (Block geom)
+          let v ← $ᵗ (Block geom)
+          pure (r, U, b, u, v)))}[z.1.cs.1.c.pos.val = 0
+            ∧ ¬ exitGood kem cipher macS kdfS streamS geom z.1.cs.1.c.req z.2.1
+                z.2.2.2.2.2]).toReal := by
+  rw [oneEnc_exitAdv_true kem cipher macS kdfS streamS geom hvalid hmactag h16 names A (fun y => y
+      = true)]
+  refine abs_prEvent_bind_sub_le_support _ _ _ _ _ fun x hx => ?_
+  by_cases hp : x.cs.1.c.pos.val = 0
+  · obtain ⟨hw, hn⟩ := backPre_log kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x hx
+    have h1 := exit_real_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x.km x.k
+        x.cs x.s hp x.cs.1.c.req rfl
+      (Nat.zero_lt_of_lt x.cs.1.c.pos.isLt)
+    rw [exit_real_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x.km x.k
+        x.cs x.s x.cs.1.c.req
+      (Nat.zero_lt_of_lt x.cs.1.c.pos.isLt) hw hn (fun y => y = true)] at h1
+    rw [ite_eq_left hp, prEvent_map]
+    exact h1.trans (le_of_eq (congrArg ENNReal.toReal (prEvent_congr _ _ _ fun p =>
+      ⟨fun hg => ⟨hp, hg⟩, fun hg => hg.2⟩)))
+  · rw [ite_eq_right hp, sub_self, abs_zero]
+    exact ENNReal.toReal_nonneg
+
+set_option maxHeartbeats 4000000 in
+/-- **The encrypt-once game with a uniform block and the hybrid.** They differ by at most the
+chance that the relay is the exit and the draws there are not good or the onion sent on cannot
+be built. -/
+theorem hybrid_exit_ideal_le (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith
+    (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    |(Pr{let y ← (Primitives.WideBlockCipher.oneEncExp cipher (geom.payloadTagLength +
+        geom.forwardPayloadLength) (exitAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) false)}[y = true]).toReal
+      - (Pr{let y ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x
+          =>
+          if x.cs.1.c.pos.val = 0 then backInner1 kem cipher macS kdfS streamS geom hvalid hmactag
+              h16 names A x
+          else backInner0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x)}[y =
+              true]).toReal|
+    ≤ (Pr{let z ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+          (fun p => (x, p)) <$> (do
+          let r ← $ᵗ (RSOR.Randomness geom)
+          let r' ← $ᵗ (RSOR.Randomness geom)
+          let U ← $ᵗ (Keystream geom)
+          let g ← $ᵗ (Block geom)
+          let u ← $ᵗ (Block geom)
+          let v ← $ᵗ (Block geom)
+          pure (r, r', U, g, u, v)))}[z.1.cs.1.c.pos.val = 0
+            ∧ ¬ (exitGood kem cipher macS kdfS streamS geom z.1.cs.1.c.req z.2.1 z.2.2.2.2.2.2
+              ∧ ∃ pkt, RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem
+                  z.1.cs.1.c.req.back [.surbReply z.2.2.1.2.2.2])
+              z.2.2.1.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) 0 = Except.ok
+                  pkt)]).toReal := by
+  rw [oneEnc_exitAdv_false kem cipher macS kdfS streamS geom hvalid hmactag h16 names A (fun y => y
+      = true)]
+  refine abs_prEvent_bind_sub_le_support _ _ _ _ _ fun x hx => ?_
+  by_cases hp : x.cs.1.c.pos.val = 0
+  · obtain ⟨hw, hn⟩ := backPre_log kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x hx
+    have h1 := exit_ideal_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x.km x.k
+        x.cs x.s hp x.cs.1.c.req rfl
+      (Nat.zero_lt_of_lt x.cs.1.c.pos.isLt) hw hn
+    rw [abs_sub_comm] at h1
+    rw [ite_eq_left hp, ite_eq_left hp, prEvent_map]
+    exact h1.trans (le_of_eq (congrArg ENNReal.toReal (prEvent_congr _ _ _ fun p =>
+      ⟨fun hg => ⟨hp, hg⟩, fun hg => hg.2⟩)))
+  · rw [ite_eq_right hp, ite_eq_right hp, sub_self, abs_zero]
+    exact ENNReal.toReal_nonneg
+
+/-- **The two games from a uniform keystream.** World 0 and the world where the relay sends on
+a reply layer differ by at most the advantage against one encryption and the chance of a draw
+that is not good: at the exit in world 0, at the exit in the sent-on world, and on the backward
+path. -/
+theorem backUniform_le (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith (replySwap kem
+    cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    |(Pr{let x ← (PRGScheme.prgIdealExperiment
+          (backStreamAdv1 kem cipher macS kdfS streamS geom hvalid hmactag h16 (replySwap kem
+              cipher macS kdfS streamS geom hvalid hmactag h16) names A))}[x = true]).toReal
+      - (Pr{let x ← (PRGScheme.prgIdealExperiment
+          (backStreamAdv0 kem cipher macS kdfS streamS geom hvalid hmactag h16 (replySwap kem
+              cipher macS kdfS streamS geom hvalid hmactag h16) names A))}[x = true]).toReal|
+    ≤ |(Pr{let y ← (Primitives.WideBlockCipher.oneEncExp cipher (geom.payloadTagLength +
+        geom.forwardPayloadLength) (exitAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) true)}[y = true]).toReal
+        - (Pr{let y ← (Primitives.WideBlockCipher.oneEncExp cipher (geom.payloadTagLength +
+            geom.forwardPayloadLength) (exitAdv kem cipher macS kdfS streamS geom hvalid hmactag
+            h16 names A) false)}[y = true]).toReal|
+      + (Pr{let z ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x
+          =>
+          (fun p => (x, p)) <$> (do
+          let r ← $ᵗ (RSOR.Randomness geom)
+          let U ← $ᵗ (Keystream geom)
+          let b ← $ᵗ (Block geom)
+          let u ← $ᵗ (Block geom)
+          let v ← $ᵗ (Block geom)
+          pure (r, U, b, u, v)))}[z.1.cs.1.c.pos.val = 0
+            ∧ ¬ exitGood kem cipher macS kdfS streamS geom z.1.cs.1.c.req z.2.1 z.2.2.2.2.2]).toReal
+      + (Pr{let z ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x
+          =>
+          (fun p => (x, p)) <$> (do
+          let r ← $ᵗ (RSOR.Randomness geom)
+          let r' ← $ᵗ (RSOR.Randomness geom)
+          let U ← $ᵗ (Keystream geom)
+          let g ← $ᵗ (Block geom)
+          let u ← $ᵗ (Block geom)
+          let v ← $ᵗ (Block geom)
+          pure (r, r', U, g, u, v)))}[z.1.cs.1.c.pos.val = 0
+            ∧ ¬ (exitGood kem cipher macS kdfS streamS geom z.1.cs.1.c.req z.2.1 z.2.2.2.2.2.2
+              ∧ ∃ pkt, RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem
+                  z.1.cs.1.c.req.back [.surbReply z.2.2.1.2.2.2])
+              z.2.2.1.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) 0 = Except.ok
+                  pkt)]).toReal
+      + (Pr{let z ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x
+          =>
+          (fun p => (x, p)) <$> (do
+          let r ← $ᵗ (RSOR.Randomness geom)
+          let r' ← $ᵗ (RSOR.Randomness geom)
+          let U ← $ᵗ (Keystream geom)
+          pure (r, r', U)))}[z.1.cs.1.c.pos.val ≠ 0
+            ∧ ¬ backGoodF kem macS kdfS streamS geom z.1.cs.1.c.req.back
+              (z.1.cs.1.c.pos.val - 1) z.2]).toReal := by
+  rw [backIdeal1_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16 names A (fun x =>
+      x = true),
+    backIdeal0_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16 names A (fun x => x
+        = true)]
+  have hR := hybrid_exit_real_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  have hI := hybrid_exit_ideal_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  have hB := hybrid_back_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  have t1 := abs_sub_le
+    (Pr{let y ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>=
+        backInner1 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[y = true]).toReal
+    (Pr{let y ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+          if x.cs.1.c.pos.val = 0 then backInner1 kem cipher macS kdfS streamS geom hvalid hmactag
+              h16 names A x
+          else backInner0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x)}[y =
+              true]).toReal
+    (Pr{let y ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>=
+        backInner0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[y = true]).toReal
+  have t2 := abs_sub_le
+    (Pr{let y ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+          if x.cs.1.c.pos.val = 0 then backInner1 kem cipher macS kdfS streamS geom hvalid hmactag
+              h16 names A x
+          else backInner0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x)}[y =
+              true]).toReal
+    (Pr{let y ← (Primitives.WideBlockCipher.oneEncExp cipher (geom.payloadTagLength +
+        geom.forwardPayloadLength) (exitAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) false)}[y = true]).toReal
+    (Pr{let y ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>=
+        backInner0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[y = true]).toReal
+  have t3 := abs_sub_le
+    (Pr{let y ← (Primitives.WideBlockCipher.oneEncExp cipher (geom.payloadTagLength +
+        geom.forwardPayloadLength) (exitAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) false)}[y = true]).toReal
+    (Pr{let y ← (Primitives.WideBlockCipher.oneEncExp cipher (geom.payloadTagLength +
+        geom.forwardPayloadLength) (exitAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) true)}[y = true]).toReal
+    (Pr{let y ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>=
+        backInner0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[y = true]).toReal
+  rw [abs_sub_comm] at hR hI hB
+  rw [abs_sub_comm (Pr{let y ← (Primitives.WideBlockCipher.oneEncExp cipher (geom.payloadTagLength
+      + geom.forwardPayloadLength) (exitAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
+      names A) false)}[y = true]).toReal
+    (Pr{let y ← (Primitives.WideBlockCipher.oneEncExp cipher (geom.payloadTagLength +
+        geom.forwardPayloadLength) (exitAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) true)}[y = true]).toReal] at t3
+  linarith
+
 end BackRelay
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
