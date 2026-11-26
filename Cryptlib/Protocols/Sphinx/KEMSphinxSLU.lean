@@ -293,6 +293,45 @@ theorem formBack_fst_real (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSiz
     (by rw [RSOR.path_size]; exact q.back.length_le) henc]
   rfl
 
+/-- The header of the reply's layer at backward position `i`, up to the relay at position `k`,
+with that relay's KEM ciphertext, header keystream, tagging function and payload encryption
+given. -/
+def backHeaderF (q : RSOR.Request kem geom) (r : RSOR.Randomness geom) (k : ℕ) (c U : ByteArray)
+    (tagf encf : ByteArray → ByteArray) (i : ℕ) : Vector UInt8 geom.headerLength :=
+  match layerF kem cipher macS kdfS streamS geom (RSOR.path kem q.back [.surbReply r.2.2.2]) r.2.1
+      ⟨Array.replicate geom.forwardPayloadLength 0⟩ k c U tagf encf i with
+  | some pkt => (RSOR.split geom pkt).1
+  | none => (default : RSOR.Onion geom).1
+
+/-- **A reply layer up to the relay, with the relay's real keys.** With the ciphertext and keys
+that the seed `s` gives at backward position `k`, `backHeaderF` is the header of the reply's
+layer built from the randomness with `s` at that position. -/
+theorem formBack_fst_realF (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (q : RSOR.Request kem geom) (r : RSOR.Randomness geom) (m : RSOR.Msg geom) (k : ℕ)
+    (hk : k < q.back.hops.length) (i : Fin q.back.hops.length) (hik : i ≤ k)
+    (s : Vector UInt8 32) (c ss pkt : ByteArray)
+    (henc : kemEncap kem ((RSOR.path kem q.back [.surbReply r.2.2.2])[k]!).publicKey s
+      = .ok (c, ss))
+    (hpkt : RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem q.back [.surbReply r.2.2.2])
+      (setSeedBack geom r k s).2.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩ i = .ok pkt) :
+    (RSOR.formBack kem cipher macS kdfS streamS geom q (setSeedBack geom r k s) m i).1
+      = backHeaderF kem cipher macS kdfS streamS geom q r k c
+        (ksOf streamS geom (keyTuple (deriveHopKeys kdfS ss)))
+        (tagOf macS (keyTuple (deriveHopKeys kdfS ss)))
+        (encOf cipher (keyTuple (deriveHopKeys kdfS ss))) i := by
+  have hF := layerF_real kem cipher macS kdfS streamS geom (RSOR.path kem q.back [.surbReply
+      r.2.2.2]) r.2.1
+    ⟨Array.replicate geom.forwardPayloadLength 0⟩ pkt k i s c ss hik
+    (by rw [RSOR.path_size]; exact hk)
+    (by rw [RSOR.path_size]; exact q.back.length_le) henc hpkt
+  have hL : RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem q.back [.surbReply
+      (setSeedBack geom r k s).2.2.2])
+      (setSeedBack geom r k s).2.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩ i = .ok pkt :=
+    hpkt
+  rw [RSOR.formBack_fst kem cipher macS kdfS streamS geom hvalid hmactag, hL]
+  unfold backHeaderF
+  rw [hF]
+
 /-- The challenger's randomness with the seed of the honest relay's layer replaced. The relay
 is the one before backward position `pos`: its layer is the last of the forward path when `pos`
 is zero, and the reply's layer at backward position `pos - 1` otherwise. -/
