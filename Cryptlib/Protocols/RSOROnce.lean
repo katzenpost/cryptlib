@@ -173,4 +173,153 @@ theorem viaDec_decOnce (dec : Vector UInt8 L → Vector UInt8 L) (patch : Patch 
   rw [hc, ← hp]
   simp [Functor.map_map]
 
+/-! ## A patch that draws once
+
+A relay processes a header once. So a patch that draws only under one header at `.relay` may
+draw before the game starts. -/
+
+section Draw
+
+variable {X : Type} (D : ProbComp X) (P : Patch S) (Pe : X → Patch S)
+  (procM : Role → S.Onion → ProbComp (Option S.Step))
+  (replyM : Role → S.Msg → S.Onion → ProbComp (Option (S.Name × S.Onion)))
+
+/-- What processing an onion does to the log and the answer. -/
+theorem oracle_process_run (h : Role) (o : S.Onion) (log : Log S) :
+    (oracle procM replyM P (.inl (.inr (h, o)))).run log
+      = if (h, o.1) ∈ log.seen then pure (none, log)
+        else procM h o >>= fun out => (fun a =>
+          (a, ({ seen := (h, o.1) :: log.seen, held := (h, o) :: log.held } : Log S)))
+            <$> P.proc h o out := by
+  by_cases hs : (h, o.1) ∈ log.seen
+  · simp [oracle, process, hs]
+  · simp [oracle, process, hs]
+
+/-- What replying to an onion does to the log and the answer. -/
+theorem oracle_answer_run (h : Role) (msg : S.Msg) (o : S.Onion) (log : Log S) :
+    (oracle procM replyM P (.inr (h, msg, o))).run log
+      = if (h, o) ∈ log.held then
+          (fun a => (P.reply h msg o a, ({ log with held := log.held.erase (h, o) } : Log S)))
+            <$> replyM h msg o
+        else pure (none, log) := by
+  by_cases hs : (h, o) ∈ log.held
+  · simp [oracle, answer, hs]
+  · simp [oracle, answer, hs]
+
+variable (hP : ∀ h o out, P.proc h o out =ᵈ D >>= fun g => (Pe g).proc h o out)
+  (hH : ∀ g g' h o out, ¬ (h = Role.relay ∧ o.1 = H) →
+    (Pe g).proc h o out = (Pe g').proc h o out)
+  (hR : ∀ g, (Pe g).reply = P.reply)
+
+include hP hR in
+/-- One query to the relays with the patch that draws is a draw, then the query with the patch
+that was given the draw. -/
+theorem oracle_draw_query (t : (oracleSpec S).Domain) (log : Log S) :
+    (oracle procM replyM P t).run log
+      =ᵈ D >>= fun g => (oracle procM replyM (Pe g) t).run log := by
+  rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
+  · have hu : ∀ g, (oracle procM replyM (Pe g) (.inl (.inl u))).run log
+        = (oracle procM replyM P (.inl (.inl u))).run log := fun g => by simp [oracle]
+    simp only [hu]
+    exact (OracleComp.EvalDistEq.bind_const _ _).symm
+  · simp only [oracle_process_run]
+    split_ifs
+    · exact (OracleComp.EvalDistEq.bind_const _ _).symm
+    · simp only [map_eq_bind_pure_comp]
+      refine EvalDistEq.trans (EvalDistEq.bind_right _ fun out => (hP h o out).bind_left _) ?_
+      simp only [bind_assoc]
+      exact OracleComp.EvalDistEq.bind_bind_swap _ _ _
+  · simp only [oracle_answer_run, hR]
+    exact (OracleComp.EvalDistEq.bind_const _ _).symm
+
+include hH hR in
+/-- Once the relay has seen the header, the draw is not used. -/
+theorem oracle_draw_seen (g g' : X) {α : Type} (oa : OracleComp (oracleSpec S) α) (log : Log S)
+    (hs : (Role.relay, H) ∈ log.seen) :
+    (simulateQ (oracle procM replyM (Pe g)) oa).run log
+      = (simulateQ (oracle procM replyM (Pe g')) oa).run log := by
+  have h := map_run_simulateQ_eq_of_query_map_eq_inv' (oracle procM replyM (Pe g))
+    (oracle procM replyM (Pe g')) (fun s : Log S => (Role.relay, H) ∈ s.seen) id
+    (fun t s hs y hy => by
+      rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
+      · simp [oracle] at hy
+        obtain ⟨_, rfl⟩ := hy
+        exact hs
+      · rw [oracle_process_run] at hy
+        split_ifs at hy
+        · simp at hy
+          subst hy
+          exact hs
+        · simp at hy
+          obtain ⟨_, -, _, -, rfl⟩ := hy
+          exact List.mem_cons_of_mem _ hs
+      · rw [oracle_answer_run] at hy
+        split_ifs at hy
+        · simp at hy
+          obtain ⟨_, -, rfl⟩ := hy
+          exact hs
+        · simp at hy
+          subst hy
+          exact hs)
+    (fun t s hs => by
+      rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
+      · simp [oracle]
+      · rw [oracle_process_run, oracle_process_run]
+        by_cases hseen : (h, o.1) ∈ s.seen
+        · simp [hseen]
+        · have hne : ¬ (h = Role.relay ∧ o.1 = H) := fun hc => hseen (by rw [hc.1, hc.2]; exact hs)
+          simp [hseen, hH g g' h o _ hne]
+      · rw [oracle_answer_run, oracle_answer_run, hR g, hR g']
+        simp)
+    oa log hs
+  simpa using h
+
+include hP hH hR in
+/-- **A patch that draws under one header may draw first.** If the patch `P` answers as
+`Pe g` does for a fresh draw `g`, and `Pe g` uses `g` only at `.relay` under the header `H`,
+then the game with `P` is the game that draws `g` first and plays with `Pe g`. -/
+theorem oracle_draw {α : Type} (oa : OracleComp (oracleSpec S) α) (log : Log S) :
+    (simulateQ (oracle procM replyM P) oa).run log
+      =ᵈ D >>= fun g => (simulateQ (oracle procM replyM (Pe g)) oa).run log := by
+  induction oa using OracleComp.inductionOn generalizing log with
+  | pure x =>
+    simp only [simulateQ_pure, StateT.run_pure]
+    exact (OracleComp.EvalDistEq.bind_const _ _).symm
+  | query_bind t k ih =>
+    simp only [simulateQ_bind, simulateQ_query, OracleQuery.input_query,
+      OracleQuery.cont_query, id_map, StateT.run_bind]
+    refine EvalDistEq.trans (EvalDistEq.bind_right _ fun p => ih p.1 p.2) ?_
+    refine EvalDistEq.trans ((oracle_draw_query D P Pe procM replyM hP hR t log).bind_left _) ?_
+    simp only [bind_assoc]
+    by_cases hc : ∃ o : S.Onion, t = .inl (.inr (Role.relay, o)) ∧ o.1 = H
+        ∧ (Role.relay, o.1) ∉ log.seen
+    · obtain ⟨o, rfl, ho, hseen⟩ := hc
+      refine EvalDistEq.bind_right _ fun g => ?_
+      simp only [oracle_process_run, hseen, ↓reduceIte, bind_assoc, bind_map_left]
+      refine EvalDistEq.bind_right _ fun out => EvalDistEq.bind_right _ fun a => ?_
+      have hs : (Role.relay, H) ∈ (Role.relay, o.1) :: log.seen := by
+        rw [ho]
+        exact List.mem_cons_self
+      refine EvalDistEq.trans (EvalDistEq.bind_right _ fun g' => ?_)
+        (OracleComp.EvalDistEq.bind_const D _)
+      rw [oracle_draw_seen H P Pe procM replyM hH hR g' g (k a)
+        ⟨(Role.relay, o.1) :: log.seen, (Role.relay, o) :: log.held⟩ hs]
+    · have hind : ∀ g g', (oracle procM replyM (Pe g) t).run log
+          = (oracle procM replyM (Pe g') t).run log := fun g g' => by
+        rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
+        · simp [oracle]
+        · rw [oracle_process_run, oracle_process_run]
+          by_cases hseen : (h, o.1) ∈ log.seen
+          · simp [hseen]
+          · have hne : ¬ (h = Role.relay ∧ o.1 = H) := fun hx =>
+              hc ⟨o, by rw [hx.1], hx.2, by rw [← hx.1]; exact hseen⟩
+            simp [hseen, hH g g' h o _ hne]
+        · rw [oracle_answer_run, oracle_answer_run, hR g, hR g']
+      refine EvalDistEq.trans (EvalDistEq.bind_right _ fun g =>
+        (OracleComp.EvalDistEq.bind_bind_swap _ _ _).trans
+          (EvalDistEq.bind_right _ fun g' => by rw [hind g g'])) ?_
+      exact OracleComp.EvalDistEq.bind_const _ _
+
+end Draw
+
 end Cryptlib.Protocols.RSOR
