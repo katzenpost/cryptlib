@@ -1553,12 +1553,14 @@ def forwardAdvOf (names : Role → RSOR.Name) (Oth : Type) (draw : ProbComp Oth)
     let kb ← (liftM (keygen kem) : OracleComp procSpec _)
     let ks ← (liftM (keygen kem) : OracleComp procSpec _)
     let sk : Role → kem.PrivateKey := fun | .relay => kb.2 | .back => kb.2 | .sender => ks.2
-    let out ← (simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 sk {})
+    let out ← (simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16
+        .relay sk {})
       (A.choose (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk kb.1
         ks.1))).run {}
     return (⟨kb, ks, out.1.1⟩, (out.1.2, out.2, sk))
   post st w :=
-    (simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 st.2.2 w.patch)
+    (simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16
+        .relay st.2.2 w.patch)
       (A.guess st.1 w.onion)).run' st.2.1
 
 /-- The adversary for world 0. -/
@@ -1589,12 +1591,12 @@ theorem forwardAdv_pre (names : Role → RSOR.Name) (Oth : Type) (draw : ProbCom
   have hv : ∀ (kb ks : Key kem × kem.PrivateKey) {α : Type}
       (oa : OracleComp (Protocols.RSOR.oracleSpec 𝒮) α),
       simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
-          ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16
+          ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
             (fun | .relay => kb.2 | .back => kb.2 | .sender => ks.2) {}) oa).run {})
         = (simulateQ (Protocols.RSOR.honest
             (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1 kb.1 ks.1)
             (fun | .relay => k.2 | .back => kb.2 | .sender => ks.2) {}) oa).run {} :=
-    fun kb ks _ oa => viaOracle_honest kem cipher macS kdfS streamS geom hvalid hmactag h16 _
+    fun kb ks _ oa => viaOracle_honest kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay _
       (fun | .relay => kb.2 | .back => kb.2 | .sender => ks.2)
       (fun | .relay => k.2 | .back => kb.2 | .sender => ks.2)
       (fun h hr => by cases h <;> first | rfl | exact absurd rfl hr) {} oa {}
@@ -1617,7 +1619,7 @@ theorem forwardAdv_post (names : Role → RSOR.Name) (Oth : Type) (draw : ProbCo
             (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1 kb.1 ks.1)
             (fun | .relay => k.2 | .back => kb.2 | .sender => ks.2) w.patch)
           (A.guess st w.onion)).run' log := by
-  have hv := viaOracle_honest kem cipher macS kdfS streamS geom hvalid hmactag h16
+  have hv := viaOracle_honest kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
     (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1 kb.1 ks.1)
     (fun | .relay => kb.2 | .back => kb.2 | .sender => ks.2)
     (fun | .relay => k.2 | .back => kb.2 | .sender => ks.2)

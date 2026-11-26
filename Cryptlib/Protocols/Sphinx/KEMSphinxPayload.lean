@@ -131,7 +131,7 @@ theorem viaOracle_header (sk : Role → kem.PrivateKey) (c : kem.Ciphertext)
       (Protocols.RSOR.oracleSpec (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) α)
     (log : Protocols.RSOR.Log (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) :
     simulateQ (relayImpl (relayAns kem cipher macS kdfS streamS geom (sk .relay) c f))
-        ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 sk patch)
+        ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay sk patch)
           oa).run log)
       = (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk c km U Hv D
           patch) oa).run log := by
@@ -192,7 +192,7 @@ theorem viaOracle_onlyHeader (sk : Role → kem.PrivateKey) (c : kem.Ciphertext)
     simulateQ (relayImpl (relayAns kem cipher macS kdfS streamS geom (sk .relay) c
           (fun pkt => if pkt.extract 0 (payloadOffset kem geom) = ofVector Hv
             then procKeys kem cipher macS streamS geom u pkt else none)))
-        ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 sk patch)
+        ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay sk patch)
           oa).run log)
       = (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk c
           u.2.2.1 (streamS.keystream (ofVector u.2.2.2) (ofVector u.2.1)

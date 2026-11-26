@@ -350,7 +350,8 @@ theorem nextOwn_run (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversar
   rw [procImplF_ownAns, ← hW]
   show simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
     (simulateQ (relayFirst kem W.2.1 W.2.2)
-      ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 st.2.2 W.1.patch)
+      ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16
+          .relay st.2.2 W.1.patch)
         (A.guess st.1 W.1.onion)).run' st.2.1)) = _
   have hcomp : procImpl kem cipher macS kdfS streamS geom k.2 ∘ₛ relayFirst kem W.2.1 W.2.2
       = relayImpl (relayAns kem cipher macS kdfS streamS geom k.2 W.2.1 W.2.2) :=
@@ -391,7 +392,8 @@ theorem nextOwn_run (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversar
   have hW2 : W.2.2 = headerHand kem macS geom km (ofVector U) Hv Dd := by
     rw [hW, hHv, hDd]
     rfl
-  rw [viaOracle_congr kem cipher macS kdfS streamS geom hvalid hmactag h16 st.2.2 skf hsk, hW1, hW2]
+  rw [viaOracle_congr kem cipher macS kdfS streamS geom hvalid hmactag h16
+      .relay st.2.2 skf hsk, hW1, hW2]
   simp only [StateT.run'_eq, simulateQ_map]
   have hf : ∀ o' : RSOR.Onion geom,
       relayAns kem cipher macS kdfS streamS geom (skf .relay) (encapOf kem k.1.1 s).1

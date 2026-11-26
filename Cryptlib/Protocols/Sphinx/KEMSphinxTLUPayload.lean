@@ -219,11 +219,11 @@ theorem forward_tagged_sub_payload_le
         (onlyHeader cipher macS streamS geom (tagged (S := 𝒯) macS M)
           d.cs.1 d.o d.c (kp, iv, r)))
       ((fun out : Bool => out) <$>
-        (simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 d.cs.2.2.2
+        (simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay d.cs.2.2.2
             (view d.cs.1 d.o d.c (kp, iv, r)).patch)
           (A.guess d.cs.2.1 (view d.cs.1 d.o d.c (kp, iv, r)).onion)).run' d.cs.2.2.1) = _
     rw [procImplF_eq_relayImpl, hh, hv, id_map',
-      viaOracle_congr kem cipher macS kdfS streamS geom hvalid hmactag h16
+      viaOracle_congr kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
         d.cs.2.2.2 (G.sk ((iv, r), d)) hsk]
     simp only [StateT.run'_eq, simulateQ_map]
     rw [hvo]
