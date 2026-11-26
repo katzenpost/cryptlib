@@ -320,6 +320,99 @@ theorem headerRelays_patch_eq (sk : Role → kem.PrivateKey) (ct : kem.Ciphertex
     · exact (congrArg (patch.reply h m o) (if_neg hc)).trans
         ((hreply h m o _ hc).trans (if_neg hc).symm)
 
+/-! ## The two worlds before the end of the path -/
+
+omit hvalid hmactag h16 in
+/-- A header's bytes followed by a payload split into the two. -/
+theorem split_append (P : ByteArray) (x : Block geom) (hP : P.size = geom.headerLength) :
+    RSOR.split geom (P ++ ofVector x) = (toVecN _ P, x) := by
+  have e1 : (P ++ ofVector x).extract 0 geom.headerLength = P := by
+    rw [← hP]
+    exact Util.Bytes.extract_append_left P _
+  have e2 : (P ++ ofVector x).extract geom.headerLength (P ++ ofVector x).size = ofVector x := by
+    rw [← hP, ByteArray.size_append]
+    exact Util.Bytes.extract_append_right P _
+  unfold RSOR.split
+  rw [e1, e2, Cryptlib.Protocols.Sphinx.Common.toVecN_ofVector]
+
+set_option maxHeartbeats 1000000 in
+/-- **Before the end of the path, world 1's patched relay is world 0's relay.** World 0's relay
+has the header of a path that goes on, and forwards the next layer `fwd` with the payload it
+decrypts: the next layer's own payload for the unchanged block, the random block `g`
+otherwise. World 1's relay, whatever it would answer, is patched to forward the same. The two
+games are the same when the headers agree and world 1's relay would not reply. -/
+theorem headerRelays_forward_eq {pk kb ks : Key kem} (names : Role → RSOR.Name)
+    (c : Protocols.RSOR.ForwardChallenge (S := 𝒮)
+      (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk kb ks))
+    (hn : c.pos + 1 < c.req.fwd.hops.length)
+    (r : RSOR.Randomness geom) (mine : RSOR.Onion geom) (g : Block geom)
+    (sk : Role → kem.PrivateKey) (ct : kem.Ciphertext) (km : Vector UInt8 32)
+    (U₀ U₁ : ByteArray) (D₁ : Block geom → Block geom)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (cc fwd : ByteArray)
+    (hj : j + 1 < hops.size) (hlen : hops.size ≤ geom.nrHops)
+    (hU : U₀.size = geom.routingInfoLength + geom.perHopRoutingInfoLength)
+    (hc : cc.size = kem.ciphertextSize)
+    (hfwd : layerPast kem cipher macS kdfS streamS geom hops d payload j U₀ (j + 1) = .ok fwd)
+    (hs : (relayFront kem cipher macS kdfS streamS geom hops d payload j cc U₀).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength)
+    (hcmd : (hops[j]!).commands = [])
+    (hname : (hops[j + 1]!).id = c.req.fwd.hops[c.pos.val + 1].name)
+    (hmine : mine.1 = Util.Bytes.toVecN geom.headerLength
+      (relayFront kem cipher macS kdfS streamS geom hops d payload j cc U₀
+        ++ ofVector (macS.mac (ofVector km)
+          (relayFront kem cipher macS kdfS streamS geom hops d payload j cc U₀))))
+    (hrep : ∀ (m : RSOR.Msg geom) (o : RSOR.Onion geom), o.1 = mine.1 →
+      RSOR.replyOf cipher geom m
+        (procKeysD kem macS geom km U₁ (ofVector (D₁ o.2)) (RSOR.join o)) = none) :
+    headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U₁ mine.1 D₁
+        (c.patchDrawn (RSOR.split geom fwd) r mine g)
+      = headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U₀ mine.1
+        (fun y => if y = mine.2 then (RSOR.split geom fwd).2 else g) {} := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have had : adLength = 2 := rfl
+  refine headerRelays_patch_eq kem cipher macS kdfS streamS geom hvalid hmactag h16 sk ct km U₀ U₁
+    mine.1 _ D₁ _ (fun o ho => ?_) (fun m o ho => ?_) (fun h o out hc => ?_)
+    (fun h m o out hc => ?_)
+  · obtain ⟨o1, o2⟩ := o
+    obtain rfl : o1 = mine.1 := ho
+    have hst := stepOf_relayFront geom kem kdfS streamS cipher macS hvalid hmactag hops d payload
+      j cc U₀ fwd km (if o2 = mine.2 then (RSOR.split geom fwd).2 else g) o2 hj hlen hU hc hfwd hs
+      (by omega) hcmd
+    rw [← hmine] at hst
+    have hfwd' := hfwd
+    unfold layerPast at hfwd'
+    have hfsz : fwd.size = geom.packetLength :=
+      newKEMPacket_size kem cipher macS kdfS streamS geom _ _ _ _ _ hvalid hmactag hfwd'
+        (newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ _ _ hfwd').1
+    have hH : 2 + kem.ciphertextSize + geom.routingInfoLength + macLength = geom.headerLength := by
+      rw [hhdr, had]
+    rw [hH] at hst
+    unfold Protocols.RSOR.ForwardChallenge.patchDrawn
+    dsimp only
+    rw [hst, hname, split_append geom _ _ (by
+      rw [ByteArray.size_extract]
+      omega)]
+    refine congrArg pure ((if_pos ⟨rfl, rfl⟩).trans ((dif_pos hn).trans ?_))
+    refine congrArg (fun z => some (Protocols.RSOR.Step.forward _ z)) ?_
+    by_cases ho : o2 = mine.2
+    · exact (if_pos ho).trans (Prod.ext rfl (if_pos ho).symm)
+    · exact (if_neg ho).trans (Prod.ext rfl (if_neg ho).symm)
+  · obtain ⟨o1, o2⟩ := o
+    obtain rfl : o1 = mine.1 := ho
+    have hrp := replyOf_relayFront geom kem kdfS streamS cipher macS hvalid hmactag hops d payload
+      j cc U₀ fwd km (if o2 = mine.2 then (RSOR.split geom fwd).2 else g) o2 hj hlen hU hc hfwd hs
+      (by omega) hcmd m
+    rw [← hmine] at hrp
+    have h1 := hrep m (mine.1, o2) rfl
+    rw [hrp]
+    unfold Protocols.RSOR.ForwardChallenge.patchDrawn Protocols.RSOR.ForwardChallenge.patchWith
+    exact (if_neg fun hx => absurd hx.2.2 (by omega)).trans h1
+  · unfold Protocols.RSOR.ForwardChallenge.patchDrawn
+    exact congrArg pure (if_neg hc)
+  · unfold Protocols.RSOR.ForwardChallenge.patchDrawn Protocols.RSOR.ForwardChallenge.patchWith
+    exact if_neg fun hx => hc ⟨hx.1, by rw [hx.2.1]⟩
+
 end ForwardFinal
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx

@@ -1788,6 +1788,37 @@ theorem stepOf_relayFront (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSiz
       (by rw [hcmd]; simp) (by rw [hcmd]; simp), hcmd]
   rfl
 
+/-- Before the end of the path the keyed hop does not reply. -/
+theorem replyOf_relayFront (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (c U fwd : ByteArray) (km : Vector UInt8 32)
+    (x y : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (hj : j + 1 < hops.size) (hlen : hops.size ≤ geom.nrHops) (hU : U.size = 𝓃)
+    (hc : c.size = kem.ciphertextSize)
+    (hfwd : layerPast kem cipher macS kdfS streamS geom hops d payload j U (j + 1) = .ok fwd)
+    (hs : (relayFront kem cipher macS kdfS streamS geom hops d payload j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength)
+    (hx : 0 < geom.payloadTagLength + geom.forwardPayloadLength)
+    (hcmd : (hops[j]!).commands = []) (m : RSOR.Msg geom) :
+    RSOR.replyOf cipher geom m (procKeysD kem macS geom km U (ofVector x)
+        (RSOR.join (Util.Bytes.toVecN geom.headerLength
+          (relayFront kem cipher macS kdfS streamS geom hops d payload j c U
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem cipher macS kdfS streamS geom hops d payload j c U))), y)))
+      = none := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have had : adLength = 2 := rfl
+  unfold RSOR.join
+  dsimp only
+  rw [Util.Bytes.ofVector_toVecN _ (by
+      rw [ByteArray.size_append, hs, Util.Bytes.size_ofVector, hmactag, hhdr, had]),
+    procKeysD_relayFront geom kem kdfS streamS cipher macS hvalid hmactag hops d payload j c U
+      fwd km (ofVector x) (ofVector y) hj hlen hU hc hfwd hs
+      (by rw [Util.Bytes.size_ofVector]; exact hx)
+      (by rw [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector])
+      (by rw [hcmd]; simp) (by rw [hcmd]; simp)]
+  rfl
+
 /-- **The keyed hop's step at the end of the path.** On its own header with a valid tag and
 any payload, with any keystream and any decryption `x` of the payload, the last hop delivers
 what is behind the zero tag of `x` to its recipient, and nothing when `x` has no zero tag. -/
