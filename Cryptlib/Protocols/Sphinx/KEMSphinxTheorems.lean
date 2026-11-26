@@ -1538,11 +1538,12 @@ def wrapKEMSURB (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (
     if hsize : surb.size = geom.surbLength then pure (⟨surb.data, hsize⟩, k)
     else throw "sphinx: internal error: newKEMSURB produced a wrong-sized SURB"
 
-/-- Process one hop with the hop's keys and with the payload decrypted by `dec`: check the
-header MAC, decrypt the routing info and the payload, and forward or deliver. -/
+/-- Process one hop with the hop's keys, given the decryption `dec` of its payload: check the
+header MAC, decrypt the routing info, and forward or deliver. -/
 def unwrapKEMKeysD (kem : KEM) (macS : MAC) (streamS : StreamCipher) (geom : Geometry)
-    (dec : ByteArray → ByteArray) (hdecsz : ∀ x, (dec x).size = x.size)
-    (keys : HopKeys) (replayTag : Vector UInt8 32) (pkt : ByteArray)
+    (keys : HopKeys) (replayTag : Vector UInt8 32) (pkt dec : ByteArray)
+    (hdecsz : dec.size
+      = (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) pkt.size).size)
     (h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength) :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
@@ -1590,14 +1591,14 @@ def unwrapKEMKeysD (kem : KEM) (macS : MAC) (streamS : StreamCipher) (geom : Geo
     rw [ByteArray.size_extract]
     omega
   let decPayload :=
-    if rawPayload.size > 0 then dec rawPayload
+    if rawPayload.size > 0 then dec
     else rawPayload
   have hdec : decPayload.size = rawPayload.size := by
     show (if rawPayload.size > 0
-          then dec rawPayload
+          then dec
           else rawPayload).size = rawPayload.size
     split
-    · exact hdecsz _
+    · exact hdecsz
     · rfl
 
   match nextNode with
@@ -1636,9 +1637,10 @@ def unwrapKEMKeys (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (streamS :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand
         × Option (Vector UInt8 pkt.size)) :=
-  unwrapKEMKeysD kem macS streamS geom
-    (cipher.decrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV))
-    (cipher.decrypt_size _ _) keys replayTag pkt h1
+  unwrapKEMKeysD kem macS streamS geom keys replayTag pkt
+    (cipher.decrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV)
+      (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) pkt.size))
+    (cipher.decrypt_size _ _ _) h1
 
 /-- Process one hop with decapsulation given as a function of the ciphertext bytes: returns
 `(payload, replayTag, cmds, forwardPkt)`. The forwarded packet carries the next-hop ciphertext

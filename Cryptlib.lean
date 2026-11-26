@@ -103,6 +103,7 @@ import Cryptlib.Protocols.RSOR
 import Cryptlib.Protocols.RSOROnce
 import Cryptlib.Protocols.Sphinx.KEMSphinxRSOR
 import Cryptlib.Protocols.Sphinx.KEMSphinxKeyed
+import Cryptlib.Protocols.Sphinx.KEMSphinxPayload
 import Cryptlib.Protocols.Sphinx.KEMSphinxKeyedMac
 import Cryptlib.Protocols.Sphinx.KEMSphinxTLU
 import Cryptlib.Protocols.Sphinx.NIKESphinxRSOR

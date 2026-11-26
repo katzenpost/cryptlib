@@ -482,29 +482,36 @@ theorem keyTuple_keysKDF (t : KeyTuple) (ss : ByteArray) :
 def procKeys (t : KeyTuple) (pkt : ByteArray) : ProcResult :=
   procWith kem cipher macS (keysKDF t) streamS geom (fun _ => .ok .empty) pkt
 
-/-- Process a packet with the hop's keys given directly and its payload decrypted by `dec`. -/
-def procKeysD (dec : ByteArray → ByteArray) (hdec : ∀ x, (dec x).size = x.size) (t : KeyTuple)
-    (pkt : ByteArray) : ProcResult :=
+/-- Process a packet with the hop's keys given directly, given the decryption `dec` of its
+payload. -/
+def procKeysD (dec : ByteArray) (t : KeyTuple) (pkt : ByteArray) : ProcResult :=
   if h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength then none
   else if (pkt.extract 0 2).data ≠ v0AD.data then none
-  else match unwrapKEMKeysD kem macS streamS geom dec hdec (deriveHopKeys (keysKDF t) .empty)
+  else if hd : dec.size = (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+      pkt.size).size then
+    match unwrapKEMKeysD kem macS streamS geom (deriveHopKeys (keysKDF t) .empty)
       (Cryptlib.Primitives.Hash.Sha512.sha512_256 (pkt.extract 2 (2 + kem.ciphertextSize)))
-      pkt h1 with
+      pkt dec hd h1 with
     | .ok (p, r, c, f) => some (p, r, c, f.map ofVector)
     | .error _ => none
+  else none
 
 /-- **A hop uses its payload key only to decrypt the payload.** -/
 theorem procKeys_eq_procKeysD (t : KeyTuple) (pkt : ByteArray) :
     procKeys kem cipher macS streamS geom t pkt
-      = procKeysD kem macS streamS geom (cipher.decrypt t.1.toArray (ofVector t.2.1))
-          (cipher.decrypt_size _ _) t pkt := by
+      = procKeysD kem macS streamS geom
+          (cipher.decrypt t.1.toArray (ofVector t.2.1)
+            (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) pkt.size))
+          t pkt := by
   have hk := keyTuple_keysKDF t .empty
   simp only [keyTuple, Prod.ext_iff] at hk
   obtain ⟨hp, hiv, -, -⟩ := hk
   have hA : ∀ (K : HopKeys), K.payloadEncryption = t.1 → K.headerEncryptionIV = t.2.1 →
       ∀ tag h1, unwrapKEMKeys kem cipher macS streamS geom K tag pkt h1
-        = unwrapKEMKeysD kem macS streamS geom (cipher.decrypt t.1.toArray (ofVector t.2.1))
-            (cipher.decrypt_size _ _) K tag pkt h1 := by
+        = unwrapKEMKeysD kem macS streamS geom K tag pkt
+            (cipher.decrypt t.1.toArray (ofVector t.2.1)
+              (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) pkt.size))
+            (cipher.decrypt_size _ _ _) h1 := by
     intro K hp' hiv' tag h1
     cases K
     dsimp only at hp' hiv'
@@ -520,7 +527,7 @@ theorem procKeys_eq_procKeysD (t : KeyTuple) (pkt : ByteArray) :
     · simp only [h1, ↓reduceDIte]
       rw [ite_eq_left_of_eq_true _ _ (eq_true hv), ite_eq_left_of_eq_true _ _ (eq_true hv)]
       rfl
-    · simp only [h1, hv, ↓reduceDIte, ↓reduceIte, hb, hA _ hp hiv]
+    · simp only [h1, hv, ↓reduceDIte, ↓reduceIte, hb, hA _ hp hiv, cipher.decrypt_size]
       rfl
 
 /-- **A hop uses its shared secret only through its four keys.** Processing with a
