@@ -1452,6 +1452,79 @@ theorem procKeysD_relayFrontLast (hvalid : geom.ValidForKEM kem)
         exact hpar)
       hnext hsurb, hpre 2 _ (by omega), hMc]
 
+/-! ## The honest relay's answers as steps of the game -/
+
+/-- **The keyed hop's step before the end of the path.** On its own header with a valid tag
+and any payload, with any keystream and any decryption `x` of the payload, a hop with no
+commands of its own forwards the next layer's header with `x` to the next hop. -/
+theorem stepOf_relayFront (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (c U fwd : ByteArray) (km : Vector UInt8 32)
+    (x y : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (hj : j + 1 < hops.size) (hlen : hops.size ≤ geom.nrHops) (hU : U.size = 𝓃)
+    (hc : c.size = kem.ciphertextSize)
+    (hfwd : layerPast kem cipher macS kdfS streamS geom hops d payload j U (j + 1) = .ok fwd)
+    (hs : (relayFront kem cipher macS kdfS streamS geom hops d payload j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength)
+    (hx : 0 < geom.payloadTagLength + geom.forwardPayloadLength)
+    (hcmd : (hops[j]!).commands = []) :
+    RSOR.stepOf geom (procKeysD kem macS geom km U (ofVector x)
+        (RSOR.join (Util.Bytes.toVecN geom.headerLength
+          (relayFront kem cipher macS kdfS streamS geom hops d payload j c U
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem cipher macS kdfS streamS geom hops d payload j c U))), y)))
+      = some (.forward (hops[j + 1]!).id (RSOR.split geom
+          (fwd.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+            ++ ofVector x))) := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have had : adLength = 2 := rfl
+  unfold RSOR.join
+  dsimp only
+  rw [Util.Bytes.ofVector_toVecN _ (by
+      rw [ByteArray.size_append, hs, Util.Bytes.size_ofVector, hmactag, hhdr, had]),
+    procKeysD_relayFront geom kem kdfS streamS cipher macS hvalid hmactag hops d payload j c U
+      fwd km (ofVector x) (ofVector y) hj hlen hU hc hfwd hs
+      (by rw [Util.Bytes.size_ofVector]; exact hx)
+      (by rw [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector])
+      (by rw [hcmd]; simp) (by rw [hcmd]; simp), hcmd]
+  rfl
+
+/-- **The keyed hop's step at the end of the path.** On its own header with a valid tag and
+any payload, with any keystream and any decryption `x` of the payload, the last hop delivers
+what is behind the zero tag of `x` to its recipient, and nothing when `x` has no zero tag. -/
+theorem stepOf_relayFrontLast (hvalid : geom.ValidForKEM kem)
+    (hmactag : macS.tagSize = macLength) (hops : Array PathHop) (d : RSOR.Draw geom) (j : ℕ)
+    (c U : ByteArray) (km : Vector UInt8 32)
+    (x y : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (hj : j + 1 = hops.size) (hlen : hops.size ≤ geom.nrHops) (hU : U.size = 𝓃)
+    (hc : c.size = kem.ciphertextSize)
+    (hs : (relayFrontLast kem kdfS streamS geom hops d j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength)
+    (hx : 0 < geom.payloadTagLength + geom.forwardPayloadLength)
+    (rc : Vector UInt8 32) (hcmd : (hops[j]!).commands = [.recipient rc]) :
+    RSOR.stepOf geom (procKeysD kem macS geom km U (ofVector x)
+        (RSOR.join (Util.Bytes.toVecN geom.headerLength
+          (relayFrontLast kem kdfS streamS geom hops d j c U
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFrontLast kem kdfS streamS geom hops d j c U))), y)))
+      = if ((ofVector x).extract 0 geom.payloadTagLength).data.all (· == 0) then
+          some (.deliver (RSOR.msgOf geom
+            ((ofVector x).extract geom.payloadTagLength (ofVector x).size)) rc)
+        else none := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have had : adLength = 2 := rfl
+  unfold RSOR.join
+  dsimp only
+  rw [Util.Bytes.ofVector_toVecN _ (by
+      rw [ByteArray.size_append, hs, Util.Bytes.size_ofVector, hmactag, hhdr, had]),
+    procKeysD_relayFrontLast geom kem kdfS streamS macS hvalid hmactag hops d j c U km
+      (ofVector x) (ofVector y) hj hlen hU hc hs
+      (by rw [Util.Bytes.size_ofVector]; exact hx)
+      (by rw [Util.Bytes.size_ofVector]; omega)
+      (by rw [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector])
+      (by rw [hcmd]; simp) (by rw [hcmd]; rfl) (by rw [hcmd]; rfl), hcmd]
+  split_ifs <;> rfl
+
 end Pad
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
