@@ -1697,6 +1697,57 @@ theorem relayFront_size (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize 
     simp only [ByteArray.size_append, size_xorBytes, ByteArray.size_extract, hfsz', hc, hv0]
     omega
 
+omit cipher macS in
+set_option maxHeartbeats 1000000 in
+/-- At the end of the path, a hop whose only command names a recipient has header bytes of a
+header's length. -/
+theorem relayFrontLast_size (hvalid : geom.ValidForKEM kem) (hops : Array PathHop)
+    (d : RSOR.Draw geom) (j : ℕ) (c U : ByteArray) (hj : j + 1 = hops.size)
+    (hlen : hops.size ≤ geom.nrHops) (hU : U.size = 𝓃) (hc : c.size = kem.ciphertextSize)
+    (rc : Vector UInt8 32) (hcmd : (hops[j]!).commands = [.recipient rc]) :
+    (relayFrontLast kem kdfS streamS geom hops d j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength := by
+  obtain ⟨hnnh, hperhopEq, hrouting, -⟩ := id hvalid
+  have hnn : Constants.nextNodeHopLength = 65 := by decide
+  have hv0 : v0AD.size = 2 := rfl
+  have hpR : 𝓅 ≤ geom.routingInfoLength := by
+    rw [hrouting]
+    exact Nat.le_mul_of_pos_right _ (by omega)
+  have hFsz : (if geom.nrHops > 1 then fillerAtF kem kdfS streamS geom hops
+        (d.1.toArray.extract 0 hops.size)
+        ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * 𝓅)) j U j
+      else ByteArray.empty).size + 𝓅 = geom.routingInfoLength := by
+    split_ifs with hn
+    · have hap : (geom.nrHops - hops.size) * 𝓅 ≤ geom.routingInfoLength := by
+        rw [hrouting, Nat.mul_comm 𝓅]
+        exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+      rw [fillerAtF_size kem kdfS streamS geom hrouting hops _ _ j U hlen (by
+          rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+          omega) hU j (by omega), hrouting, Nat.mul_comm 𝓅, ← Nat.succ_mul]
+      congr 1
+      omega
+    · have h1 : geom.nrHops = 1 := by omega
+      rw [hrouting, h1, Nat.mul_one]
+      exact Nat.zero_add _
+  have hksz : ∀ i (hi : i < (#[c] : Array ByteArray).size),
+      ((#[c] : Array ByteArray)[i]'hi).size = kem.ciphertextSize := fun i hi => by
+    obtain rfl : i = 0 := by simpa using hi
+    exact hc
+  unfold relayFrontLast
+  cases hfr : kemRiFragment kem geom #[hops[j]!] #[c] ByteArray.empty 1 0 with
+  | error e =>
+    exfalso
+    unfold kemRiFragment at hfr
+    have hb : ¬ (𝓅 - kem.ciphertextSize < 33) := by
+      rw [hperhopEq, hnnh, hnn]
+      omega
+    simp [hcmd, commandsToBytes, RoutingCommand.toBytes, hb] at hfr
+  | ok frag =>
+    have hfsz' := kemRiFragment_size kem geom #[hops[j]!] #[c] ByteArray.empty 1 0
+      Nat.one_pos (by omega) hnnh rfl hksz frag hfr
+    simp only [ByteArray.size_append, size_xorBytes, hfsz', hc, hv0]
+    omega
+
 /-! ## The same header in both worlds -/
 
 /-- A mask shifted by the difference of two strings takes one to the other's masking. -/
@@ -1915,6 +1966,104 @@ theorem shiftStream_spec (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize
     payload j c U _ fwd hj hlen hj' hU hT hc hkeys h1
     (relayFront_size geom kem kdfS streamS cipher macS hvalid hmactag hops dd payload j c _ fwd
       hj hlen hc h1 hcmd) hs'
+
+/-! ## The keystream that takes one world to the other, at the end of the path -/
+
+/-- The keystream for the last hop on the path `hops` with the draw `d` that shows what the
+keystream `U` shows on the path `hops'` with the draw `d'`: the head of `U` shifted by the
+difference of the two routing informations, then the rest of `U`. -/
+def lastShift (hops hops' : Array PathHop) (d d' : RSOR.Draw geom) (j : ℕ) (c U : ByteArray) :
+    ByteArray :=
+  xorBytes (U.extract 0 (geom.routingInfoLength - j * 𝓅))
+      (xorBytes
+        (lastFrag geom kem hops' j c
+          ++ (zeroFiller geom kem kdfS streamS hops' d' j).extract 0
+            ((geom.nrHops - hops'.size) * 𝓅))
+        (lastFrag geom kem hops j c
+          ++ (zeroFiller geom kem kdfS streamS hops d j).extract 0
+            ((geom.nrHops - hops.size) * 𝓅)))
+    ++ U.extract (geom.routingInfoLength - j * 𝓅) 𝓃
+
+omit cipher macS in
+set_option maxHeartbeats 1000000 in
+/-- **At the end of the path the shifted keystream takes one world to the other.** Two paths
+that end at the keyed hop, with the same hop keys in front, give the same header bytes once
+the head of the keystream is shifted. -/
+theorem lastShift_spec (hvalid : geom.ValidForKEM kem) (hops hops' : Array PathHop)
+    (d d' : RSOR.Draw geom) (j : ℕ) (c U : ByteArray)
+    (hj : j + 1 = hops.size) (hlen : hops.size ≤ geom.nrHops) (hj' : j + 1 = hops'.size)
+    (hU : U.size = 𝓃) (hc : c.size = kem.ciphertextSize)
+    (hkeys : ∀ m, m < j → kemHopKeys kem kdfS hops (d.1.toArray.extract 0 hops.size) m
+      = kemHopKeys kem kdfS hops' (d'.1.toArray.extract 0 hops'.size) m)
+    (rc rc' : Vector UInt8 32) (hcmd : (hops[j]!).commands = [.recipient rc])
+    (hcmd' : (hops'[j]!).commands = [.recipient rc']) :
+    (lastShift geom kem kdfS streamS hops hops' d d' j c U).size = 𝓃
+      ∧ relayFrontLast kem kdfS streamS geom hops d j c
+          (lastShift geom kem kdfS streamS hops hops' d d' j c U)
+        = relayFrontLast kem kdfS streamS geom hops' d' j c U := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hjp : (j + 1) * 𝓅 ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm 𝓅]
+    exact Nat.mul_le_mul_right _ (by omega)
+  rw [Nat.succ_mul] at hjp
+  have hUh : (U.extract 0 (geom.routingInfoLength - j * 𝓅)).size
+      = geom.routingInfoLength - j * 𝓅 := by
+    rw [ByteArray.size_extract, hU]
+    omega
+  have hVs : (lastShift geom kem kdfS streamS hops hops' d d' j c U).size = 𝓃 := by
+    unfold lastShift
+    rw [ByteArray.size_append, size_xorBytes, hUh, ByteArray.size_extract, hU]
+    omega
+  refine ⟨hVs, ?_⟩
+  obtain ⟨X1, hX1⟩ : ∃ X1, X1 = lastFrag geom kem hops' j c
+      ++ (zeroFiller geom kem kdfS streamS hops' d' j).extract 0
+        ((geom.nrHops - hops'.size) * 𝓅) := ⟨_, rfl⟩
+  obtain ⟨X0, hX0⟩ : ∃ X0, X0 = lastFrag geom kem hops j c
+      ++ (zeroFiller geom kem kdfS streamS hops d j).extract 0
+        ((geom.nrHops - hops.size) * 𝓅) := ⟨_, rfl⟩
+  obtain ⟨V, hV⟩ : ∃ V, V = lastShift geom kem kdfS streamS hops hops' d d' j c U := ⟨_, rfl⟩
+  rw [← hV] at hVs ⊢
+  unfold lastShift at hV
+  rw [← hX1, ← hX0] at hV
+  have hs := relayFrontLast_size geom kem kdfS streamS hvalid hops d j c V hj hlen hVs hc rc hcmd
+  have hs' := relayFrontLast_size geom kem kdfS streamS hvalid hops' d' j c U hj' (by omega) hU
+    hc rc' hcmd'
+  have h0 := relayFrontLast_canon geom kem kdfS streamS hrouting hops d j c V hj hlen hVs hc hs
+  have h1 := relayFrontLast_canon geom kem kdfS streamS hrouting hops' d' j c U hj' (by omega)
+    hU hc hs'
+  rw [← hX0] at h0
+  rw [← hX1] at h1
+  have hv0 : v0AD.size = 2 := rfl
+  have hzs : ∀ (hp : Array PathHop) (dr : RSOR.Draw geom), j + 1 = hp.size →
+      (zeroFiller geom kem kdfS streamS hp dr j).size
+        = (geom.nrHops - hp.size) * 𝓅 + j * 𝓅 := fun hp dr hhp => by
+    have hap : (geom.nrHops - hp.size) * 𝓅 ≤ geom.routingInfoLength := by
+      rw [hrouting, Nat.mul_comm 𝓅]
+      exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+    unfold zeroFiller
+    rw [fillerAtF_size kem kdfS streamS geom hrouting hp _ _ j _ (by omega) (by
+        rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+        omega) (zeroBytes_size _) j (by omega), Nat.add_mul]
+  have hp1 := zeroFiller_front geom kem kdfS streamS hrouting hops' d' j hj' (by omega) j le_rfl
+  have hp0 := zeroFiller_front geom kem kdfS streamS hrouting hops d j hj hlen j le_rfl
+  rw [hzs hops' d' hj', hp1] at h1
+  rw [hzs hops d hj, hp0, frontPadOf_congr geom kem kdfS streamS hops hops' _ _ j hkeys j le_rfl]
+    at h0
+  have hFP : (frontPadOf geom kem kdfS streamS hops' (d'.1.toArray.extract 0 hops'.size) j
+      j).size = j * 𝓅 := by
+    rw [← hp1, ByteArray.size_extract, hzs hops' d' hj']
+    omega
+  have hX1s : X1.size = geom.routingInfoLength - j * 𝓅 := by
+    rw [h1] at hs'
+    simp only [ByteArray.size_append, size_xorBytes, hc, hv0, hFP] at hs'
+    omega
+  have hX0s : X0.size = geom.routingInfoLength - j * 𝓅 := by
+    rw [h0] at hs
+    simp only [ByteArray.size_append, size_xorBytes, hc, hv0, hFP] at hs
+    omega
+  rw [h0, h1, hV, Util.Bytes.extract_append_of_le _ _ (by rw [size_xorBytes, hUh]),
+    extract_all _ _ (by rw [size_xorBytes, hUh]),
+    xorBytes_shift X0 X1 _ (hX0s.trans hX1s.symm) (hUh.trans hX0s.symm)]
 
 /-! ## The honest relay's answers as steps of the game -/
 
