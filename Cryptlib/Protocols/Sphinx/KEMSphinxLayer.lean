@@ -69,11 +69,11 @@ theorem procWith_payload_congr (dec : ByteArray → Except String ByteArray) (pk
   dsimp only at h ⊢
   simp only [e0, e1, e2, e3, e4]
   by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
-  · rw [dif_pos h1] at h; cases h
-  rw [dif_neg h1] at h; rw [dif_neg (hsz ▸ h1)]
+  · rw [dite_eq_left h1] at h; cases h
+  rw [dite_eq_right h1] at h; rw [dite_eq_right (hsz ▸ h1)]
   by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
-  · rw [if_pos h2] at h; cases h
-  rw [if_neg h2] at h ⊢
+  · rw [ite_eq_left h2] at h; cases h
+  rw [ite_eq_right h2] at h ⊢
   cases hd : dec (pkt.extract 2 (2 + kem.ciphertextSize)) with
   | error e => rw [hd] at h; cases h
   | ok ss =>
@@ -83,8 +83,8 @@ theorem procWith_payload_congr (dec : ByteArray → Except String ByteArray) (pk
         (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength)))).data
         ≠ (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
           (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)).data
-    · rw [if_pos h3] at h; cases h
-    rw [if_neg h3] at h ⊢
+    · rw [ite_eq_left h3] at h; cases h
+    rw [ite_eq_right h3] at h ⊢
     generalize parseAll _ = r at h ⊢
     cases r with
     | error e => cases h
@@ -180,11 +180,11 @@ theorem procWith_payload_changed (dec : ByteArray → Except String ByteArray) (
   dsimp only at h h'
   simp only [e0, e1, e2, e3, e4] at h'
   by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
-  · rw [dif_pos h1] at h; cases h
-  rw [dif_neg h1] at h; rw [dif_neg (hsz ▸ h1)] at h'
+  · rw [dite_eq_left h1] at h; cases h
+  rw [dite_eq_right h1] at h; rw [dite_eq_right (hsz ▸ h1)] at h'
   by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
-  · rw [if_pos h2] at h; cases h
-  rw [if_neg h2] at h h'
+  · rw [ite_eq_left h2] at h; cases h
+  rw [ite_eq_right h2] at h h'
   cases hd : dec (pkt.extract 2 (2 + kem.ciphertextSize)) with
   | error e => rw [hd] at h; cases h
   | ok ss =>
@@ -194,8 +194,8 @@ theorem procWith_payload_changed (dec : ByteArray → Except String ByteArray) (
         (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength)))).data
         ≠ (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
           (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)).data
-    · rw [if_pos h3] at h; cases h
-    rw [if_neg h3] at h h'
+    · rw [ite_eq_left h3] at h; cases h
+    rw [ite_eq_right h3] at h h'
     generalize parseAll _ = r at h h'
     cases r with
     | error e => cases h
@@ -262,18 +262,18 @@ theorem procWith_final_tag (dec : ByteArray → Except String ByteArray) (pkt ss
   unfold procWith unwrapKEMWith unwrapKEMKeys unwrapKEMKeysD at h
   dsimp only at h
   by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
-  · rw [dif_pos h1] at h; cases h
-  rw [dif_neg h1] at h
+  · rw [dite_eq_left h1] at h; cases h
+  rw [dite_eq_right h1] at h
   by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
-  · rw [if_pos h2] at h; cases h
-  rw [if_neg h2, hd] at h
+  · rw [ite_eq_left h2] at h; cases h
+  rw [ite_eq_right h2, hd] at h
   dsimp only [Bind.bind, Except.bind] at h
   by_cases h3 : (ofVector (macS.mac (ofVector (deriveHopKeys kdfS ss).headerMAC)
       (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength)))).data
       ≠ (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
         (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)).data
-  · rw [if_pos h3] at h; cases h
-  rw [if_neg h3] at h
+  · rw [ite_eq_left h3] at h; cases h
+  rw [ite_eq_right h3] at h
   generalize parseAll _ = r at h
   cases r with
   | error e => cases h
@@ -293,29 +293,29 @@ theorem procWith_final_tag (dec : ByteArray → Except String ByteArray) (pkt ss
           (pkt.extract (payloadOffset kem geom) pkt.size)
         else pkt.extract (payloadOffset kem geom) pkt.size) = d at h
       by_cases hlt : d.size < geom.payloadTagLength
-      · rw [if_pos hlt] at h; cases h
-      rw [if_neg hlt] at h
+      · rw [ite_eq_left hlt] at h; cases h
+      rw [ite_eq_right hlt] at h
       generalize hany : List.any cmds0 _ = bsr at h
       have hb : hasSurbReply cmds0 = bsr := by
         rw [← hany]; unfold hasSurbReply
         congr 1
       cases bsr with
       | true =>
-        rw [if_pos rfl] at h
+        rw [ite_eq_left rfl] at h
         simp only [pure, Except.pure, Option.some.injEq, Prod.mk.injEq] at h
         obtain ⟨-, -, rfl, -⟩ := h
         rw [hs] at hb; cases hb
       | false =>
-      rw [if_neg Bool.false_ne_true] at h
+      rw [ite_eq_right Bool.false_ne_true] at h
       by_cases htag : (!(d.extract 0 geom.payloadTagLength).data.all fun x => x == 0) = true
-      · rw [if_pos htag] at h; cases h
+      · rw [ite_eq_left htag] at h; cases h
       have hd' : tagOK geom d = true := by
         unfold tagOK
         simp only [Bool.not_eq_true, Bool.not_eq_false'] at htag
         rw [htag, decide_eq_false hlt]; rfl
       by_cases hpos : (pkt.extract (payloadOffset kem geom) pkt.size).size > 0
-      · rw [if_pos hpos] at hdd; rw [hdd]; exact hd'
-      · rw [if_neg hpos] at hdd
+      · rw [ite_eq_left hpos] at hdd; rw [hdd]; exact hd'
+      · rw [ite_eq_right hpos] at hdd
         have hz : d.size = 0 := by rw [← hdd]; omega
         unfold tagOK
         rw [cipher.decrypt_size, hdd, hz]
@@ -367,19 +367,19 @@ theorem procWith_payload (dec : ByteArray → Except String ByteArray) (pkt pkt'
     unfold payloadOffset at hpos; omega
   have h1' : ¬ pkt'.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by
     rw [hsz]; exact h1
-  rw [dif_neg h1] at h
-  rw [dif_neg h1'] at hR
+  rw [dite_eq_right h1] at h
+  rw [dite_eq_right h1'] at hR
   by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
-  · rw [if_pos h2] at h; cases h
-  rw [if_neg h2, hd] at h
-  rw [if_neg h2, hd] at hR
+  · rw [ite_eq_left h2] at h; cases h
+  rw [ite_eq_right h2, hd] at h
+  rw [ite_eq_right h2, hd] at hR
   dsimp only [Bind.bind, Except.bind] at h hR
   by_cases h3 : (ofVector (macS.mac (ofVector (deriveHopKeys kdfS ss).headerMAC)
       (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength)))).data
       ≠ (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
         (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)).data
-  · rw [if_pos h3] at h; cases h
-  rw [if_neg h3] at h hR
+  · rw [ite_eq_left h3] at h; cases h
+  rw [ite_eq_right h3] at h hR
   have hds : ∀ x : ByteArray, x.size = pkt.size →
       (cipher.decrypt (deriveHopKeys kdfS ss).payloadEncryption.toArray
         (ofVector (deriveHopKeys kdfS ss).headerEncryptionIV)
@@ -402,7 +402,7 @@ theorem procWith_payload (dec : ByteArray → Except String ByteArray) (pkt pkt'
           (ofVector (deriveHopKeys kdfS ss).headerEncryptionIV)
           (pkt'.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
             pkt'.size)).size > 0 := by rw [hds pkt' hsz]; omega
-      simp only [if_pos hp', if_pos hpd, Option.map_some]
+      simp only [ite_eq_left hp', ite_eq_left hpd, Option.map_some]
       have key : ∀ A P P' : ByteArray, A.size = payloadOffset kem geom →
           A ++ P' = (A ++ P).extract 0 (payloadOffset kem geom) ++ P' := by
         intro A P P' hA; rw [← hA, Cryptlib.Util.Bytes.extract_append_left]
@@ -418,24 +418,24 @@ theorem procWith_payload (dec : ByteArray → Except String ByteArray) (pkt pkt'
     | none =>
       have hs := hds pkt rfl
       have hs' := hds pkt' hsz
-      simp only [if_pos hp, hs] at h
-      simp only [if_pos hp', hs'] at hR
+      simp only [ite_eq_left hp, hs] at h
+      simp only [ite_eq_left hp', hs'] at hR
       by_cases hlt : pkt.size - payloadOffset kem geom < geom.payloadTagLength
-      · rw [if_pos hlt] at h; cases h
-      rw [if_neg hlt] at h hR
+      · rw [ite_eq_left hlt] at h; cases h
+      rw [ite_eq_right hlt] at h hR
       generalize hany : List.any cmds0 _ = bsr at h hR
       have hb : hasSurbReply cmds0 = bsr := by
         rw [← hany]; unfold hasSurbReply
         congr 1
       cases bsr with
       | true =>
-        rw [if_pos rfl] at h hR
+        rw [ite_eq_left rfl] at h hR
         simp only [pure, Except.pure, Option.map_none, Option.some.injEq, Prod.mk.injEq] at h
         obtain ⟨-, rfl, rfl, rfl⟩ := h
         subst hR
         exact ⟨fun fwd hf => (by cases hf), fun _ _ => rfl⟩
       | false =>
-        rw [if_neg Bool.false_ne_true] at h
+        rw [ite_eq_right Bool.false_ne_true] at h
         split_ifs at h
         simp only [pure, Except.pure, Option.map_none, Option.some.injEq, Prod.mk.injEq] at h
         obtain ⟨-, -, rfl, rfl⟩ := h
@@ -575,14 +575,14 @@ theorem procWith_mac (dec : ByteArray → Except String ByteArray) (pkt ss : Byt
   unfold procWith unwrapKEMWith unwrapKEMKeys unwrapKEMKeysD at h
   dsimp only at h
   by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
-  · rw [dif_pos h1] at h; cases h
-  rw [dif_neg h1] at h
+  · rw [dite_eq_left h1] at h; cases h
+  rw [dite_eq_right h1] at h
   by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
-  · rw [if_pos h2] at h; cases h
-  rw [if_neg h2, hd] at h
+  · rw [ite_eq_left h2] at h; cases h
+  rw [ite_eq_right h2, hd] at h
   dsimp only [Bind.bind, Except.bind] at h
   by_contra h3
-  rw [if_pos h3] at h
+  rw [ite_eq_left h3] at h
   cases h
 
 /-- A hop that accepts a packet with its keys given has checked its MAC under the MAC key. -/
@@ -609,11 +609,11 @@ theorem procWith_keysKDF (t : KeyTuple) (dec : ByteArray → Except String ByteA
   unfold procWith unwrapKEMWith at h
   dsimp only at h
   by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
-  · rw [dif_pos h1] at h; cases h
-  rw [dif_neg h1] at h
+  · rw [dite_eq_left h1] at h; cases h
+  rw [dite_eq_right h1] at h
   by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
-  · rw [if_pos h2] at h; cases h
-  rw [if_neg h2] at h
+  · rw [ite_eq_left h2] at h; cases h
+  rw [ite_eq_right h2] at h
   cases hd : dec (pkt.extract 2 (2 + kem.ciphertextSize)) with
   | error e =>
     rw [hd] at h
@@ -662,12 +662,12 @@ theorem procKeys_const (t t' : KeyTuple) (pkt : ByteArray) (hpay : t.1 = t'.1)
   unfold procKeys procWith unwrapKEMWith
   dsimp only
   by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
-  · rw [dif_pos h1, dif_pos h1]
-  rw [dif_neg h1, dif_neg h1]
+  · rw [dite_eq_left h1, dite_eq_left h1]
+  rw [dite_eq_right h1, dite_eq_right h1]
   by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
-  · rw [if_pos h2, if_pos h2]
+  · rw [ite_eq_left h2, ite_eq_left h2]
     rfl
-  rw [if_neg h2, if_neg h2]
+  rw [ite_eq_right h2, ite_eq_right h2]
   dsimp only [Bind.bind, Except.bind]
   rw [unwrapKEMKeys_const kem cipher macS streamS geom
       (deriveHopKeys (keysKDF t) ByteArray.empty),
@@ -687,7 +687,7 @@ theorem procKeys_size (t : KeyTuple) (pkt : ByteArray)
   unfold procKeys procWith unwrapKEMWith at h
   dsimp only at h
   by_contra h1
-  rw [dif_pos (by omega)] at h
+  rw [dite_eq_left (by omega)] at h
   cases h
 
 /-- **A packet a hop accepts under another header is a forgery.** If the packet's header is not
@@ -768,7 +768,7 @@ theorem newKEMPacket_one (seed : Vector UInt8 32) (filler : ByteArray) (hop : Pa
   have e10 : (#[hop] : Array PathHop).size - 1 - 0 = 0 := rfl
   rw [e10] at hfrag hs1 hs2
   rw [hsz] at hfrag
-  rw [if_neg (by decide : ¬ (0 > 0))] at hs2
+  rw [ite_eq_right (by decide : ¬ (0 > 0))] at hs2
   have hs0b : (s 0).2 = ByteArray.empty := by rw [hs0]
   have hs0a : (s 0).1 = if geom.nrHops > 1 then filler else ByteArray.empty := by rw [hs0]
   rw [hs0b] at hfrag
@@ -817,7 +817,7 @@ theorem newKEMPacketFrom_one (c : ByteArray) (K : HopKeys) (filler : ByteArray) 
   have e10 : (#[hop] : Array PathHop).size - 1 - 0 = 0 := rfl
   rw [e10] at hfrag hs1 hs2
   rw [hsz] at hfrag
-  rw [if_neg (by decide : ¬ (0 > 0))] at hs2
+  rw [ite_eq_right (by decide : ¬ (0 > 0))] at hs2
   have hs0b : (s 0).2 = ByteArray.empty := by rw [hs0]
   have hs0a : (s 0).1 = if geom.nrHops > 1 then filler else ByteArray.empty := by rw [hs0]
   rw [hs0b] at hfrag

@@ -188,12 +188,12 @@ theorem createKEMHeader_fold (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : St
               simp
             rw [← h1, ← h2, hks]
             by_cases hj0 : j > 0
-            · rw [if_pos hj0] at hpad
-              rw [if_pos hj0, getElem!_extract_zero riPadding (j - 1) j (by omega) (by omega),
+            · rw [ite_eq_left hj0] at hpad
+              rw [ite_eq_left hj0, getElem!_extract_zero riPadding (j - 1) j (by omega) (by omega),
                 hpad]
               rfl
-            · rw [if_neg hj0] at hpad
-              rw [if_neg hj0, hpad]
+            · rw [ite_eq_right hj0] at hpad
+              rw [ite_eq_right hj0, hpad]
               rfl
           · refine Except.bind_eq_ok (a := s path.size) ?_ ?_
             · refine forIn_range'_ok' _ s path.size _ _ hs0 rfl ?_
@@ -263,12 +263,12 @@ theorem createKEMHeaderFrom_fold (kem : KEM) (macS : MAC) (streamS : StreamCiphe
       simp
     rw [← h1, ← h2, hks]
     by_cases hj0 : j > 0
-    · rw [if_pos hj0] at hpad
-      rw [if_pos hj0, getElem!_extract_zero riPadding (j - 1) j (by omega) (by omega),
+    · rw [ite_eq_left hj0] at hpad
+      rw [ite_eq_left hj0, getElem!_extract_zero riPadding (j - 1) j (by omega) (by omega),
         hpad]
       rfl
-    · rw [if_neg hj0] at hpad
-      rw [if_neg hj0, hpad]
+    · rw [ite_eq_right hj0] at hpad
+      rw [ite_eq_right hj0, hpad]
       rfl
   · refine Except.bind_eq_ok (a := s path.size) ?_ ?_
     · refine forIn_range'_ok' _ s path.size _ _ hs0 rfl ?_
@@ -417,10 +417,10 @@ theorem xorBytes_extract (a b : ByteArray) (p q : Nat) (hq : q ≤ a.size) (hb :
     have hi : p + i < q := by
       simp only [ByteArray.size_extract, size_xorBytes] at h1
       omega
-    rw [ByteArray.getElem_extract, xorBytes_getElem a b (p + i) (by omega), dif_pos (by omega),
+    rw [ByteArray.getElem_extract, xorBytes_getElem a b (p + i) (by omega), dite_eq_left (by omega),
       xorBytes_getElem (a.extract p q) (b.extract p q) i
         (by simp only [ByteArray.size_extract]; omega),
-      dif_pos (by simp only [ByteArray.size_extract]; omega), ByteArray.getElem_extract,
+      dite_eq_left (by simp only [ByteArray.size_extract]; omega), ByteArray.getElem_extract,
       ByteArray.getElem_extract]
 
 /-- A prefix splits at any earlier point. -/
@@ -680,7 +680,7 @@ theorem newKEMPacketFrom_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS 
       intro hi
       have hc := hriPadcontent 0 hi
       dsimp only at hc
-      rw [if_neg (by omega)] at hc
+      rw [ite_eq_right (by omega)] at hc
       rw [hc, ByteArray.size_extract, streamS.keystream_size]
       have := hle 0 hi
       omega
@@ -688,7 +688,7 @@ theorem newKEMPacketFrom_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS 
       intro hi
       have hc := hriPadcontent (i + 1) hi
       dsimp only at hc
-      rw [if_pos (by omega : i + 1 > 0)] at hc
+      rw [ite_eq_left (by omega : i + 1 > 0)] at hc
       have hihsize := ih (by omega)
       have hthis0size : ((streamS.keystream (ofVector keys[i + 1]!.headerEncryption)
           (ofVector keys[i + 1]!.headerEncryptionIV)
@@ -724,7 +724,7 @@ theorem newKEMPacketFrom_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS 
   have hpkteq2 : pkt = hopPacket kemElements riPadding s t path.size 0 := by
     rw [hpkteq, hhdreq]
     unfold hopPacket
-    rw [Nat.sub_zero, if_neg (lt_irrefl 0), ByteArray.append_empty, hsprp]
+    rw [Nat.sub_zero, ite_eq_right (lt_irrefl 0), ByteArray.append_empty, hsprp]
   subst hpkteq2
   refine ⟨fun h2 => ?_, fun h1 => ⟨_, unwrapKEM_hopPacket_terminal kem cipher
     macS kdfS streamS geom path keys kemElements riKeyStream riPadding sprpKeys path.size s t
@@ -768,7 +768,7 @@ theorem newKEMPacketFrom_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS 
       intro hi
       have hc := hriPadcontent 0 hi
       dsimp only at hc
-      rw [if_neg (by omega)] at hc
+      rw [ite_eq_right (by omega)] at hc
       have hle0 := hle 0 hi
       have h01 : (0 + 1) * geom.perHopRoutingInfoLength = geom.perHopRoutingInfoLength := by simp
       have h00 : 0 * geom.perHopRoutingInfoLength = 0 := by simp
@@ -781,7 +781,7 @@ theorem newKEMPacketFrom_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS 
       intro hi
       have hc := hriPadcontent (i + 1) hi
       dsimp only at hc
-      rw [if_pos (by omega : i + 1 > 0)] at hc
+      rw [ite_eq_left (by omega : i + 1 > 0)] at hc
       simp only [Nat.add_sub_cancel] at hc
       have hPs := hpadsize i (by omega)
       have hle1 := hle (i + 1) hi
@@ -837,7 +837,7 @@ theorem newKEMPacketFrom_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS 
         rw [hRPget i hi, hkget i (by omega)]
         have hc := hriPadcontent (i + 1) (by omega)
         dsimp only at hc
-        rw [if_pos (by omega : i + 1 > 0)] at hc
+        rw [ite_eq_left (by omega : i + 1 > 0)] at hc
         simp only [Nat.add_sub_cancel] at hc
         have hPs := hpadsize i (by omega)
         have hRs := hpadsize (i + 1) (by omega)
@@ -867,19 +867,19 @@ theorem newKEMPacketFrom_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS 
         have hcs : (riPadding[i + 1]!).size = T.size := by rw [hRs, hTs]
         rw [hU, hcs]
         by_cases hi0 : i > 0
-        · rw [if_pos hi0, hRPget (i - 1) (by omega), show i - 1 + 1 = i from by omega, hc]
+        · rw [ite_eq_left hi0, hRPget (i - 1) (by omega), show i - 1 + 1 = i from by omega, hc]
           exact pad_extract_tail T _ _ (by rw [hPs]; exact hsl) (by rw [hPs, hTs]; omega)
         · have hi00 : i = 0 := by omega
           subst hi00
           have hP1 : (riPadding[0]!).size = geom.perHopRoutingInfoLength := by
             rw [hPs]; simp
-          rw [if_neg hi0, hc, Cryptlib.Util.Bytes.extract_append_of_ge _ _
+          rw [ite_eq_right hi0, hc, Cryptlib.Util.Bytes.extract_append_of_ge _ _
             (by rw [size_xorBytes, ByteArray.size_extract, hP1]; omega),
             ByteArray.extract_extract, size_xorBytes, ByteArray.size_extract, hP1]
           congr 1 <;> omega)
     (by
       show s' 0 = _
-      rw [if_pos (by rw [hps]; omega)]
+      rw [ite_eq_left (by rw [hps]; omega)]
       show ((s 0).1 ++ (riPadding[path.size - 1 - 0]!).extract 0
         geom.perHopRoutingInfoLength, (s 0).2) = _
       rw [Nat.sub_zero,
@@ -910,7 +910,7 @@ theorem newKEMPacketFrom_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS 
         -- The padding recurrence at hop `path.size - 1 - j`.
         have hc := hriPadcontent (path.size - 1 - j) hi1
         dsimp only at hc
-        rw [if_pos (by omega : path.size - 1 - j > 0), hq] at hc
+        rw [ite_eq_left (by omega : path.size - 1 - j > 0), hq] at hc
         have hle1 := hle (path.size - 1 - j) hi1
         have hsm : (path.size - 1 - j + 1) * geom.perHopRoutingInfoLength
             = (path.size - 1 - j) * geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength :=
@@ -975,18 +975,18 @@ theorem newKEMPacketFrom_unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS 
                 then RP'[(path.extract 1 path.size).size - 1 - j - 1]! else ByteArray.empty)))
         rw [hps, hkget _ (by omega), hkeget _ (by omega), hidx,
           show path.size - 1 - (j + 1) = path.size - 1 - 1 - j from by omega, h2,
-          if_pos (by omega : path.size - 1 - j > 0)]
+          ite_eq_left (by omega : path.size - 1 - j > 0)]
         have hYZ : (riPadding[path.size - 1 - 1 - j]!).extract 0 geom.perHopRoutingInfoLength
             ++ (if path.size - 1 - 1 - j > 0 then RP'[path.size - 1 - 1 - j - 1]!
                 else ByteArray.empty) = riPadding[path.size - 1 - 1 - j]! := by
           by_cases hq0 : path.size - 1 - 1 - j > 0
-          · rw [if_pos hq0, hRPget (path.size - 1 - 1 - j - 1) (by omega),
+          · rw [ite_eq_left hq0, hRPget (path.size - 1 - 1 - j - 1) (by omega),
               show path.size - 1 - 1 - j - 1 + 1 = path.size - 1 - 1 - j from by omega]
             exact Cryptlib.Util.Bytes.append_extract _ _ (by rw [hPq]; exact hslq)
           · have hq00 : path.size - 1 - 1 - j = 0 := by omega
             have hP0 : (riPadding[0]!).size = geom.perHopRoutingInfoLength := by
               rw [hpadsize 0 (by omega)]; simp
-            rw [if_neg hq0, ByteArray.append_empty, hq00]
+            rw [ite_eq_right hq0, ByteArray.append_empty, hq00]
             conv_lhs => rw [← hP0]
             exact ByteArray.extract_zero_size
         simp only [ByteArray.append_assoc]
@@ -1225,7 +1225,7 @@ theorem wrapKEM_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS : MA
       rw [getElem!_pos seeds (1 + j) (by rw [hseedsize]; simp; omega)] at e2
       rw [e1, Array.getElem_extract, e2]
       show str0 (0 + j) = _
-      simp only [str0, Nat.zero_add, if_pos hj]
+      simp only [str0, Nat.zero_add, ite_eq_left hj]
       congr 1
       omega
   have hfill : seedBytes str0 (0 + rest.toArray.size) (fillerLength geom rest.length) = TF := by
@@ -1233,7 +1233,7 @@ theorem wrapKEM_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS : MA
     exact seedBytes_chunks TF str0 _ (fun k => by
       show str0 (0 + rest.toArray.size + k) = _
       simp only [str0]
-      rw [if_neg (by simp)]
+      rw [ite_eq_right (by simp)]
       simp)
   have hsz : (ofVector fwd).size = geom.packetLength := by
     rw [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector]
@@ -1246,7 +1246,7 @@ theorem wrapKEM_unwrapKEM_tail (kem : KEM) (cipher : WideBlockCipher) (macS : MA
   dsimp only [drawBytes]
   rw [hfill, hseeds', htail]
   dsimp only
-  rw [dif_pos hsz]
+  rw [dite_eq_left hsz]
   rfl
 
 /-- A `KEMSphinxScheme` for any `KEM`, MAC, KDF, stream cipher and wide-block cipher. -/

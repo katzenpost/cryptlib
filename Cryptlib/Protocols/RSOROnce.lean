@@ -373,19 +373,19 @@ theorem patchWith_draw (next : S.Onion) (r : S.Randomness) (mine : S.Onion)
   · unfold patchWith patchDrawn
     dsimp only
     by_cases hc : h = Role.relay ∧ o.1 = mine.1
-    · rw [if_pos hc]
+    · rw [ite_eq_left hc]
       simp only [hc, and_self, ↓reduceIte]
       split_ifs with hn ho
       · exact (OracleComp.EvalDistEq.bind_const _ _).symm
       · simp only [bind_pure_comp]
         exact EvalDistEq.rfl
       · exact (OracleComp.EvalDistEq.bind_const _ _).symm
-    · rw [if_neg hc]
+    · rw [ite_eq_right hc]
       simp only [hc, ↓reduceIte]
       exact (OracleComp.EvalDistEq.bind_const _ _).symm
   · unfold patchDrawn
     dsimp only
-    rw [if_neg hne, if_neg hne]
+    rw [ite_eq_right hne, ite_eq_right hne]
 
 end ForwardChallenge
 

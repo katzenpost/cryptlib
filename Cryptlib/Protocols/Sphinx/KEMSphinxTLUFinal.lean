@@ -318,16 +318,56 @@ theorem headerRelays_patch_eq (sk : Role → kem.PrivateKey) (ct : kem.Ciphertex
     (fun h m o => ?_)
   · by_cases hc : h = Role.relay ∧ o.1 = Hv
     · obtain ⟨rfl, ho⟩ := hc
-      exact (congrArg (patch.proc Role.relay o) (if_pos ⟨rfl, ho⟩)).trans
-        ((hstep o ho).trans (congrArg pure (if_pos ⟨rfl, ho⟩).symm))
-    · exact (congrArg (patch.proc h o) (if_neg hc)).trans
-        ((hproc h o _ hc).trans (congrArg pure (if_neg hc).symm))
+      exact (congrArg (patch.proc Role.relay o) (ite_eq_left ⟨rfl, ho⟩)).trans
+        ((hstep o ho).trans (congrArg pure (ite_eq_left ⟨rfl, ho⟩).symm))
+    · exact (congrArg (patch.proc h o) (ite_eq_right hc)).trans
+        ((hproc h o _ hc).trans (congrArg pure (ite_eq_right hc).symm))
   · by_cases hc : h = Role.relay ∧ o.1 = Hv
     · obtain ⟨rfl, ho⟩ := hc
-      exact (congrArg (patch.reply Role.relay m o) (if_pos ⟨rfl, ho⟩)).trans
-        ((hrep m o ho).trans (if_pos ⟨rfl, ho⟩).symm)
-    · exact (congrArg (patch.reply h m o) (if_neg hc)).trans
-        ((hreply h m o _ hc).trans (if_neg hc).symm)
+      exact (congrArg (patch.reply Role.relay m o) (ite_eq_left ⟨rfl, ho⟩)).trans
+        ((hrep m o ho).trans (ite_eq_left ⟨rfl, ho⟩).symm)
+    · exact (congrArg (patch.reply h m o) (ite_eq_right hc)).trans
+        ((hreply h m o _ hc).trans (ite_eq_right hc).symm)
+
+/-! ## The truncated path and the mixed randomness -/
+
+namespace RSOR
+
+omit hvalid hmactag h16 in
+/-- A hop before the last of a truncated route is the same hop of the route. -/
+theorem path_take_getElem! (R : Protocols.RSOR.Route geom.nrHops Name (Key kem))
+    (last last' : List RoutingCommand) (k i : ℕ) (hi : i + 1 < k) (hk : k ≤ R.hops.length) :
+    (path kem (R.take k) last)[i]! = (path kem R last')[i]! := by
+  have hl : (R.take k).hops.length = k := by simp [Protocols.RSOR.Route.take]; omega
+  rw [path_getElem! kem _ _ _ (by omega), path_getElem! kem _ _ _ (by omega),
+    ite_eq_right (by omega), ite_eq_right (by omega)]
+  simp [Protocols.RSOR.Route.take]
+
+omit hvalid hmactag h16 in
+/-- The last hop of a truncated route has that hop's name and key, and the last commands. -/
+theorem path_take_last (R : Protocols.RSOR.Route geom.nrHops Name (Key kem))
+    (last : List RoutingCommand) (j : ℕ) (hj : j < R.hops.length) :
+    (path kem (R.take (j + 1)) last)[j]!
+      = ⟨R.hops[j].name, ofVector (kem.encodePublicKey R.hops[j].key.1), last⟩ := by
+  have hl : (R.take (j + 1)).hops.length = j + 1 := by simp [Protocols.RSOR.Route.take]; omega
+  rw [path_getElem! kem _ _ _ (by omega), ite_eq_left (by omega)]
+  simp [Protocols.RSOR.Route.take]
+
+/-- The original's randomness with the seeds of the first `j` forward hops taken from the
+replacement's. -/
+def mixSeeds (r r' : Randomness geom) (j : ℕ) : Randomness geom :=
+  ((Vector.ofFn fun i : Fin geom.nrHops =>
+      if i.val < j then r'.1.1[i.val]'i.isLt else r.1.1[i.val]'i.isLt, r.1.2),
+    r.2)
+
+omit hvalid hmactag h16 in
+theorem mixSeeds_getElem! (r r' : Randomness geom) (j k : ℕ) (hk : k < geom.nrHops) :
+    (mixSeeds geom r r' j).1.1.toArray[k]!
+      = if k < j then r'.1.1.toArray[k]! else r.1.1.toArray[k]! := by
+  rw [getElem!_pos _ _ (by simpa using hk)]
+  split_ifs <;> simp [mixSeeds, getElem!_pos, *]
+
+end RSOR
 
 /-! ## The exit relay's reply -/
 
@@ -368,7 +408,7 @@ theorem replyOf_body (q : Request kem geom) (r : Randomness geom) (m : Msg geom)
     exact extract_append_tail _ _ _ _ rfl (by rw [hss])
   unfold replyOf formBack
   dsimp only
-  rw [if_pos hfl, hsb, hnp, hx0]
+  rw [ite_eq_left hfl, hsb, hnp, hx0]
   dsimp only
   rw [hP0]
   rfl
@@ -448,11 +488,11 @@ theorem headerRelays_forward_eq {pk kb ks : Key kem} (names : Role → RSOR.Name
     rw [hst, hname, split_append geom _ _ (by
       rw [ByteArray.size_extract]
       omega)]
-    refine congrArg pure ((if_pos ⟨rfl, rfl⟩).trans ((dif_pos hn).trans ?_))
+    refine congrArg pure ((ite_eq_left ⟨rfl, rfl⟩).trans ((dite_eq_left hn).trans ?_))
     refine congrArg (fun z => some (Protocols.RSOR.Step.forward _ z)) ?_
     by_cases ho : o2 = mine.2
-    · exact (if_pos ho).trans (Prod.ext rfl (if_pos ho).symm)
-    · exact (if_neg ho).trans (Prod.ext rfl (if_neg ho).symm)
+    · exact (ite_eq_left ho).trans (Prod.ext rfl (ite_eq_left ho).symm)
+    · exact (ite_eq_right ho).trans (Prod.ext rfl (ite_eq_right ho).symm)
   · obtain ⟨o1, o2⟩ := o
     obtain rfl : o1 = mine.1 := ho
     have hrp := replyOf_relayFront geom kem kdfS streamS cipher macS hvalid hmactag hops d payload
@@ -462,11 +502,11 @@ theorem headerRelays_forward_eq {pk kb ks : Key kem} (names : Role → RSOR.Name
     have h1 := hrep m (mine.1, o2) rfl
     rw [hrp]
     unfold Protocols.RSOR.ForwardChallenge.patchDrawn Protocols.RSOR.ForwardChallenge.patchWith
-    exact (if_neg fun hx => absurd hx.2.2 (by omega)).trans h1
+    exact (ite_eq_right fun hx => absurd hx.2.2 (by omega)).trans h1
   · unfold Protocols.RSOR.ForwardChallenge.patchDrawn
-    exact congrArg pure (if_neg hc)
+    exact congrArg pure (ite_eq_right hc)
   · unfold Protocols.RSOR.ForwardChallenge.patchDrawn Protocols.RSOR.ForwardChallenge.patchWith
-    exact if_neg fun hx => hc ⟨hx.1, by rw [hx.2.1]⟩
+    exact ite_eq_right fun hx => hc ⟨hx.1, by rw [hx.2.1]⟩
 
 /-! ## The two worlds at the end of the path -/
 
@@ -531,11 +571,11 @@ theorem headerRelays_last_eq {pk kb ks : Key kem} (names : Role → RSOR.Name)
     unfold Protocols.RSOR.ForwardChallenge.patchDrawn
     dsimp only
     rw [h0, h1]
-    refine congrArg pure ((if_pos ⟨rfl, rfl⟩).trans ((dif_neg (by omega)).trans ?_))
+    refine congrArg pure ((ite_eq_left ⟨rfl, rfl⟩).trans ((dite_eq_right (by omega)).trans ?_))
     by_cases ho : o2 = mine.2
-    · rw [if_pos ho, if_pos ho, if_pos hB₀, if_pos hB₁, hbody, hmsg]
+    · rw [ite_eq_left ho, ite_eq_left ho, ite_eq_left hB₀, ite_eq_left hB₁, hbody, hmsg]
       rfl
-    · rw [if_neg ho, if_neg ho, if_neg hv, if_neg hv]
+    · rw [ite_eq_right ho, ite_eq_right ho, ite_eq_right hv, ite_eq_right hv]
       rfl
   · obtain ⟨o1, o2⟩ := o
     obtain rfl : o1 = mine.1 := ho
@@ -549,16 +589,16 @@ theorem headerRelays_last_eq {pk kb ks : Key kem} (names : Role → RSOR.Name)
     unfold Protocols.RSOR.ForwardChallenge.patchDrawn Protocols.RSOR.ForwardChallenge.patchWith
     by_cases ho : o2 = mine.2
     · subst ho
-      refine (if_pos ⟨rfl, rfl, hl⟩).trans ?_
-      rw [if_pos rfl, if_pos hB₀, hbody,
+      refine (ite_eq_left ⟨rfl, rfl, hl⟩).trans ?_
+      rw [ite_eq_left rfl, ite_eq_left hB₀, hbody,
         RSOR.replyOf_body kem cipher macS kdfS streamS geom hvalid hmactag c.req r m hr hjlt]
       rfl
-    · refine (if_neg fun hx' => ho (congrArg Prod.snd hx'.2.1)).trans ?_
-      rw [if_neg ho, if_neg ho, if_neg hv, if_neg hv]
+    · refine (ite_eq_right fun hx' => ho (congrArg Prod.snd hx'.2.1)).trans ?_
+      rw [ite_eq_right ho, ite_eq_right ho, ite_eq_right hv, ite_eq_right hv]
   · unfold Protocols.RSOR.ForwardChallenge.patchDrawn
-    exact congrArg pure (if_neg hc)
+    exact congrArg pure (ite_eq_right hc)
   · unfold Protocols.RSOR.ForwardChallenge.patchDrawn Protocols.RSOR.ForwardChallenge.patchWith
-    exact if_neg fun hx' => hc ⟨hx'.1, by rw [hx'.2.1]⟩
+    exact ite_eq_right fun hx' => hc ⟨hx'.1, by rw [hx'.2.1]⟩
 
 end ForwardFinal
 
