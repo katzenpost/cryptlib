@@ -1006,6 +1006,99 @@ theorem frontPadOf_congr (hops hops' : Array PathHop) (seeds seeds' : Array (Vec
     · simp only [hkm, ↓reduceIte]
     · simp only [hkm, ↓reduceIte, h (k + m) (by omega)]
 
+/-! ## The next layer's filler under other hops in front -/
+
+/-- The keyed filler begins with the sender's filler. -/
+theorem fillerAtF_head (hrouting : geom.routingInfoLength = 𝓅 * geom.nrHops)
+    (hops : Array PathHop) (seeds : Array (Vector UInt8 32)) (filler : ByteArray) (j : ℕ)
+    (U : ByteArray) (hU : U.size = 𝓃) (hlen : hops.size ≤ geom.nrHops)
+    (hf : filler.size = (geom.nrHops - hops.size) * 𝓅) (i : ℕ) (hi : i ≤ hops.size) :
+    (fillerAtF kem kdfS streamS geom hops seeds filler j U i).extract 0 filler.size = filler := by
+  induction i with
+  | zero => exact extract_all _ _ rfl
+  | succ i ih =>
+    rw [fillerAtF, tailFillerOf]
+    split_ifs with hc
+    · rw [Util.Bytes.extract_append_of_le _ _ (by
+        rw [fillerAtF_size kem kdfS streamS geom hrouting hops seeds filler j U hlen hf hU i
+          (by omega), hf]
+        exact Nat.mul_le_mul_right _ (by omega))]
+      exact ih (by omega)
+    · have h0 : filler.size = 0 := by
+        rw [hf, show geom.nrHops - hops.size = 0 by omega, Nat.zero_mul]
+      rw [h0, eq_empty_of_size_zero filler h0]
+      exact eq_empty_of_size_zero _ (by rw [ByteArray.size_extract]; omega)
+
+/-- **Other hops in front shift the keyed hop's keystream.** The filler of the layer after the
+keyed hop, built with other seeds, is the filler built with the given seeds once the tail of
+the keyed hop's keystream is shifted by the difference of the two fillers at a zero
+keystream. -/
+theorem fillerAtF_shift (hrouting : geom.routingInfoLength = 𝓅 * geom.nrHops)
+    (hops : Array PathHop) (seeds seeds' : Array (Vector UInt8 32)) (filler : ByteArray) (j : ℕ)
+    (U : ByteArray) (hU : U.size = 𝓃) (hlen : hops.size ≤ geom.nrHops) (hj : j + 1 < hops.size)
+    (hf : filler.size = (geom.nrHops - hops.size) * 𝓅) :
+    fillerAtF kem kdfS streamS geom hops seeds' filler j
+        (U.extract 0 (𝓃 - (j + 1) * 𝓅) ++ xorBytes (U.extract (𝓃 - (j + 1) * 𝓅) 𝓃)
+          (xorBytes
+            ((fillerAtF kem kdfS streamS geom hops seeds filler j (zeroBytes 𝓃) (j + 1)).extract
+              filler.size (filler.size + (j + 1) * 𝓅))
+            ((fillerAtF kem kdfS streamS geom hops seeds' filler j (zeroBytes 𝓃) (j + 1)).extract
+              filler.size (filler.size + (j + 1) * 𝓅)))) (j + 1)
+      = fillerAtF kem kdfS streamS geom hops seeds filler j U (j + 1) := by
+  have hm : (j + 1) * 𝓅 ≤ 𝓃 := by
+    have h1 : (j + 1) * 𝓅 ≤ geom.nrHops * 𝓅 := Nat.mul_le_mul_right _ (by omega)
+    rw [hrouting, Nat.mul_comm 𝓅]
+    omega
+  have hZsz : ∀ sd, (fillerAtF kem kdfS streamS geom hops sd filler j (zeroBytes 𝓃) (j + 1)).size
+      = filler.size + (j + 1) * 𝓅 := fun sd => by
+    rw [fillerAtF_size kem kdfS streamS geom hrouting hops sd filler j _ hlen hf
+      (zeroBytes_size _) (j + 1) hj, hf, Nat.add_mul]
+  have hZ : ∀ sd, fillerAtF kem kdfS streamS geom hops sd filler j (zeroBytes 𝓃) (j + 1)
+      = filler ++ (fillerAtF kem kdfS streamS geom hops sd filler j (zeroBytes 𝓃)
+        (j + 1)).extract filler.size (filler.size + (j + 1) * 𝓅) := fun sd => by
+    have h := Util.Bytes.append_extract
+      (fillerAtF kem kdfS streamS geom hops sd filler j (zeroBytes 𝓃) (j + 1)) filler.size
+      (by rw [hZsz]; omega)
+    rw [fillerAtF_head geom kem kdfS streamS hrouting hops sd filler j _ (zeroBytes_size _)
+      hlen hf (j + 1) (by omega), hZsz] at h
+    exact h.symm
+  obtain ⟨Zt, hZt⟩ : ∃ Zt, Zt = (fillerAtF kem kdfS streamS geom hops seeds filler j
+      (zeroBytes 𝓃) (j + 1)).extract filler.size (filler.size + (j + 1) * 𝓅) := ⟨_, rfl⟩
+  obtain ⟨Zt', hZt'⟩ : ∃ Zt', Zt' = (fillerAtF kem kdfS streamS geom hops seeds' filler j
+      (zeroBytes 𝓃) (j + 1)).extract filler.size (filler.size + (j + 1) * 𝓅) := ⟨_, rfl⟩
+  have hZts : Zt.size = (j + 1) * 𝓅 := by
+    rw [hZt, ByteArray.size_extract, hZsz]
+    omega
+  have hZts' : Zt'.size = (j + 1) * 𝓅 := by
+    rw [hZt', ByteArray.size_extract, hZsz]
+    omega
+  have hUt : (U.extract (𝓃 - (j + 1) * 𝓅) 𝓃).size = (j + 1) * 𝓅 := by
+    rw [ByteArray.size_extract, hU]
+    omega
+  have hUh : (U.extract 0 (𝓃 - (j + 1) * 𝓅)).size = 𝓃 - (j + 1) * 𝓅 := by
+    rw [ByteArray.size_extract, hU]
+    omega
+  rw [← hZt, ← hZt']
+  have hV : (U.extract 0 (𝓃 - (j + 1) * 𝓅)
+      ++ xorBytes (U.extract (𝓃 - (j + 1) * 𝓅) 𝓃) (xorBytes Zt Zt')).size = 𝓃 := by
+    rw [ByteArray.size_append, size_xorBytes, hUh, hUt]
+    omega
+  rw [fillerAtF_affine geom kem kdfS streamS hrouting hops seeds' filler j _ hV hlen (by omega)
+      hf (j + 1) le_rfl,
+    fillerAtF_affine geom kem kdfS streamS hrouting hops seeds filler j U hU hlen (by omega)
+      hf (j + 1) le_rfl, Nat.sub_self, Nat.zero_mul, Nat.sub_zero,
+    Util.Bytes.extract_append_of_ge _ _ (by rw [hUh]), hUh, Nat.sub_self,
+    show 𝓃 - (𝓃 - (j + 1) * 𝓅) = (j + 1) * 𝓅 by omega,
+    extract_all _ _ (by rw [size_xorBytes, hUt]), hZ seeds, hZ seeds', ← hZt, ← hZt',
+    xorBytes_append filler Zt' _ _ (by rw [zeroBytes_size, hf]),
+    xorBytes_append filler Zt _ _ (by rw [zeroBytes_size, hf]),
+    xorBytes_comm_of_size_eq (U.extract (𝓃 - (j + 1) * 𝓅) 𝓃) (xorBytes Zt Zt')
+      (by rw [size_xorBytes, hUt, hZts]),
+    ← xorBytes_assoc Zt' (xorBytes Zt Zt') _ (by rw [size_xorBytes, hZts, hZts'])
+      (by rw [size_xorBytes, hZts, hUt]),
+    xorBytes_comm_of_size_eq Zt' (xorBytes Zt Zt') (by rw [size_xorBytes, hZts, hZts']),
+    xorBytes_xorBytes]
+
 /-! ## What a hop does with a masked header -/
 
 /-- A hop's routing information after its keystream is taken off: the masked bytes, then the
