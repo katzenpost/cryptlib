@@ -535,6 +535,14 @@ theorem procKeys_eq_procKeysD (t : KeyTuple) (pkt : ByteArray) :
     · simp only [h1, hv, ↓reduceDIte, ↓reduceIte, hb, hA _ hp hiv hm he, cipher.decrypt_size]
       rfl
 
+/-- A hop rejects a packet with another version. -/
+theorem procKeys_version (t : KeyTuple) (pkt : ByteArray)
+    (h : (pkt.extract 0 2).data ≠ v0AD.data) :
+    procKeys kem cipher macS streamS geom t pkt = none := by
+  rw [procKeys_eq_procKeysD]
+  unfold procKeysD
+  split_ifs <;> rfl
+
 /-- **A hop uses its shared secret only through its four keys.** Processing with a
 decapsulation function is processing with the keys of the secret it gives. -/
 theorem procWith_eq_procKeys (dec : ByteArray → Except String ByteArray) (pkt ss : ByteArray)

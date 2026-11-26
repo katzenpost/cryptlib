@@ -505,6 +505,76 @@ theorem shortIdeal_sub_nextReal_le
     d.cs.2 d.s d.o
     ct ss hpk hrel henc hsz).symm
 
+/-! ## The relay rejects the original's ciphertext -/
+
+/-- Bytes of a header's length without its tag that no accepted packet starts with: their
+version is not the packet version. -/
+def nextM0 : ByteArray :=
+  ⟨#[1, 1]⟩ ++ ⟨Array.replicate (kem.ciphertextSize + geom.routingInfoLength) 0⟩
+
+omit [SampleableType kem.Plaintext] in
+/-- A relay that answers under the header of `nextM0` only answers nothing. -/
+theorem onlyHeader_nextM0 {pk : Key kem}
+    (ch : (nextSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names).Ch pk)
+    (o : (nextSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth)
+    (c : kem.Ciphertext) (u : KeyTuple) (pkt : ByteArray) :
+    onlyHeader cipher macS streamS geom
+        (tagged (S := (nextSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names)) macS
+          (fun _ _ _ _ => nextM0 kem geom)) ch o c u pkt = none := by
+  unfold onlyHeader
+  split_ifs with h
+  · refine procKeys_version kem cipher macS streamS geom u pkt ?_
+    have h2 := congrArg (fun x : ByteArray => x.extract 0 2) h
+    simp only [ByteArray.extract_extract] at h2
+    rw [Nat.zero_add, Nat.zero_add, Nat.min_eq_left (by unfold payloadOffset; omega)] at h2
+    have h3 : (tagged (S := (nextSetup kem cipher macS kdfS streamS geom hvalid hmactag h16
+      names)) macS
+        (fun _ _ _ _ => nextM0 kem geom) ch o c u).extract 0 2 = ⟨#[1, 1]⟩ := by
+      unfold tagged nextM0
+      rw [Cryptlib.Util.Bytes.extract_append_of_le _ _
+        (by rw [ByteArray.size_append]; exact Nat.le_add_right 2 _)]
+      exact Cryptlib.Util.Bytes.extract_append_left ⟨#[1, 1]⟩ _
+    rw [h2, h3]
+    decide
+  · rfl
+
+/-- **The MAC step for the original's ciphertext.** No tag under the keys of the original's
+layer at the relay is shown, so with uniform keys the relay may reject every packet that carries
+its ciphertext, at the cost of a forgery against the MAC. -/
+theorem nextIdeal_sub_reject_le
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    |(Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+          (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[x = true]).toReal
+      - (Pr{let x ← (keyedGameH cipher macS kdfS streamS geom
+          (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+          (fun _ _ _ _ _ => none))}[x = true]).toReal|
+    ≤ (Pr{let x ← (Primitives.MAC.forgeExp macS (forgeAdv cipher macS kdfS streamS geom
+        (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+        (fun _ _ _ _ => nextM0 kem geom)
+        (fun ch o c rest _ => nextView kem cipher macS kdfS streamS geom hvalid hmactag h16
+          names ch o c
+          (withMAC rest default))))}[x = true]).toReal := by
+  have h := keyedIdeal_sub_tagged_le cipher macS kdfS streamS geom
+    (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) hmactag
+    (fun _ _ _ _ => nextM0 kem geom)
+    (fun ch o c rest _ => nextView kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o c
+      (withMAC rest default))
+    (fun _ => True)
+    (fun _ _ _ => by
+      unfold nextM0
+      rw [ByteArray.size_append]
+      show 2 + (Array.replicate _ (0 : UInt8)).size = _
+      rw [Array.size_replicate, Nat.add_assoc])
+    (fun _ _ _ => rfl) (fun _ _ _ _ _ => rfl)
+  have e : (fun {pk : Key kem} => onlyHeader cipher macS streamS geom
+        (tagged (S := (nextSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names)) macS
+          (fun _ _ _ _ => nextM0 kem geom)) (pk := pk))
+      = fun {pk : Key kem} _ _ _ _ _ => none := by
+    funext pk ch o c u pkt
+    exact onlyHeader_nextM0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o c u pkt
+  rw [e] at h
+  simpa using h
+
 end ForwardNext
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
