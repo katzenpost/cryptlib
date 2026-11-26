@@ -115,6 +115,7 @@ import Cryptlib.Protocols.Sphinx.KEMSphinxTLUFinal
 import Cryptlib.Protocols.Sphinx.KEMSphinxProp
 import Cryptlib.Protocols.Sphinx.KEMSphinxSLU
 import Cryptlib.Protocols.Sphinx.KEMSphinxSLUSender
+import Cryptlib.Protocols.Sphinx.KEMSphinxSLURelay
 import Cryptlib.Protocols.Sphinx.NIKESphinxRSOR
 import Cryptlib.Protocols.Sphinx.Schemes
 import Cryptlib.Protocols.GroupComm
