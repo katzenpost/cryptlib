@@ -185,13 +185,18 @@ parameter, and `KEMSphinxProp.lean` writes any property's game as a keyed game f
 three roles. SLU← needs it for the sender as well as the relay.
 
 Proved so far, in `KEMSphinxSLU.lean`: both worlds as their draws with the relay's seed drawn
-on its own (`backward_play_false_evalDistEq`, `backward_play_true_evalDistEq`); world 0 around
-the relay's ciphertext, at the exit and on the backward path (`backView0`); and the first
-reduction for world 0, the relay's keys replaced by uniform ones at the cost of a bad draw and
-the KEM and KDF terms (`backward_false_sub_keyedIdeal_le`).
+on its own (`backward_play_false_evalDistEq`, `backward_play_true_evalDistEq`); both worlds
+around the relay's ciphertext, at the exit and on the backward path (`backView0`,
+`backView1`); and the first reduction, `backwardUnlinkable_le_keyedIdeal`: the advantage is at
+most the chance of a bad draw in each world, the KEM and KDF terms for each world, and the
+distance between the two keyed games with uniform keys at the relay.
 
-Not proved yet: the same for world 1; the MAC, payload cipher and keystream steps; the
-sender's keys; the last comparison.
+World 1 reads the adversary's onion through three things only: its first layer, the header of
+the reply's layer at the relay, and the header of its last forward layer (`world1With`,
+`world1_eq`, for any scheme).
+
+Not proved yet: the MAC, payload cipher and keystream steps; the sender's keys; the last
+comparison.
 
 ## How the bounds are built
 
