@@ -1722,16 +1722,16 @@ theorem relayFront_size (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize 
 
 omit cipher macS in
 set_option maxHeartbeats 1000000 in
-/-- At the end of the path, a hop whose only command names a recipient has header bytes of a
+/-- At the end of the path, a hop whose routing fragment can be built has header bytes of a
 header's length. -/
-theorem relayFrontLast_size (hvalid : geom.ValidForKEM kem) (hops : Array PathHop)
+theorem relayFrontLast_size_ok (hvalid : geom.ValidForKEM kem) (hops : Array PathHop)
     (d : RSOR.Draw geom) (j : ℕ) (c U : ByteArray) (hj : j + 1 = hops.size)
     (hlen : hops.size ≤ geom.nrHops) (hU : U.size = 𝓃) (hc : c.size = kem.ciphertextSize)
-    (rc : Vector UInt8 32) (hcmd : (hops[j]!).commands = [.recipient rc]) :
+    (frag : ByteArray)
+    (hfr : kemRiFragment kem geom #[hops[j]!] #[c] ByteArray.empty 1 0 = .ok frag) :
     (relayFrontLast kem kdfS streamS geom hops d j c U).size
       = 2 + kem.ciphertextSize + geom.routingInfoLength := by
   obtain ⟨hnnh, hperhopEq, hrouting, -⟩ := id hvalid
-  have hnn : Constants.nextNodeHopLength = 65 := by decide
   have hv0 : v0AD.size = 2 := rfl
   have hpR : 𝓅 ≤ geom.routingInfoLength := by
     rw [hrouting]
@@ -1757,6 +1757,24 @@ theorem relayFrontLast_size (hvalid : geom.ValidForKEM kem) (hops : Array PathHo
     obtain rfl : i = 0 := by simpa using hi
     exact hc
   unfold relayFrontLast
+  rw [hfr]
+  have hfsz' := kemRiFragment_size kem geom #[hops[j]!] #[c] ByteArray.empty 1 0
+    Nat.one_pos (by omega) hnnh rfl hksz frag hfr
+  simp only [ByteArray.size_append, size_xorBytes, hfsz', hc, hv0]
+  omega
+
+omit cipher macS in
+set_option maxHeartbeats 1000000 in
+/-- At the end of the path, a hop whose only command names a recipient has header bytes of a
+header's length. -/
+theorem relayFrontLast_size (hvalid : geom.ValidForKEM kem) (hops : Array PathHop)
+    (d : RSOR.Draw geom) (j : ℕ) (c U : ByteArray) (hj : j + 1 = hops.size)
+    (hlen : hops.size ≤ geom.nrHops) (hU : U.size = 𝓃) (hc : c.size = kem.ciphertextSize)
+    (rc : Vector UInt8 32) (hcmd : (hops[j]!).commands = [.recipient rc]) :
+    (relayFrontLast kem kdfS streamS geom hops d j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength := by
+  obtain ⟨hnnh, hperhopEq, -, -⟩ := id hvalid
+  have hnn : Constants.nextNodeHopLength = 65 := by decide
   cases hfr : kemRiFragment kem geom #[hops[j]!] #[c] ByteArray.empty 1 0 with
   | error e =>
     exfalso
@@ -1766,10 +1784,30 @@ theorem relayFrontLast_size (hvalid : geom.ValidForKEM kem) (hops : Array PathHo
       omega
     simp [hcmd, commandsToBytes, RoutingCommand.toBytes, hb] at hfr
   | ok frag =>
-    have hfsz' := kemRiFragment_size kem geom #[hops[j]!] #[c] ByteArray.empty 1 0
-      Nat.one_pos (by omega) hnnh rfl hksz frag hfr
-    simp only [ByteArray.size_append, size_xorBytes, hfsz', hc, hv0]
-    omega
+    exact relayFrontLast_size_ok geom kem kdfS streamS hvalid hops d j c U hj hlen hU hc frag hfr
+
+omit cipher macS in
+set_option maxHeartbeats 1000000 in
+/-- At the end of the path, a hop whose only command names a reply has header bytes of a
+header's length. -/
+theorem relayFrontLast_size_reply (hvalid : geom.ValidForKEM kem) (hops : Array PathHop)
+    (d : RSOR.Draw geom) (j : ℕ) (c U : ByteArray) (hj : j + 1 = hops.size)
+    (hlen : hops.size ≤ geom.nrHops) (hU : U.size = 𝓃) (hc : c.size = kem.ciphertextSize)
+    (sid : Vector UInt8 16) (hcmd : (hops[j]!).commands = [.surbReply sid]) :
+    (relayFrontLast kem kdfS streamS geom hops d j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength := by
+  obtain ⟨hnnh, hperhopEq, -, -⟩ := id hvalid
+  have hnn : Constants.nextNodeHopLength = 65 := by decide
+  cases hfr : kemRiFragment kem geom #[hops[j]!] #[c] ByteArray.empty 1 0 with
+  | error e =>
+    exfalso
+    unfold kemRiFragment at hfr
+    have hb : ¬ (𝓅 - kem.ciphertextSize < 17) := by
+      rw [hperhopEq, hnnh, hnn]
+      omega
+    simp [hcmd, commandsToBytes, RoutingCommand.toBytes, hb] at hfr
+  | ok frag =>
+    exact relayFrontLast_size_ok geom kem kdfS streamS hvalid hops d j c U hj hlen hU hc frag hfr
 
 /-! ## The same header in both worlds -/
 
@@ -2026,14 +2064,17 @@ set_option maxHeartbeats 1000000 in
 /-- **At the end of the path the shifted keystream takes one world to the other.** Two paths
 that end at the keyed hop, with the same hop keys in front, give the same header bytes once
 the head of the keystream is shifted. -/
-theorem lastShift_spec (hvalid : geom.ValidForKEM kem) (hops hops' : Array PathHop)
+theorem lastShift_spec_of_size (hvalid : geom.ValidForKEM kem) (hops hops' : Array PathHop)
     (d d' : RSOR.Draw geom) (j : ℕ) (c U : ByteArray)
     (hj : j + 1 = hops.size) (hlen : hops.size ≤ geom.nrHops) (hj' : j + 1 = hops'.size)
     (hU : U.size = 𝓃) (hc : c.size = kem.ciphertextSize)
     (hkeys : ∀ m, m < j → kemHopKeys kem kdfS hops (d.1.toArray.extract 0 hops.size) m
       = kemHopKeys kem kdfS hops' (d'.1.toArray.extract 0 hops'.size) m)
-    (rc rc' : Vector UInt8 32) (hcmd : (hops[j]!).commands = [.recipient rc])
-    (hcmd' : (hops'[j]!).commands = [.recipient rc']) :
+    (hs : (relayFrontLast kem kdfS streamS geom hops d j c
+        (lastShift geom kem kdfS streamS hops hops' d d' j c U)).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength)
+    (hs' : (relayFrontLast kem kdfS streamS geom hops' d' j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength) :
     (lastShift geom kem kdfS streamS hops hops' d d' j c U).size = 𝓃
       ∧ relayFrontLast kem kdfS streamS geom hops d j c
           (lastShift geom kem kdfS streamS hops hops' d d' j c U)
@@ -2059,12 +2100,9 @@ theorem lastShift_spec (hvalid : geom.ValidForKEM kem) (hops hops' : Array PathH
       ++ (zeroFiller geom kem kdfS streamS hops d j).extract 0
         ((geom.nrHops - hops.size) * 𝓅) := ⟨_, rfl⟩
   obtain ⟨V, hV⟩ : ∃ V, V = lastShift geom kem kdfS streamS hops hops' d d' j c U := ⟨_, rfl⟩
-  rw [← hV] at hVs ⊢
+  rw [← hV] at hVs hs ⊢
   unfold lastShift at hV
   rw [← hX1, ← hX0] at hV
-  have hs := relayFrontLast_size geom kem kdfS streamS hvalid hops d j c V hj hlen hVs hc rc hcmd
-  have hs' := relayFrontLast_size geom kem kdfS streamS hvalid hops' d' j c U hj' (by omega) hU
-    hc rc' hcmd'
   have h0 := relayFrontLast_canon geom kem kdfS streamS hrouting hops d j c V hj hlen hVs hc hs
   have h1 := relayFrontLast_canon geom kem kdfS streamS hrouting hops' d' j c U hj' (by omega)
     hU hc hs'
@@ -2101,6 +2139,31 @@ theorem lastShift_spec (hvalid : geom.ValidForKEM kem) (hops hops' : Array PathH
   rw [h0, h1, hV, Util.Bytes.extract_append_of_le _ _ (by rw [size_xorBytes, hUh]),
     extract_all _ _ (by rw [size_xorBytes, hUh]),
     xorBytes_shift X0 X1 _ (hX0s.trans hX1s.symm) (hUh.trans hX0s.symm)]
+
+omit cipher macS in
+set_option maxHeartbeats 1000000 in
+/-- **At the end of the path the shifted keystream takes one world to the other.** Two paths
+that end at the keyed hop, with the same hop keys in front, give the same header bytes once
+the head of the keystream is shifted. -/
+theorem lastShift_spec (hvalid : geom.ValidForKEM kem) (hops hops' : Array PathHop)
+    (d d' : RSOR.Draw geom) (j : ℕ) (c U : ByteArray)
+    (hj : j + 1 = hops.size) (hlen : hops.size ≤ geom.nrHops) (hj' : j + 1 = hops'.size)
+    (hU : U.size = 𝓃) (hc : c.size = kem.ciphertextSize)
+    (hkeys : ∀ m, m < j → kemHopKeys kem kdfS hops (d.1.toArray.extract 0 hops.size) m
+      = kemHopKeys kem kdfS hops' (d'.1.toArray.extract 0 hops'.size) m)
+    (rc rc' : Vector UInt8 32) (hcmd : (hops[j]!).commands = [.recipient rc])
+    (hcmd' : (hops'[j]!).commands = [.recipient rc']) :
+    (lastShift geom kem kdfS streamS hops hops' d d' j c U).size = 𝓃
+      ∧ relayFrontLast kem kdfS streamS geom hops d j c
+          (lastShift geom kem kdfS streamS hops hops' d d' j c U)
+        = relayFrontLast kem kdfS streamS geom hops' d' j c U := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hVs := lastShift_size geom kem kdfS streamS hrouting hops hops' d d' j c U (by omega) hU
+  exact lastShift_spec_of_size geom kem kdfS streamS hvalid hops hops' d d' j c U hj hlen hj' hU
+    hc hkeys
+    (relayFrontLast_size geom kem kdfS streamS hvalid hops d j c _ hj hlen hVs hc rc hcmd)
+    (relayFrontLast_size geom kem kdfS streamS hvalid hops' d' j c U hj' (by omega) hU hc rc'
+      hcmd')
 
 /-! ## The honest relay's answers as steps of the game -/
 
