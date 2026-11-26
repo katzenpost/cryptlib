@@ -250,8 +250,24 @@ apart is at most the bad draws, the KEM and KDF terms, a MAC forgery, the one-bl
 advantage and the keystream generator's advantage, each for both onions, and the distance
 between the two games played from a uniform keystream at the sender. World 1′ is `replySwap`.
 
-Not proved yet: that last distance, a comparison of the two onions with the sender's layer
-uniform; and the second point.
+That last distance is bounded too (`swap_uniform_le`): the two games played from a uniform
+keystream at the sender are the same run, draw for draw, off an explicit event
+(`swapFinalGood`). The pieces:
+
+- With the head of the sender's keystream shifted, the fresh onion's last header bytes are the
+  reply header's (`lastShift_spec_of_size`, `lastLayer_swap`). The two end in different
+  commands, a recipient and a reply.
+- The layers in front split into a header that reads the header only and a payload under the
+  hops' payload keys (`wrapUp_append`, `KEMSphinxWrap.lean`). So the fresh onion's block, under
+  the hops in front, is the uniform payload of world 1′ (`evalDistEq_payUp`).
+- The sender replies to neither under the header it refuses (`lastLayer_noreply`): a reply
+  packet is not read for a SURB, and the fresh onion's block carries none.
+
+The event asks that the hops in front have ciphertexts of a ciphertext's length, that the
+fresh onion's payload has a payload's length, and that the block given for a changed payload
+does not begin with the zero tag.
+
+Not proved yet: the second point, worlds 0 and 1′; and bounds on the explicit events.
 
 ## How the bounds are built
 
