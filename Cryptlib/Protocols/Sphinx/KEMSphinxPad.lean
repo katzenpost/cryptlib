@@ -1847,6 +1847,21 @@ def shiftStream (hops hops' : Array PathHop) (d dd d' : RSOR.Draw geom) (j : ℕ
           (j + 1)).extract ((geom.nrHops - hops.size) * 𝓅)
             ((geom.nrHops - hops.size) * 𝓅 + (j + 1) * 𝓅)))
 
+omit cipher macS in
+/-- The shifted keystream has a keystream's length. -/
+theorem shiftStream_size (hrouting : geom.routingInfoLength = 𝓅 * geom.nrHops)
+    (hops hops' : Array PathHop) (d dd d' : RSOR.Draw geom) (j : ℕ) (c U U' fwd : ByteArray)
+    (hj : j + 1 ≤ geom.nrHops) (hU : U.size = 𝓃) (hU' : U'.size = 𝓃) :
+    (shiftStream geom kem kdfS streamS hops hops' d dd d' j c U U' fwd).size = 𝓃 := by
+  have hjp : (j + 1) * 𝓅 ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm 𝓅]
+    exact Nat.mul_le_mul_right _ hj
+  unfold shiftStream
+  rw [ByteArray.size_append, size_xorBytes, size_xorBytes, ByteArray.size_extract,
+    ByteArray.size_extract, hU, hU']
+  rw [Nat.succ_mul] at hjp ⊢
+  omega
+
 set_option maxHeartbeats 1000000 in
 /-- **The shifted keystream takes world 1 to world 0.** With `shiftStream`, the keyed hop on
 the longer path has the next layer `fwd` and the header bytes that it has on the path that ends
