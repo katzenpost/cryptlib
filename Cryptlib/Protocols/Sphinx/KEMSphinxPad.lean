@@ -1631,6 +1631,72 @@ theorem wrapUp_congr (hops hops' : Array PathHop) (d d' : RSOR.Draw geom)
     rw [p0, s0, kemRiFragment_path_congr geom kem _ (hops'.extract i hops'.size) _ _ _
       (hops'.extract i hops'.size).size p0 p1 (by simp; omega)]
 
+/-! ## The header's length -/
+
+set_option maxHeartbeats 1000000 in
+/-- Before the end of the path, a hop with no commands of its own has header bytes of a
+header's length whenever the next layer builds. -/
+theorem relayFront_size (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (c U fwd : ByteArray) (hj : j + 1 < hops.size) (hlen : hops.size ≤ geom.nrHops)
+    (hc : c.size = kem.ciphertextSize)
+    (hfwd : layerPast kem cipher macS kdfS streamS geom hops d payload j U (j + 1) = .ok fwd)
+    (hcmd : (hops[j]!).commands = []) :
+    (relayFront kem cipher macS kdfS streamS geom hops d payload j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength := by
+  obtain ⟨hnnh, hperhopEq, hrouting, hhdr, hpacket, -⟩ := id hvalid
+  have hnnpos : 0 < Constants.nextNodeHopLength := by decide
+  have hfwd' := hfwd
+  unfold layerPast at hfwd'
+  have hfsz : fwd.size = geom.packetLength :=
+    newKEMPacket_size kem cipher macS kdfS streamS geom _ _ _ _ _ hvalid hmactag hfwd'
+      (newKEMPacket_unfold kem cipher macS kdfS streamS geom _ _ _ _ _ hfwd').1
+  have had : adLength = 2 := rfl
+  have hfge : 2 + kem.ciphertextSize + geom.routingInfoLength + macLength ≤ fwd.size := by
+    rw [hfsz, hpacket, hhdr, had]
+    omega
+  have hv0 : v0AD.size = 2 := rfl
+  have hpR : 𝓅 ≤ geom.routingInfoLength := by
+    rw [hrouting]
+    exact Nat.le_mul_of_pos_right _ (by omega)
+  have h0 : (hops.extract j hops.size)[0]! = hops[j]! := by
+    have := getElem!_extract_from hops j 0 (by omega)
+    rwa [Nat.add_zero] at this
+  have hke1 : (Array.replicate (hops.size - j) (fwd.extract 2 (2 + kem.ciphertextSize)))[1]!
+      = fwd.extract 2 (2 + kem.ciphertextSize) := by
+    rw [getElem!_pos _ 1 (by simp; omega)]
+    simp
+  have hksz : ∀ i (hi : i < (Array.replicate (hops.size - j)
+        (fwd.extract 2 (2 + kem.ciphertextSize))).size),
+      ((Array.replicate (hops.size - j) (fwd.extract 2 (2 + kem.ciphertextSize)))[i]'hi).size
+        = kem.ciphertextSize := fun i hi => by
+    simp only [Array.getElem_replicate, ByteArray.size_extract]
+    omega
+  unfold relayFront
+  rw [hfwd]
+  dsimp only
+  cases hfr : kemRiFragment kem geom (hops.extract j hops.size)
+      #[ByteArray.empty, fwd.extract 2 (2 + kem.ciphertextSize)]
+      (fwd.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+        (2 + kem.ciphertextSize + geom.routingInfoLength + macLength))
+      (hops.extract j hops.size).size 0 with
+  | error e =>
+    exfalso
+    unfold kemRiFragment at hfr
+    simp [h0, hcmd, commandsToBytes, show ¬ (0 = hops.size - j - 1) by omega] at hfr
+  | ok frag =>
+    have hfr' : kemRiFragment kem geom (hops.extract j hops.size)
+        (Array.replicate (hops.size - j) (fwd.extract 2 (2 + kem.ciphertextSize)))
+        (fwd.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
+          (2 + kem.ciphertextSize + geom.routingInfoLength + macLength))
+        (hops.extract j hops.size).size 0 = .ok frag := by
+      rw [kemRiFragment_zero_congr, hke1]
+      exact hfr
+    have hfsz' := kemRiFragment_size kem geom _ _ _ _ 0 (by simp; omega) (by omega) hnnh
+      (by simp) hksz frag hfr'
+    simp only [ByteArray.size_append, size_xorBytes, ByteArray.size_extract, hfsz', hc, hv0]
+    omega
+
 /-! ## The same header in both worlds -/
 
 /-- A mask shifted by the difference of two strings takes one to the other's masking. -/
