@@ -4162,6 +4162,105 @@ theorem hybrid_back_le (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwar
     rw [hj]
     exact ⟨fun hg => ⟨Nat.succ_ne_zero j, hg⟩, fun hg => hg.2⟩
 
+/-- **The adversary against one encryption.** It makes the shared draws. When the relay is the
+exit it plays the exit game through its oracle; when the relay is on the backward path it plays
+world 0 and asks nothing. -/
+def exitAdv (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith (replySwap kem cipher macS
+    kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    ProbComp (OracleComp (Primitives.WideBlockCipher.decSpec (geom.payloadTagLength +
+        geom.forwardPayloadLength)) Bool) :=
+  backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+    if x.cs.1.c.pos.val = 0 then do
+      let d₁ ← $ᵗ (RSOR.Draw geom)
+      let d₂ ← $ᵗ (RSOR.Draw geom)
+      let i ← $ᵗ (Vector UInt8 16)
+      let U ← $ᵗ (Keystream geom)
+      let u ← $ᵗ (Block geom)
+      pure (exitOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x.km x.k x.cs
+          x.s
+            x.cs.1.c.req (Nat.zero_lt_of_lt x.cs.1.c.pos.isLt) d₁ d₂ i U u)
+    else backInner0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x >>= fun b =>
+        pure (pure b)
+
+set_option maxHeartbeats 4000000 in
+/-- The encrypt-once game with the cipher, for `exitAdv`: the exit game with the cipher at the
+exit, world 0 on the backward path. -/
+theorem oneEnc_exitAdv_true (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith (replySwap
+    kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    Primitives.WideBlockCipher.oneEncExp cipher (geom.payloadTagLength + geom.forwardPayloadLength)
+        (exitAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) true
+      =ᵈ backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+        if x.cs.1.c.pos.val = 0 then
+          (do
+        let k' ← $ᵗ (Vector UInt8 48)
+        let iv ← $ᵗ (Vector UInt8 16)
+        let d₁ ← $ᵗ (RSOR.Draw geom)
+        let d₂ ← $ᵗ (RSOR.Draw geom)
+        let i ← $ᵗ (Vector UInt8 16)
+        let U ← $ᵗ (Keystream geom)
+        let u ← $ᵗ (Block geom)
+        (simulateQ (Primitives.WideBlockCipher.decOnce
+            (fun x : Block geom => Util.Bytes.toVecN (geom.payloadTagLength +
+                geom.forwardPayloadLength)
+              (cipher.encrypt k'.toArray (ofVector iv) (ofVector x))))
+          (exitOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x.km x.k x.cs x.s
+            x.cs.1.c.req (Nat.zero_lt_of_lt x.cs.1.c.pos.isLt) d₁ d₂ i U u)).run' none)
+        else backInner0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x := by
+  unfold Primitives.WideBlockCipher.oneEncExp exitAdv
+  simp only [bind_assoc]
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k' => EvalDistEq.bind_right _ fun iv =>
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k' =>
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun x => ?_
+  by_cases hp : x.cs.1.c.pos.val = 0
+  · simp only [hp, ↓reduceIte, bind_assoc, pure_bind]
+    exact EvalDistEq.bind_right _ fun k' => EvalDistEq.bind_right _ fun iv =>
+      OracleComp.EvalDistEq.bind_const _ _
+  · simp only [hp, ↓reduceIte, bind_assoc, pure_bind, simulateQ_pure, StateT.run'_eq,
+      StateT.run_pure, map_pure, bind_pure]
+    exact (OracleComp.EvalDistEq.bind_const _ _).trans
+      ((OracleComp.EvalDistEq.bind_const _ _).trans (OracleComp.EvalDistEq.bind_const _ _))
+
+set_option maxHeartbeats 4000000 in
+/-- The encrypt-once game with a uniform block, for `exitAdv`: the exit game with a uniform
+block at the exit, world 0 on the backward path. -/
+theorem oneEnc_exitAdv_false (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith
+    (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    Primitives.WideBlockCipher.oneEncExp cipher (geom.payloadTagLength + geom.forwardPayloadLength)
+        (exitAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) false
+      =ᵈ backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+        if x.cs.1.c.pos.val = 0 then
+          (do
+        let _ ← $ᵗ (Vector UInt8 48)
+        let _ ← $ᵗ (Vector UInt8 16)
+        let g ← $ᵗ (Block geom)
+        let d₁ ← $ᵗ (RSOR.Draw geom)
+        let d₂ ← $ᵗ (RSOR.Draw geom)
+        let i ← $ᵗ (Vector UInt8 16)
+        let U ← $ᵗ (Keystream geom)
+        let u ← $ᵗ (Block geom)
+        (simulateQ (Primitives.WideBlockCipher.decOnce fun _ => g)
+          (exitOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x.km x.k x.cs x.s
+            x.cs.1.c.req (Nat.zero_lt_of_lt x.cs.1.c.pos.isLt) d₁ d₂ i U u)).run' none)
+        else backInner0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x := by
+  unfold Primitives.WideBlockCipher.oneEncExp exitAdv
+  simp only [bind_assoc]
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k' => EvalDistEq.bind_right _ fun iv =>
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k' =>
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun x => ?_
+  by_cases hp : x.cs.1.c.pos.val = 0
+  · simp only [hp, ↓reduceIte, bind_assoc, pure_bind, Bool.false_eq_true]
+    exact EvalDistEq.rfl
+  · simp only [hp, ↓reduceIte, bind_assoc, pure_bind, simulateQ_pure, StateT.run'_eq,
+      StateT.run_pure, map_pure, bind_pure]
+    exact (OracleComp.EvalDistEq.bind_const _ _).trans
+      ((OracleComp.EvalDistEq.bind_const _ _).trans (OracleComp.EvalDistEq.bind_const _ _))
+
 end BackRelay
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
