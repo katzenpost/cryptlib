@@ -6,6 +6,32 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Cryptlib.Protocols.Sphinx.KEMSphinxProp
 import Cryptlib.Protocols.Sphinx.KEMSphinxTLU
 
+namespace Cryptlib.Protocols.RSOR
+
+open OracleComp OracleSpec
+
+variable {S : Scheme} {hon : Honest S}
+
+/-- World 0 of SLU← from the challenger's randomness: the first layer of the adversary's onion,
+and a sender that does not answer the reply's last layer. -/
+def BackwardChallenge.world0 (c : BackwardChallenge hon) (r : S.Randomness) : World S where
+  onion := S.form c.req r c.req.first
+  patch :=
+    { proc := fun h o out =>
+        if h = .sender ∧ o.1 = (S.formBack c.req r c.req.msg
+            ⟨c.req.back.hops.length - 1, by have := c.pos.isLt; omega⟩).1 then pure none
+        else pure out }
+
+/-- World 0 of SLU← draws the randomness and shows `world0`. -/
+theorem backwardUnlinkable_world_false (c : BackwardChallenge hon) :
+    (backwardUnlinkable (S := S)).world c false
+      = (do
+        let r ← $ᵗ S.Randomness
+        return c.world0 r) := by
+  simp [backwardUnlinkable, BackwardChallenge.world0]
+
+end Cryptlib.Protocols.RSOR
+
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
 
 open OracleComp OracleSpec ENNReal
@@ -225,6 +251,31 @@ theorem formBack_fst_real (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSiz
     (by rw [RSOR.path_size]; exact i.isLt.le)
     (by rw [RSOR.path_size]; exact q.back.length_le) henc]
   rfl
+
+/-- The challenger's randomness with the seed of the honest relay's layer replaced. The relay
+is the one before backward position `pos`: its layer is the last of the forward path when `pos`
+is zero, and the reply's layer at backward position `pos - 1` otherwise. -/
+def relaySeed (q : RSOR.Request kem geom) (pos : ℕ) (r : RSOR.Randomness geom)
+    (s : Vector UInt8 32) : RSOR.Randomness geom :=
+  match pos with
+  | 0 => setSeed geom r (q.fwd.hops.length - 1) s
+  | k + 1 => setSeedBack geom r k s
+
+/-- Drawing the challenger's randomness and a seed, and putting the seed at the honest relay's
+layer, is drawing the randomness. -/
+theorem evalDistEq_relaySeed {δ : Type} (q : RSOR.Request kem geom) (pos : ℕ)
+    (hpos : pos < q.back.hops.length) (K : RSOR.Randomness geom → ProbComp δ) :
+    (do
+      let r ← $ᵗ (RSOR.Randomness geom)
+      let s ← $ᵗ (Vector UInt8 32)
+      K (relaySeed kem geom q pos r s)) =ᵈ ($ᵗ (RSOR.Randomness geom) >>= K) := by
+  cases pos with
+  | zero =>
+    exact evalDistEq_setSeed geom _ (lt_of_lt_of_le
+      (Nat.sub_one_lt (Nat.ne_of_gt (List.length_pos_iff.2 q.fwd_ne))) q.fwd.length_le) K
+  | succ k =>
+    exact evalDistEq_setSeedBack geom k (lt_of_lt_of_le (Nat.lt_of_succ_lt hpos)
+      q.back.length_le) K
 
 end BackKeyed
 
