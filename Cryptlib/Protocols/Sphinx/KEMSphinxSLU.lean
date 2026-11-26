@@ -30,6 +30,47 @@ theorem backwardUnlinkable_world_false (c : BackwardChallenge hon) :
         return c.world0 r) := by
   simp [backwardUnlinkable, BackwardChallenge.world0]
 
+/-- The replacement request of SLU←: a forward onion along the rest of the backward path, with
+no backward path of its own. -/
+def BackwardChallenge.swapReq (c : BackwardChallenge hon) (msg : S.Msg) (rcv : S.Receiver) :
+    S.Request :=
+  { msg := msg, receiver := rcv, fwd := c.req.back.drop c.pos, back := .nil,
+    fwd_ne := c.req.back.drop_ne c.pos.isLt }
+
+/-- World 1 of SLU← from the challenger's draws: the first layer of the adversary's onion; the
+honest relay sends on the first layer of the replacement in place of the reply's next layer;
+and the sender does not answer the replacement's last layer. -/
+def BackwardChallenge.world1 (c : BackwardChallenge hon) (r : S.Randomness) (msg : S.Msg)
+    (rcv : S.Receiver) (r' : S.Randomness) : World S :=
+  let q := c.swapReq msg rcv
+  let swap : S.Name × S.Onion := (c.req.back.hops[c.pos].name, S.form q r' q.first)
+  let swapAt : Option S.Header := match hk : c.pos.val with
+    | 0 => none
+    | k + 1 => some (S.formBack c.req r c.req.msg ⟨k, by have := c.pos.isLt; omega⟩).1
+  { onion := S.form c.req r c.req.first
+    patch :=
+      { proc := fun h o out =>
+          if h = .sender ∧ o.1 = (S.form q r' q.last).1 then pure none
+          else if h = .relay ∧ swapAt = some o.1 then
+            pure (out.map fun _ => .forward swap.1 swap.2)
+          else pure out
+        reply := fun h _ o out =>
+          if h = .relay ∧ c.pos.val = 0 ∧ o.1 = (S.form c.req r c.req.last).1 then
+            out.map fun _ => swap
+          else out } }
+
+/-- World 1 of SLU← draws the randomness, the replacement's message and receiver and its
+randomness, and shows `world1`. -/
+theorem backwardUnlinkable_world_true (c : BackwardChallenge hon) :
+    (backwardUnlinkable (S := S)).world c true
+      = (do
+        let r ← $ᵗ S.Randomness
+        let msg ← $ᵗ S.Msg
+        let rcv ← $ᵗ S.Receiver
+        let r' ← $ᵗ S.Randomness
+        return c.world1 r msg rcv r') := by
+  rfl
+
 end Cryptlib.Protocols.RSOR
 
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
@@ -319,6 +360,53 @@ theorem backward_play_false_evalDistEq (names : Role → RSOR.Name)
   refine (hcong _ _ _ (Protocols.RSOR.backwardUnlinkable_world_false (S := 𝒮) out.1.1)).trans ?_
   simp only [bind_assoc, pure_bind]
   exact (evalDistEq_relaySeed kem geom out.1.1.req out.1.1.pos out.1.1.pos.isLt _).symm
+
+set_option maxHeartbeats 2000000 in
+/-- **World 1 of SLU← as its draws**, with the seed of the honest relay's layer drawn on its
+own, and then the adversary's guess against the honest relays. -/
+theorem backward_play_true_evalDistEq (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.backwardUnlinkable (S := 𝒮)).Adversary) :
+    Protocols.RSOR.Property.play names A true
+      =ᵈ propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names _ (shortDraw geom) A >>= fun d
+          =>
+        (simulateQ (Protocols.RSOR.honest
+            (honAt kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay names d.k.1 d.keys)
+            (fun h => if h = .relay then d.k.2 else (d.keys h).2)
+            (Protocols.RSOR.BackwardChallenge.world1 d.c
+              (relaySeed kem geom d.c.req d.c.pos d.o.1 d.s) d.o.2.1 d.o.2.2.1 d.o.2.2.2).patch)
+          (A.guess d.st (Protocols.RSOR.BackwardChallenge.world1 d.c
+            (relaySeed kem geom d.c.req d.c.pos d.o.1 d.s) d.o.2.1 d.o.2.2.1
+            d.o.2.2.2).onion)).run' d.log := by
+  refine (play_evalDistEq_honAt kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names A true).trans ?_
+  unfold Protocols.RSOR.Property.playFrom propDrawOf
+  simp only [bind_assoc, pure_bind]
+  refine EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+    EvalDistEq.bind_right _ fun k₂ => EvalDistEq.bind_right _ fun out => ?_
+  have hcong : ∀ (m m' : ProbComp (Protocols.RSOR.World 𝒮))
+      (F : Protocols.RSOR.World 𝒮 → ProbComp Bool), m = m' → m >>= F =ᵈ m' >>= F :=
+    fun _ _ _ h => h ▸ EvalDistEq.rfl
+  refine (hcong _ _ _ (Protocols.RSOR.backwardUnlinkable_world_true (S := 𝒮) out.1.1)).trans ?_
+  simp only [shortDraw, bind_assoc, pure_bind]
+  refine EvalDistEq.symm ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ =>
+      EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => 
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact evalDistEq_relaySeed kem geom out.1.1.req out.1.1.pos out.1.1.pos.isLt fun r =>
+    $ᵗ (RSOR.Msg geom) >>= fun m => $ᵗ RSOR.Name >>= fun n =>
+      $ᵗ (RSOR.Randomness geom) >>= fun r' =>
+        (simulateQ (Protocols.RSOR.honest
+            (honAt kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay names k.1 (keysOf
+                kem .relay k₁ k₂))
+            (fun h => if h = .relay then k.2 else (keysOf kem .relay k₁ k₂ h).2)
+            (Protocols.RSOR.BackwardChallenge.world1 out.1.1 r m n r').patch)
+          (A.guess out.1.2
+            (Protocols.RSOR.BackwardChallenge.world1 out.1.1 r m n r').onion)).run' out.2
 
 /-- World 0 of SLU← around the honest relay's ciphertext and keys. At the exit the relay's
 layer is the last of the forward path; on the backward path its keys enter through the reply

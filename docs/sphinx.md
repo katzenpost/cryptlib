@@ -173,6 +173,26 @@ from `prEvent_zeroPrefix`).
 
 Not proved yet: those two; SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx.
 
+### SLU← (in progress)
+
+A reply's layers are the layers of a packet over the backward path, with only the payload
+swapped for the reply's (`formBack_fst`), and the reply block in the sender's payload is the
+header of the first of them (`surb_fst`). So the lemmas about keyed layers proved for TLU→
+apply to replies as they stand.
+
+The machinery that puts one honest relay behind an oracle takes the relay's role as a
+parameter, and `KEMSphinxProp.lean` writes any property's game as a keyed game for any of the
+three roles. SLU← needs it for the sender as well as the relay.
+
+Proved so far, in `KEMSphinxSLU.lean`: both worlds as their draws with the relay's seed drawn
+on its own (`backward_play_false_evalDistEq`, `backward_play_true_evalDistEq`); world 0 around
+the relay's ciphertext, at the exit and on the backward path (`backView0`); and the first
+reduction for world 0, the relay's keys replaced by uniform ones at the cost of a bad draw and
+the KEM and KDF terms (`backward_false_sub_keyedIdeal_le`).
+
+Not proved yet: the same for world 1; the MAC, payload cipher and keystream steps; the
+sender's keys; the last comparison.
+
 ## How the bounds are built
 
 The structural lemmas are stated for packets built from any keys (`newKEMPacketFrom`), not only
