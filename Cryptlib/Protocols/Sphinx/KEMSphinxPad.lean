@@ -1581,9 +1581,11 @@ theorem layerPast_shift (hrouting : geom.routingInfoLength = 𝓅 * geom.nrHops)
 /-! ## The layers in front of the keyed hop -/
 
 omit kdfS streamS cipher macS in
-/-- The first hop's routing fragment reads the first two hops, and whether the path ends. -/
+/-- The first hop's routing fragment reads the first hop, the second hop's name, and whether
+the path ends. -/
 theorem kemRiFragment_path_congr (path path' : Array PathHop) (ke : Array ByteArray)
-    (mac : ByteArray) (n n' : ℕ) (h0 : path[0]! = path'[0]!) (h1 : path[1]! = path'[1]!)
+    (mac : ByteArray) (n n' : ℕ) (h0 : path[0]! = path'[0]!)
+    (h1 : (path[1]!).id = (path'[1]!).id)
     (hn : (0 == n - 1) = (0 == n' - 1)) :
     kemRiFragment kem geom path ke mac n 0 = kemRiFragment kem geom path' ke mac n' 0 := by
   unfold kemRiFragment
@@ -1591,12 +1593,13 @@ theorem kemRiFragment_path_congr (path path' : Array PathHop) (ke : Array ByteAr
 
 /-- **The layers in front read the hops in front.** Wrapping a layer in the layers of hops
 `i` to `i + n` gives the same bytes on two paths with two draws that agree on those hops, on
-the hop after each, and on their seeds. -/
+the name of the hop after each, and on their seeds. -/
 theorem wrapUp_congr (hops hops' : Array PathHop) (d d' : RSOR.Draw geom)
     (hlen : hops.size ≤ geom.nrHops) (hlen' : hops'.size ≤ geom.nrHops) (i n : ℕ)
     (L : ByteArray)
     (h : ∀ k, i ≤ k → k < i + n → k + 1 < hops.size ∧ k + 1 < hops'.size
-      ∧ hops[k]! = hops'[k]! ∧ hops[k + 1]! = hops'[k + 1]! ∧ d.1.toArray[k]! = d'.1.toArray[k]!) :
+      ∧ hops[k]! = hops'[k]! ∧ (hops[k + 1]!).id = (hops'[k + 1]!).id
+      ∧ d.1.toArray[k]! = d'.1.toArray[k]!) :
     wrapUp kem cipher macS kdfS streamS geom hops d i n L
       = wrapUp kem cipher macS kdfS streamS geom hops' d' i n L := by
   induction n generalizing i with
@@ -1608,7 +1611,7 @@ theorem wrapUp_congr (hops hops' : Array PathHop) (d d' : RSOR.Draw geom)
     have p0 : (hops.extract i hops.size)[0]! = (hops'.extract i hops'.size)[0]! := by
       rw [getElem!_extract_from hops i 0 (by omega), getElem!_extract_from hops' i 0 (by omega)]
       exact e0
-    have p1 : (hops.extract i hops.size)[1]! = (hops'.extract i hops'.size)[1]! := by
+    have p1 : ((hops.extract i hops.size)[1]!).id = ((hops'.extract i hops'.size)[1]!).id := by
       rw [getElem!_extract_from hops i 1 (by omega), getElem!_extract_from hops' i 1 (by omega)]
       exact e1
     have s0 : ((d.1.toArray.extract 0 hops.size).extract i

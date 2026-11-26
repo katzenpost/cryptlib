@@ -322,4 +322,23 @@ theorem oracle_draw {α : Type} (oa : OracleComp (oracleSpec S) α) (log : Log S
 
 end Draw
 
+/-- **A patch that does not draw is part of the relays' answers.** Relays with pure answers
+and a patch that maps them to pure answers are relays with the patched answers and no patch. -/
+theorem oracle_pure_patch (P : Patch S)
+    (proc proc' : Role → S.Onion → Option S.Step)
+    (reply reply' : Role → S.Msg → S.Onion → Option (S.Name × S.Onion))
+    (hp : ∀ h o, P.proc h o (proc h o) = pure (proc' h o))
+    (hr : ∀ h m o, P.reply h m o (reply h m o) = reply' h m o) :
+    oracle (m := ProbComp) (fun h o => pure (proc h o)) (fun h m o => pure (reply h m o)) P
+      = oracle (fun h o => pure (proc' h o)) (fun h m o => pure (reply' h m o)) {} := by
+  funext t
+  rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
+  · simp [oracle]
+  · refine StateT.ext fun log => ?_
+    rw [oracle_process_run, oracle_process_run]
+    simp [hp]
+  · refine StateT.ext fun log => ?_
+    rw [oracle_answer_run, oracle_answer_run]
+    simp [hr]
+
 end Cryptlib.Protocols.RSOR
