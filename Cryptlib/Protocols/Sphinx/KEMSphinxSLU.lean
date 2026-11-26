@@ -320,6 +320,43 @@ theorem backward_play_false_evalDistEq (names : Role → RSOR.Name)
   simp only [bind_assoc, pure_bind]
   exact (evalDistEq_relaySeed kem geom out.1.1.req out.1.1.pos out.1.1.pos.isLt _).symm
 
+/-- World 0 of SLU← around the honest relay's ciphertext and keys. At the exit the relay's
+layer is the last of the forward path; on the backward path its keys enter through the reply
+block and, in the header the sender refuses, through its keystream. -/
+def backView0 (names : Role → RSOR.Name) {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names pk)
+    (r : RSOR.Randomness geom) (c : kem.Ciphertext) (t : KeyTuple) : Protocols.RSOR.World 𝒮 :=
+  match ch.c.pos.val with
+  | 0 =>
+    { onion := onionK kem cipher macS kdfS streamS geom ch.c.req r (ch.c.req.fwd.hops.length - 1) c
+        t 0
+      patch := (Protocols.RSOR.BackwardChallenge.world0 ch.c r).patch }
+  | k + 1 =>
+    { onion := backOnionF kem cipher macS kdfS streamS geom ch.c.req r (Nat.zero_lt_of_lt
+        ch.c.pos.isLt) k
+        (ofVector (kem.encodeCiphertext c)) (ksOf streamS geom t) (tagOf macS t) (encOf cipher t)
+      patch :=
+        { proc := fun (h : Role) (o : RSOR.Onion geom) out =>
+            if h = .sender ∧ o.1 = backHeaderU kem cipher macS kdfS streamS geom ch.c.req r k (ksOf
+                streamS geom t)
+                (ch.c.req.back.hops.length - 1) then pure none
+            else pure out } }
+
+/-- The keyed game of world 0 of SLU← around the honest relay's ciphertext. -/
+abbrev backSetup0 (names : Role → RSOR.Name) :
+    KeyedSetup kem (Protocols.RSOR.World 𝒮) Bool :=
+  propSetupOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness geom)
+    ($ᵗ RSOR.Randomness geom) (backView0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+
+/-- The adversary of that keyed game. -/
+abbrev backAdv0 (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardUnlinkable (S :=
+    𝒮)).Adversary) :
+    KeyedAdversary (backSetup0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names) :=
+  propAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardUnlinkable
+      (S := 𝒮)) .relay names _ _ _ A
+
 end BackGame
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
