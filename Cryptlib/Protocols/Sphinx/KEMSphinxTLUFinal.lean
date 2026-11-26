@@ -88,6 +88,38 @@ theorem evalDistEq_headTail {δ : Type} {h t n : ℕ} (hn : h + t = n) (A : Byte
     fun y' x => K (padFiller hn B x y')) ?_
   exact evalDistEq_pair_of_bijective (padFiller_bijective hn B) K
 
+/-- **A pad on the head of a keystream.** A game that reads a uniform string with its head
+masked by a constant reads a uniform string. -/
+theorem evalDistEq_headPad {δ : Type} {h t n : ℕ} (hn : h + t = n) (X : ByteArray)
+    (K : Vector UInt8 n → ProbComp δ) :
+    ($ᵗ (Vector UInt8 n) >>= fun U => K (Util.Bytes.toVecN n
+        (xorBytes ((ofVector U).extract 0 h) X ++ (ofVector U).extract h n)))
+      =ᵈ ($ᵗ (Vector UInt8 n) >>= K) := by
+  have hcat := padFiller_bijective (a := h) (b := t) hn (zeroBytes 0)
+  have e0 : ∀ (x : Vector UInt8 h) (y : Vector UInt8 t),
+      (ofVector (padFiller hn (zeroBytes 0) x y)).extract 0 h = ofVector x
+        ∧ (ofVector (padFiller hn (zeroBytes 0) x y)).extract h n = ofVector y := by
+    intro x y
+    rw [ofVector_padFiller, xorBytes_zeroBytes]
+    constructor
+    · have h1 := Util.Bytes.extract_append_left (ofVector x) (ofVector y)
+      rwa [Util.Bytes.size_ofVector] at h1
+    · have h1 := Util.Bytes.extract_append_right (ofVector x) (ofVector y)
+      rwa [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector, hn] at h1
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective hcat _).symm ?_
+  simp only [(e0 _ _).1, (e0 _ _).2]
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  have t5 : ∀ y : Vector UInt8 t, ($ᵗ (Vector UInt8 h) >>= fun x =>
+        K (Util.Bytes.toVecN n (xorBytes (ofVector x) X ++ ofVector y)))
+      =ᵈ ($ᵗ (Vector UInt8 h) >>= fun x => K (padFiller hn (zeroBytes 0) x y)) := fun y => by
+    have h5 := evalDistEq_otp h X (fun z => K (padFiller hn (zeroBytes 0) z y))
+    simpa only [padFiller, xorBytes_zeroBytes, Util.Bytes.ofVector_toVecN _
+      ((size_xorBytes _ _).trans (Util.Bytes.size_ofVector _))] using h5
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ t5) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _
+    fun y x => K (padFiller hn (zeroBytes 0) x y)) ?_
+  exact evalDistEq_pair_of_bijective hcat K
+
 section ForwardFinal
 
 open Cryptlib.Protocols.RSOR (Role)

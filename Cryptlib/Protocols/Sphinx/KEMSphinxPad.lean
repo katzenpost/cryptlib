@@ -1578,6 +1578,29 @@ theorem layerPast_shift (hrouting : geom.routingInfoLength = 𝓅 * geom.nrHops)
   dsimp only
   rw [h2, hs, h]
 
+/-- **The next layer reads the tail of the keyed hop's keystream.** Two keystreams with the
+same last `j + 1` blocks give the same layer after the keyed hop. -/
+theorem layerPast_tail (hrouting : geom.routingInfoLength = 𝓅 * geom.nrHops)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (U V : ByteArray) (hU : U.size = 𝓃) (hV : V.size = 𝓃)
+    (hlen : hops.size ≤ geom.nrHops) (hj : j + 1 < hops.size)
+    (hUV : U.extract (𝓃 - (j + 1) * 𝓅) 𝓃 = V.extract (𝓃 - (j + 1) * 𝓅) 𝓃) :
+    layerPast kem cipher macS kdfS streamS geom hops d payload j U (j + 1)
+      = layerPast kem cipher macS kdfS streamS geom hops d payload j V (j + 1) := by
+  have hf : ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * 𝓅)).size
+      = (geom.nrHops - hops.size) * 𝓅 := by
+    have hap : (geom.nrHops - hops.size) * 𝓅 ≤ geom.routingInfoLength := by
+      rw [hrouting, Nat.mul_comm 𝓅]
+      exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+    rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+    omega
+  unfold layerPast
+  dsimp only
+  rw [fillerAtF_affine geom kem kdfS streamS hrouting hops _ _ j U hU hlen (by omega) hf (j + 1)
+      le_rfl,
+    fillerAtF_affine geom kem kdfS streamS hrouting hops _ _ j V hV hlen (by omega) hf (j + 1)
+      le_rfl, Nat.sub_self, Nat.zero_mul, Nat.sub_zero, hUV]
+
 /-! ## The layers in front of the keyed hop -/
 
 omit kdfS streamS cipher macS in
