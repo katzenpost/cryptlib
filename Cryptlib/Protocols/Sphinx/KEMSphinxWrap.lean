@@ -250,6 +250,25 @@ theorem evalDistEq_of_bijective {γ δ : Type} [SampleableType γ] {g : γ → �
       fun y => (hg.2 y).elim fun x hx => ⟨(default, x), hx⟩⟩
   exact (OracleComp.EvalDistEq.bind_const _ _).symm.trans (evalDistEq_pair_of_bijective hb K)
 
+omit kem cipher macS kdfS streamS geom in
+/-- **One answer of the ideal cipher's decryption is a uniform draw.** For a fixed block `y`,
+the block `w` when `y` is the uniform `u`, and the block `v` otherwise, is uniform when `u`,
+`w` and `v` are. -/
+theorem evalDistEq_ite_fresh {γ δ : Type} [SampleableType γ] [DecidableEq γ] (y : γ)
+    (K : γ → ProbComp δ) :
+    (do
+      let u ← $ᵗ γ
+      let w ← $ᵗ γ
+      let v ← $ᵗ γ
+      K (if y = u then w else v)) =ᵈ ($ᵗ γ >>= K) := by
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun u => ?_)
+    (OracleComp.EvalDistEq.bind_const ($ᵗ γ) ($ᵗ γ >>= K))
+  by_cases h : y = u
+  · simp only [h, ↓reduceIte]
+    exact EvalDistEq.bind_right _ fun w => OracleComp.EvalDistEq.bind_const _ _
+  · simp only [h, ↓reduceIte]
+    exact OracleComp.EvalDistEq.bind_const _ _
+
 omit macS streamS in
 /-- A run of hops' payload encryptions keeps the payload's length. -/
 theorem payUp_size (hops : Array PathHop) (d : RSOR.Draw geom) (n i : ℕ) (P : ByteArray) :

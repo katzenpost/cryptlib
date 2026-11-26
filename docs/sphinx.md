@@ -267,7 +267,21 @@ The event asks that the hops in front have ciphertexts of a ciphertext's length,
 fresh onion's payload has a payload's length, and that the block given for a changed payload
 does not begin with the zero tag.
 
-Not proved yet: the second point, worlds 0 and 1′; and bounds on the explicit events.
+Not proved yet: the second point, worlds 0 and 1′; and bounds on the explicit events. What the
+second point needs, as far as worked out:
+
+- At the exit the relay answers the SURB in its payload. The reply's header is a fresh reply
+  header by renaming the challenger's randomness. Its payload is the answer under the reply's
+  payload key, which is uniform and used once: one more cipher step.
+- On the backward path the relay sends on the reply's next layer. The relay's header in the
+  two worlds agrees after shifting the head of its keystream by the difference of two routing
+  informations of a hop in the middle of a path (TLU→ had a hop at the end of one). The next
+  layer is a first layer over the rest of the path once the tail of the keystream stands for
+  that layer's padding.
+- On the backward path in world 0 the relay hands on what the ideal cipher's decryption gives.
+  That is a uniform block when the block the cipher would decrypt to is uniform
+  (`evalDistEq_ite_fresh`), so world 0 has to draw that block; then `oracle_draw` moves the
+  draw to the front.
 
 ## How the bounds are built
 
