@@ -234,6 +234,70 @@ theorem withDec_fresh (patch : Protocols.RSOR.Patch S)
 
 end Fresh
 
+section Parts
+
+variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+  (streamS : StreamCipher) (geom : Geometry)
+
+/-- **A packet is a header and a payload block, and only the block uses the payload cipher.**
+A packet that can be built with one cipher can be built with any, with the same header. With
+the cipher that changes nothing, the block is the zero tag and the payload. -/
+theorem newKEMPacket_parts (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (seeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop)
+    (payload x : ByteArray)
+    (h : newKEMPacket kem cipher macS kdfS streamS geom seeds filler path payload = .ok x) :
+    ∃ hdr : ByteArray, hdr.size = geom.headerLength
+      ∧ (∀ c : WideBlockCipher, ∃ b : ByteArray,
+        b.size = geom.payloadTagLength + geom.forwardPayloadLength
+        ∧ newKEMPacket kem c macS kdfS streamS geom seeds filler path payload = .ok (hdr ++ b))
+      ∧ newKEMPacket kem default macS kdfS streamS geom seeds filler path payload
+        = .ok (hdr ++ ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)) := by
+  obtain ⟨-, -, -, -, hpacket, -⟩ := id hvalid
+  by_cases hp : payload.size = geom.forwardPayloadLength
+  · have hx := newKEMPacket_size kem cipher macS kdfS streamS geom seeds filler path payload x
+      hvalid hmactag h hp
+    unfold newKEMPacket at h ⊢
+    simp only [hp, ne_eq, not_true_eq_false, ↓reduceIte, Std.Legacy.Range.forIn_eq_forIn_range',
+      Std.Legacy.Range.size, Nat.sub_zero, Nat.add_sub_cancel, Nat.div_one,
+      List.forIn_pure_yield_eq_foldl, pure_bind] at h ⊢
+    cases hc : createKEMHeader kem macS kdfS streamS geom seeds filler path with
+    | error e =>
+      rw [hc] at h
+      cases h
+    | ok s =>
+      rw [hc] at h
+      have hsz : ∀ (c : WideBlockCipher) (l : List ℕ) (b : ByteArray),
+          (l.foldl (fun b a => c.encrypt s.2[s.2.size - 1 - a]!.key.toArray
+            (ofVector s.2[s.2.size - 1 - a]!.iv) b) b).size = b.size := by
+        intro c l
+        induction l with
+        | nil => intro b; rfl
+        | cons a l ih => intro b; rw [List.foldl_cons, ih, c.encrypt_size]
+      have hid : ∀ (l : List ℕ) (b : ByteArray),
+          l.foldl (fun b a => (default : WideBlockCipher).encrypt
+            s.2[s.2.size - 1 - a]!.key.toArray (ofVector s.2[s.2.size - 1 - a]!.iv) b) b = b := by
+        intro l
+        induction l with
+        | nil => intro b; rfl
+        | cons a l ih => intro b; rw [List.foldl_cons, ih]; rfl
+      have hinit : ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload).size
+          = geom.payloadTagLength + geom.forwardPayloadLength := by
+        rw [ByteArray.size_append, hp]
+        exact congrArg (· + geom.forwardPayloadLength) Array.size_replicate
+      obtain rfl : s.1 ++ List.foldl (fun b a => cipher.encrypt s.2[s.2.size - 1 - a]!.key.toArray
+          (ofVector s.2[s.2.size - 1 - a]!.iv) b)
+          ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)
+          (List.range' 0 s.2.size) = x := Except.ok.inj h
+      rw [ByteArray.size_append, hsz, hinit] at hx
+      exact ⟨s.1, by omega, fun c => ⟨_, (hsz c _ _).trans hinit, rfl⟩,
+        congrArg (fun b => Except.ok (s.1 ++ b)) (hid _ _)⟩
+  · exfalso
+    unfold newKEMPacket at h
+    simp only [hp, ne_eq, not_false_eq_true, ↓reduceIte] at h
+    cases h
+
+end Parts
+
 section RestOfPath
 
 variable (kem : KEM) (geom : Geometry)
@@ -1270,5 +1334,209 @@ theorem evalDistEq_backShift {δ : Type} (hvalid : geom.ValidForKEM kem)
   rw [key P U]
 
 end RestOfPath
+
+section SentOn
+
+variable {S : Protocols.RSOR.Scheme} {hon : Protocols.RSOR.Honest S}
+  (c : Protocols.RSOR.BackwardChallenge hon) (onion : S.Onion) (own exit : Option S.Header)
+  (swap : S.Onion) (refuse : S.Header)
+
+/-- Under the header it is told, the relay of the world where an onion is sent on forwards
+that onion, when it forwards anything. -/
+theorem world1With_proc_own (o : S.Onion) (out : Option S.Step) :
+    (c.world1With onion (some o.1) exit swap refuse).patch.proc .relay o out
+      = pure (out.map fun _ => .forward (c.req.back.hops[c.pos].name) swap) := by
+  simp [Protocols.RSOR.BackwardChallenge.world1With]
+
+/-- Elsewhere the world where an onion is sent on changes one answer: the sender does not
+answer the header it is told to refuse. -/
+theorem world1With_proc_other (h : Protocols.RSOR.Role) (o : S.Onion) (out : Option S.Step)
+    (hne : ¬ (h = .relay ∧ own = some o.1)) :
+    (c.world1With onion own exit swap refuse).patch.proc h o out
+      = if h = .sender ∧ o.1 = refuse then pure none else pure out := by
+  simp [Protocols.RSOR.BackwardChallenge.world1With, hne]
+
+/-- With no exit header given, the world where an onion is sent on changes no reply. -/
+theorem world1With_reply (h : Protocols.RSOR.Role) (m : S.Msg) (o : S.Onion)
+    (out : Option (S.Name × S.Onion)) :
+    (c.world1With onion own none swap refuse).patch.reply h m o out = out := by
+  simp [Protocols.RSOR.BackwardChallenge.world1With]
+
+end SentOn
+
+section BackRelay
+
+open Cryptlib.Protocols.RSOR (Role)
+
+variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+  (geom : Geometry)
+  (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+  (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+
+local notation "𝒮" => sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16
+
+omit h16 in
+include hvalid hmactag in
+/-- **A relay does not reply under the header of a hop in the middle of a path**, whatever the
+payload cipher of the reply it would build. -/
+theorem replyOf_relayFront_default (hops : Array PathHop) (d : RSOR.Draw geom)
+    (payload : ByteArray) (j : ℕ) (c U fwd : ByteArray) (km : Vector UInt8 32)
+    (x y : Block geom) (hj : j + 1 < hops.size) (hlen : hops.size ≤ geom.nrHops)
+    (hU : U.size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hc : c.size =
+        kem.ciphertextSize)
+    (hfwd : layerPast kem default macS kdfS streamS geom hops d payload j U (j + 1) = .ok fwd)
+    (hx : 0 < geom.payloadTagLength + geom.forwardPayloadLength)
+    (hcmd : (hops[j]!).commands = []) (m : RSOR.Msg geom) :
+    RSOR.replyOf cipher geom m (procKeysD kem macS geom km U (ofVector x)
+        (RSOR.join (Util.Bytes.toVecN geom.headerLength
+          (relayFront kem default macS kdfS streamS geom hops d payload j c U
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem default macS kdfS streamS geom hops d payload j c U))), y)))
+      = none := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have had : adLength = 2 := rfl
+  have hs := relayFront_size geom kem kdfS streamS default macS hvalid hmactag hops d payload j c
+    U fwd hj hlen hc hfwd hcmd
+  unfold RSOR.join
+  dsimp only
+  rw [Util.Bytes.ofVector_toVecN _ (by
+      rw [ByteArray.size_append, hs, Util.Bytes.size_ofVector, hmactag, hhdr, had]),
+    procKeysD_relayFront geom kem kdfS streamS default macS hvalid hmactag hops d payload j c U
+      fwd km (ofVector x) (ofVector y) hj hlen hU hc hfwd hs
+      (by rw [Util.Bytes.size_ofVector]; exact hx)
+      (by rw [Util.Bytes.size_ofVector, Util.Bytes.size_ofVector])
+      (by rw [hcmd]; simp) (by rw [hcmd]; simp)]
+  rfl
+
+set_option maxHeartbeats 2000000 in
+/-- **On the backward path, world 1′'s patched relay is world 0's relay with one fresh block.**
+World 0's relay has the header of a hop in the middle of the reply's path, and forwards the
+next layer's header with the block `g`. The relay of the world where an onion is sent on has
+the same header bytes, and whatever it would forward is patched to that onion. The two games
+are the same when the onion is the next layer's header with `g`. -/
+theorem headerRelays_back_eq {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.BackwardChallenge hon) (sk : Role → kem.PrivateKey)
+    (ct : kem.Ciphertext) (km : Vector UInt8 32) (U₀ U₁ : ByteArray)
+    (D₁ : Block geom → Block geom) (g : Block geom) (hops₀ hops₁ : Array PathHop)
+    (d₀ d₁ : RSOR.Draw geom) (payload : ByteArray) (j : ℕ) (cc fwd₀ fwd₁ : ByteArray)
+    (onion : RSOR.Onion geom) (refuse : Vector UInt8 geom.headerLength)
+    (hj₀ : j + 1 < hops₀.size) (hlen₀ : hops₀.size ≤ geom.nrHops)
+    (hj₁ : j + 1 < hops₁.size) (hlen₁ : hops₁.size ≤ geom.nrHops)
+    (hU₀ : U₀.size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hU₁ : U₁.size =
+        (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hc : cc.size = kem.ciphertextSize)
+    (hfwd₀ : layerPast kem default macS kdfS streamS geom hops₀ d₀ payload j U₀ (j + 1) = .ok fwd₀)
+    (hfwd₁ : layerPast kem default macS kdfS streamS geom hops₁ d₁ payload j U₁ (j + 1) = .ok fwd₁)
+    (hcmd₀ : (hops₀[j]!).commands = []) (hcmd₁ : (hops₁[j]!).commands = [])
+    (hF : relayFront kem default macS kdfS streamS geom hops₁ d₁ payload j cc U₁
+      = (relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀))
+    (hname : (hops₀[j + 1]!).id = c.req.back.hops[c.pos].name) :
+    headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay sk ct km U₁
+        (Util.Bytes.toVecN geom.headerLength
+          ((relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)))) D₁
+        (Protocols.RSOR.BackwardChallenge.world1With (S := 𝒮) c onion
+          (some (Util.Bytes.toVecN geom.headerLength
+          ((relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀))))) none
+          (Util.Bytes.toVecN _ (fwd₀.extract 0 geom.headerLength), g) refuse).patch
+      = headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay sk ct km U₀
+        (Util.Bytes.toVecN geom.headerLength
+          ((relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)))) (fun _ =>
+                  g)
+        ({ proc := fun (h : Role) (o : RSOR.Onion geom) out =>
+            if h = .sender ∧ o.1 = refuse then pure none else pure out } :
+          Protocols.RSOR.Patch 𝒮) := by
+  obtain ⟨-, -, -, hhdr, hpacket, -⟩ := id hvalid
+  have had : adLength = 2 := rfl
+  have hH : 2 + kem.ciphertextSize + geom.routingInfoLength + macLength = geom.headerLength := by
+    rw [hhdr, had]
+  have hx : 0 < geom.payloadTagLength + geom.forwardPayloadLength := by omega
+  have hs₀ := relayFront_size geom kem kdfS streamS default macS hvalid hmactag hops₀ d₀ payload
+    j cc U₀ fwd₀ hj₀ hlen₀ hc hfwd₀ hcmd₀
+  have hs₁ := relayFront_size geom kem kdfS streamS default macS hvalid hmactag hops₁ d₁ payload
+    j cc U₁ fwd₁ hj₁ hlen₁ hc hfwd₁ hcmd₁
+  have hfwd₀' := hfwd₀
+  unfold layerPast at hfwd₀'
+  have hfsz : fwd₀.size = geom.packetLength :=
+    newKEMPacket_size kem default macS kdfS streamS geom _ _ _ _ _ hvalid hmactag hfwd₀'
+      (newKEMPacket_unfold kem default macS kdfS streamS geom _ _ _ _ _ hfwd₀').1
+  have hst₀ := fun y : Block geom => stepOf_relayFront geom kem kdfS streamS default macS hvalid
+    hmactag hops₀ d₀ payload j cc U₀ fwd₀ km g y hj₀ hlen₀ hU₀ hc hfwd₀ hs₀ hx hcmd₀
+  have hst₁ := fun x y : Block geom => stepOf_relayFront geom kem kdfS streamS default macS
+    hvalid hmactag hops₁ d₁ payload j cc U₁ fwd₁ km x y hj₁ hlen₁ hU₁ hc hfwd₁ hs₁ hx hcmd₁
+  have hrp₀ := fun (m : RSOR.Msg geom) (y : Block geom) => replyOf_relayFront_default kem cipher
+    macS kdfS streamS geom hvalid hmactag hops₀ d₀ payload j cc U₀ fwd₀ km g y hj₀ hlen₀ hU₀ hc
+    hfwd₀ hx hcmd₀ m
+  have hrp₁ := fun (m : RSOR.Msg geom) (x y : Block geom) => replyOf_relayFront_default kem
+    cipher macS kdfS streamS geom hvalid hmactag hops₁ d₁ payload j cc U₁ fwd₁ km x y hj₁ hlen₁
+    hU₁ hc hfwd₁ hx hcmd₁ m
+  simp only [hF] at hst₁ hrp₁
+  simp only [hH] at hst₀ hst₁
+  rw [hname, split_append geom _ _ (by
+    rw [ByteArray.size_extract]
+    omega)] at hst₀
+  refine Protocols.RSOR.oracle_patch_congr (S := 𝒮) _ _ _ _ _ _ (fun h o => ?_)
+    (fun h m o => ?_)
+  · obtain ⟨o1, o2⟩ := o
+    by_cases hc' : h = Role.relay ∧ o1 = (Util.Bytes.toVecN geom.headerLength
+          ((relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀))))
+    · obtain ⟨rfl, rfl⟩ := hc'
+      have h4 : Role.relay = Role.relay ∧ (Util.Bytes.toVecN geom.headerLength
+          ((relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)))) =
+                  (Util.Bytes.toVecN geom.headerLength
+          ((relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)))) := ⟨rfl,
+                  rfl⟩
+      refine (congrArg ((Protocols.RSOR.BackwardChallenge.world1With (S := 𝒮) c onion _ none _
+        refuse).patch.proc Role.relay _)
+        ((ite_eq_left h4).trans (hst₁ _ o2))).trans ?_
+      refine (world1With_proc_own (S := 𝒮) c onion none _ refuse _ _).trans ?_
+      refine Eq.trans ?_ (congrArg (({ proc := fun (h : Role) (o : RSOR.Onion geom) out =>
+            if h = .sender ∧ o.1 = refuse then pure none else pure out } :
+          Protocols.RSOR.Patch 𝒮).proc Role.relay _)
+        ((ite_eq_left h4).trans (hst₀ o2))).symm
+      rfl
+    · have hne : ¬ (h = Role.relay ∧ some (Util.Bytes.toVecN geom.headerLength
+          ((relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)))) = some
+                  o1) :=
+        fun hx => hc' ⟨hx.1, (Option.some.inj hx.2).symm⟩
+      refine (congrArg ((Protocols.RSOR.BackwardChallenge.world1With (S := 𝒮) c onion _ none _
+        refuse).patch.proc h _) (ite_eq_right hc')).trans ?_
+      refine (world1With_proc_other (S := 𝒮) c onion _ none _ refuse h _ _ hne).trans ?_
+      exact (congrArg (({ proc := fun (h : Role) (o : RSOR.Onion geom) out =>
+            if h = .sender ∧ o.1 = refuse then pure none else pure out } :
+          Protocols.RSOR.Patch 𝒮).proc h _) (ite_eq_right hc')).symm
+  · obtain ⟨o1, o2⟩ := o
+    refine (world1With_reply (S := 𝒮) c onion _ _ refuse h m _ _).trans ?_
+    by_cases hc' : h = Role.relay ∧ o1 = (Util.Bytes.toVecN geom.headerLength
+          ((relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀))))
+    · obtain ⟨rfl, rfl⟩ := hc'
+      have h4 : Role.relay = Role.relay ∧ (Util.Bytes.toVecN geom.headerLength
+          ((relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)))) =
+                  (Util.Bytes.toVecN geom.headerLength
+          ((relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)
+            ++ ofVector (macS.mac (ofVector km)
+              (relayFront kem default macS kdfS streamS geom hops₀ d₀ payload j cc U₀)))) := ⟨rfl,
+                  rfl⟩
+      exact ((ite_eq_left h4).trans (hrp₁ m _ o2)).trans
+        ((ite_eq_left h4).trans (hrp₀ m o2)).symm
+    · exact (ite_eq_right hc').trans (ite_eq_right hc').symm
+
+end BackRelay
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
