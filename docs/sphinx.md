@@ -215,7 +215,14 @@ The machinery that puts a relay behind an oracle, and the payload cipher and key
 are stated once for any property and any of the three roles (`KEMSphinxProp.lean`,
 `propPayloadGame`, `propStreamAdv`). TLU→ uses the same ones.
 
-Not proved yet: the keystream step; the sender's keys; the last comparison.
+The keystream step is proved for both worlds (`backward0_stream_le`, `backward1_stream_le`),
+and the steps so far are put together in `backwardUnlinkable_le_uniform`: the advantage is at
+most the bad draws, the KEM and KDF terms, a MAC forgery, the one-block cipher advantage and
+the keystream generator's advantage, each for both worlds, and the distance between the two
+worlds played from a uniform keystream at the relay.
+
+Not proved yet: that last distance. It needs the same chain around the sender's ciphertext,
+and then a comparison of the two worlds.
 
 ## How the bounds are built
 
