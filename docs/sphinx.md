@@ -221,8 +221,20 @@ most the bad draws, the KEM and KDF terms, a MAC forgery, the one-block cipher a
 the keystream generator's advantage, each for both worlds, and the distance between the two
 worlds played from a uniform keystream at the relay.
 
-Not proved yet: that last distance. It needs the same chain around the sender's ciphertext,
-and then a comparison of the two worlds.
+All of this is stated for `backwardWith W`: SLU← with any onion `W` sent on by the relay in
+world 1 (`BackSwap`, `world1Of`). The relay's keys do not enter that onion, so the steps above
+do not look at it. SLU← itself is `backwardWith freshSwap` (`backwardUnlinkable_eq_with`).
+
+The plan for the rest uses a world in between, world 1′: the relay sends on an onion that is
+built like a reply layer, a header over the rest of the backward path with a uniform payload.
+
+- Worlds 1 and 1′ differ in the onion sent on only. Its last layer is the sender's, so this is
+  the same chain as above around the sender's ciphertext.
+- Worlds 0 and 1′, with the relay's keys used up, should be the same game after relabelling
+  the relay's keystream, as in the last comparison of TLU→. At the exit this also needs the
+  cipher under the reply's payload key.
+
+Not proved yet: both of those.
 
 ## How the bounds are built
 
