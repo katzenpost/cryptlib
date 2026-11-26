@@ -377,12 +377,12 @@ theorem traceMask_congr (ks ks' : ℕ → ByteArray) (size f t : ℕ) (ht : t �
   | succ t ih => simp only [traceMask, ih (by omega), h (size - 1 - t) (by omega)]
 
 /-- **The hops after the keyed one cancel in the padding of the hops before it.** The padding
-block of a layer before the keyed hop, under the mask of the hops after the keyed hop, is that
-block built from the hops up to the keyed hop only. -/
+block of a layer up to the keyed hop's, under the mask of the hops after the keyed hop, is
+that block built from the hops up to the keyed hop only. -/
 theorem tailPadOf_traceMask (hrouting : geom.routingInfoLength
       = geom.perHopRoutingInfoLength * geom.nrHops)
     (hops : Array PathHop) (seeds : Array (Vector UInt8 32)) (hseeds : seeds.size = hops.size)
-    (hlen : hops.size ≤ geom.nrHops) (j i : ℕ) (hi : i < j) (hj : j + 1 < hops.size) (t : ℕ)
+    (hlen : hops.size ≤ geom.nrHops) (j i : ℕ) (hi : i ≤ j) (hj : j + 1 < hops.size) (t : ℕ)
     (ht : t ≤ hops.size - (j + 1)) :
     xorBytes
         (tailPadOf geom (fun m => if i + m = j then zeroBytes 𝓃
@@ -784,6 +784,114 @@ theorem relayFront_canon (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize
     xorBytes_mask_split _ _ _ U ((geom.nrHops - hops.size) * 𝓅) (j * 𝓅)
       geom.routingInfoLength hG1 hG2 (by rw [ByteArray.size_append, hE]; omega) (by omega),
     ← ByteArray.append_assoc]
+
+/-- **The next layer ends with the tail of the keyed hop's keystream.** -/
+theorem layerPast_lastBlock (hvalid : geom.ValidForKEM kem) (hops : Array PathHop)
+    (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ) (U fwd : ByteArray)
+    (hj : j + 1 < hops.size) (hlen : hops.size ≤ geom.nrHops) (hU : U.size = 𝓃)
+    (hfwd : layerPast kem cipher macS kdfS streamS geom hops d payload j U (j + 1) = .ok fwd) :
+    fwd.extract (2 + kem.ciphertextSize + geom.routingInfoLength - 𝓅)
+        (2 + kem.ciphertextSize + geom.routingInfoLength)
+      = U.extract geom.routingInfoLength 𝓃 := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hap : (geom.nrHops - hops.size) * 𝓅 ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm 𝓅]
+    exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+  have hf : ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * 𝓅)).size
+      = (geom.nrHops - hops.size) * 𝓅 := by
+    rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+    omega
+  have hseeds : (d.1.toArray.extract 0 hops.size).size = hops.size := by
+    simp
+    omega
+  have hfwd' : newKEMPacket kem cipher macS kdfS streamS geom
+      ((d.1.toArray.extract 0 hops.size).extract (j + 1) (d.1.toArray.extract 0 hops.size).size)
+      (fillerAtF kem kdfS streamS geom hops (d.1.toArray.extract 0 hops.size)
+        ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * 𝓅)) j U (j + 1))
+      (hops.extract (j + 1) hops.size) payload = .ok fwd := hfwd
+  have htail := newKEMPacket_tail geom kem kdfS streamS cipher macS hvalid _ _ _ _ _ hfwd'
+  have hm : (hops.extract (j + 1) hops.size).size = hops.size - (j + 1) := by simp
+  have hjm : (j + 1) * 𝓅 = j * 𝓅 + 𝓅 := Nat.succ_mul _ _
+  have hnm : (geom.nrHops - (hops.size - (j + 1))) * 𝓅
+      = (geom.nrHops - hops.size) * 𝓅 + (j + 1) * 𝓅 := by
+    rw [← Nat.add_mul]
+    congr 1
+    omega
+  have hmp : (hops.size - (j + 1)) * 𝓅 + (geom.nrHops - hops.size) * 𝓅 + (j + 1) * 𝓅
+      = geom.routingInfoLength := by
+    rw [← Nat.add_mul, ← Nat.add_mul, hrouting, Nat.mul_comm]
+    congr 1
+    omega
+  have hΦsz := fillerAtF_size kem kdfS streamS geom hrouting hops
+    (d.1.toArray.extract 0 hops.size) _ j U hlen hf hU (j + 1) hj
+  rw [Nat.add_mul] at hΦsz
+  rw [hm, ite_eq_left_of_eq_true _ _ (eq_true (by omega))] at htail
+  have h1 := congrArg (fun x : ByteArray => x.extract ((geom.nrHops - hops.size) * 𝓅 + j * 𝓅)
+    ((geom.nrHops - hops.size) * 𝓅 + (j + 1) * 𝓅)) htail
+  simp only [ByteArray.extract_extract] at h1
+  rw [Nat.min_eq_left (by omega),
+    xorBytes_extract _ _ _ _ (by omega) (by rw [traceMask_size]; omega),
+    fillerAtF_block geom kem kdfS streamS hrouting hops _ _ j U hU hlen hf (j + 1) j
+      (by omega) hj] at h1
+  have hfun : ∀ V : ByteArray, (fun m => if j + m = j then V
+        else headerKeystream streamS geom (kemHopKeys kem kdfS hops
+          (d.1.toArray.extract 0 hops.size) (j + m)))
+      = fun m => if m = 0 then V
+        else headerKeystream streamS geom (kemHopKeys kem kdfS hops
+          (d.1.toArray.extract 0 hops.size) (j + m)) := fun V => by
+    funext m
+    have : (j + m = j) ↔ (m = 0) := by omega
+    simp only [this]
+  have haff := tailPadOf_affine geom (fun m => headerKeystream streamS geom
+    (kemHopKeys kem kdfS hops (d.1.toArray.extract 0 hops.size) (j + m))) 0 U hU
+    (fun _ => streamS.keystream_size _ _ _) (hops.size - j - 1) (by
+      rw [hrouting, Nat.mul_comm 𝓅]
+      have h2 : (0 + (hops.size - j - 1) + 1) * 𝓅 ≤ geom.nrHops * 𝓅 :=
+        Nat.mul_le_mul_right _ (by omega)
+      omega)
+  have hcan := tailPadOf_traceMask geom kem kdfS streamS hrouting hops
+    (d.1.toArray.extract 0 hops.size) hseeds hlen j j le_rfl hj (hops.size - (j + 1)) le_rfl
+  rw [hfun (zeroBytes 𝓃)] at hcan
+  rw [Nat.zero_add] at haff
+  rw [hfun U, haff] at h1
+  rw [show hops.size - j - 1 - (hops.size - (j + 1)) = 0 by omega] at hcan
+  simp only [tailPadOf, ↓reduceIte] at hcan
+  rw [extract_zeroBytes _ _ _ (by omega)] at hcan
+  have hP0 : (tailPadOf geom (fun k => if k = 0 then zeroBytes 𝓃
+        else headerKeystream streamS geom (kemHopKeys kem kdfS hops
+          (d.1.toArray.extract 0 hops.size) (j + k))) (hops.size - j - 1)).size = 𝓅 :=
+    tailPadOf_size geom _ _ (fun m _ => by
+      split
+      · exact zeroBytes_size _
+      · exact streamS.keystream_size _ _ _) (by
+      rw [hrouting, Nat.mul_comm 𝓅]
+      have h2 : (hops.size - j - 1 + 1) * 𝓅 ≤ geom.nrHops * 𝓅 :=
+        Nat.mul_le_mul_right _ (by omega)
+      omega)
+  have hUs : (U.extract (𝓃 - (0 + 1) * 𝓅) (𝓃 - 0 * 𝓅)).size = 𝓅 := by
+    rw [ByteArray.size_extract, hU]
+    omega
+  have hMKb : ((traceMask geom (fun m => headerKeystream streamS geom
+        (kemHopKeys kem kdfS (hops.extract (j + 1) hops.size)
+          ((d.1.toArray.extract 0 hops.size).extract (j + 1)
+            (d.1.toArray.extract 0 hops.size).size) m))
+      (hops.size - (j + 1)) ((geom.nrHops - (hops.size - (j + 1))) * 𝓅)
+      (hops.size - (j + 1))).extract ((geom.nrHops - hops.size) * 𝓅 + j * 𝓅)
+      ((geom.nrHops - hops.size) * 𝓅 + (j + 1) * 𝓅)).size = 𝓅 := by
+    rw [ByteArray.size_extract, traceMask_size]
+    omega
+  rw [xorBytes_assoc _ _ _ (hP0.trans hUs.symm) (hUs.trans hMKb.symm),
+    xorBytes_comm_of_size_eq _ _ (hUs.trans hMKb.symm),
+    ← xorBytes_assoc _ _ _ (hP0.trans hMKb.symm) (hMKb.trans hUs.symm), hcan,
+    zeroBytes_xorBytes_of_size _ _ (by rw [hUs]; omega)] at h1
+  rw [show 2 + kem.ciphertextSize + geom.routingInfoLength - 𝓅
+      = 2 + kem.ciphertextSize + (hops.size - (j + 1)) * 𝓅
+        + ((geom.nrHops - hops.size) * 𝓅 + j * 𝓅) by omega,
+    show 2 + kem.ciphertextSize + geom.routingInfoLength
+      = 2 + kem.ciphertextSize + (hops.size - (j + 1)) * 𝓅
+        + ((geom.nrHops - hops.size) * 𝓅 + (j + 1) * 𝓅) by omega, h1]
+  congr 1 <;> omega
+
 
 /-! ## The padding of the hops in front -/
 
