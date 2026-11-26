@@ -347,6 +347,43 @@ theorem pktFn_isSome_congr (ks ks' : ℕ → ByteArray) (tag tag' enc enc' : ℕ
   · simp only [hp, ↓reduceIte] at h
     cases h
 
+/-- **The header of a packet does not use the payload encryptions.** With other payload
+encryptions `pktFn` gives a packet with the same bytes in front of the payload. -/
+theorem pktFn_header (ks : ℕ → ByteArray) (tag enc enc' : ℕ → ByteArray → ByteArray)
+    (ke : Array ByteArray) (filler : ByteArray) (path : Array PathHop) (payload x : ByteArray)
+    (h : pktFn kem geom ks tag enc ke filler path payload = some x)
+    (henc : ∀ i b, (enc i b).size = b.size) :
+    ∃ x', pktFn kem geom ks tag enc' ke filler path payload = some x' ∧
+      x'.extract 0 (x.size - (geom.payloadTagLength + geom.forwardPayloadLength))
+        = x.extract 0 (x.size - (geom.payloadTagLength + geom.forwardPayloadLength)) := by
+  unfold pktFn at h ⊢
+  by_cases hp : payload.size = geom.forwardPayloadLength
+  · simp only [hp, ↓reduceIte] at h ⊢
+    cases ht : hdrTrace kem geom ks tag ke filler path path.size with
+    | error e =>
+      rw [ht] at h
+      cases h
+    | ok s =>
+      rw [ht] at h
+      dsimp only at h ⊢
+      generalize v0AD ++ ke[0]! ++ s.1 ++ s.2 = H at h ⊢
+      obtain rfl := Option.some.inj h
+      refine ⟨_, rfl, ?_⟩
+      have hsz : ∀ (l : List ℕ) (b : ByteArray),
+          (l.foldl (fun b iRev => enc (path.size - 1 - iRev) b) b).size = b.size := by
+        intro l
+        induction l with
+        | nil => intro b; rfl
+        | cons a l ih => intro b; rw [List.foldl_cons, ih, henc]
+      have hinit : ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload).size
+          = geom.payloadTagLength + geom.forwardPayloadLength := by
+        rw [ByteArray.size_append, hp]
+        exact congrArg (· + geom.forwardPayloadLength) Array.size_replicate
+      rw [ByteArray.size_append, hsz, hinit, Nat.add_sub_cancel,
+        Cryptlib.Util.Bytes.extract_append_left, Cryptlib.Util.Bytes.extract_append_left]
+  · simp only [hp, ↓reduceIte] at h
+    cases h
+
 /-- Each hop's payload encryption, from its keys. -/
 def keysEnc (keys : Array HopKeys) (i : ℕ) (b : ByteArray) : ByteArray :=
   cipher.encrypt (keys[i]!).payloadEncryption.toArray (ofVector (keys[i]!).headerEncryptionIV) b
