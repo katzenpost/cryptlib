@@ -109,6 +109,131 @@ theorem evalDistEq_headRegion {δ : Type} {n a t h m : ℕ} (hat : a + t ≤ n) 
 
 end Uniform
 
+section Fresh
+
+variable {S : Protocols.RSOR.Scheme} {L : ℕ} (ρ : Protocols.RSOR.Role) (H : S.Header)
+  (key : S.Onion → Vector UInt8 L) (step : S.Onion → Vector UInt8 L → Option S.Step)
+  (rep : S.Msg → S.Onion → Vector UInt8 L → Option (S.Name × S.Onion))
+
+/-- A patch that first gives the relay `ρ`, under the header `H`, the answer it has when its
+payload decrypts by `dec`. -/
+def decPatch (dec : Vector UInt8 L → Vector UInt8 L) (patch : Protocols.RSOR.Patch S) :
+    Protocols.RSOR.Patch S where
+  proc h o out :=
+    if h = ρ ∧ o.1 = H then patch.proc h o (step o (dec (key o))) else patch.proc h o out
+  reply h m o out :=
+    if h = ρ ∧ o.1 = H then patch.reply h m o (rep m o default) else patch.reply h m o out
+
+/-- A patch that first gives the relay `ρ`, under the header `H`, the answer it has when its
+payload decrypts to a block drawn then. -/
+def drawPatch (patch : Protocols.RSOR.Patch S) : Protocols.RSOR.Patch S where
+  proc h o out :=
+    if h = ρ ∧ o.1 = H then $ᵗ (Vector UInt8 L) >>= fun g => patch.proc h o (step o g)
+    else patch.proc h o out
+  reply := (decPatch ρ H key step rep id patch).reply
+
+variable (proc : Protocols.RSOR.Role → S.Onion → Option S.Step)
+  (reply : Protocols.RSOR.Role → S.Msg → S.Onion → Option (S.Name × S.Onion))
+
+/-- A relay that decrypts by `dec` under one header is a relay patched with `decPatch`, when
+its patched reply under that header does not depend on the decrypted block. -/
+theorem withDec_decPatch (dec : Vector UInt8 L → Vector UInt8 L)
+    (patch : Protocols.RSOR.Patch S)
+    (hrep : ∀ m o x, o.1 = H →
+      patch.reply ρ m o (rep m o x) = patch.reply ρ m o (rep m o default)) :
+    Protocols.RSOR.withDec ρ H key step rep proc reply dec patch
+      = Protocols.RSOR.oracle (fun h o => pure (proc h o)) (fun h m o => pure (reply h m o))
+        (decPatch ρ H key step rep dec patch) := by
+  refine Protocols.RSOR.oracle_patch_congr patch _ _ _ _ _ (fun h o => ?_) (fun h m o => ?_)
+  · by_cases hc : h = ρ ∧ o.1 = H
+    · exact (congrArg (patch.proc h o) (ite_eq_left hc)).trans (ite_eq_left hc).symm
+    · exact (congrArg (patch.proc h o) (ite_eq_right hc)).trans (ite_eq_right hc).symm
+  · by_cases hc : h = ρ ∧ o.1 = H
+    · have e : patch.reply h m o (rep m o (dec (key o)))
+          = patch.reply h m o (rep m o default) := by
+        obtain ⟨rfl, ho⟩ := hc
+        exact hrep m o _ ho
+      exact (congrArg (patch.reply h m o) (ite_eq_left hc)).trans (e.trans (ite_eq_left hc).symm)
+    · exact (congrArg (patch.reply h m o) (ite_eq_right hc)).trans (ite_eq_right hc).symm
+
+/-- **The ideal cipher's one answer under a header is a fresh block.** An honest relay
+processes a header once. So a relay whose payload under one header decrypts as the ideal
+cipher does after one encryption (to the block `w` for the block `u`, to the block `v` for any
+other) is, with `u`, `w` and `v` uniform, a relay whose payload decrypts to one uniform
+block. -/
+theorem withDec_fresh (patch : Protocols.RSOR.Patch S)
+    (hrep : ∀ m o x, o.1 = H →
+      patch.reply ρ m o (rep m o x) = patch.reply ρ m o (rep m o default))
+    {α : Type} (oa : OracleComp (Protocols.RSOR.oracleSpec S) α) (log : Protocols.RSOR.Log S) :
+    (do
+      let u ← $ᵗ (Vector UInt8 L)
+      let w ← $ᵗ (Vector UInt8 L)
+      let v ← $ᵗ (Vector UInt8 L)
+      (simulateQ (Protocols.RSOR.withDec ρ H key step rep proc reply
+        (fun y => if y = u then w else v) patch) oa).run log)
+      =ᵈ ($ᵗ (Vector UInt8 L) >>= fun g =>
+        (simulateQ (Protocols.RSOR.withDec ρ H key step rep proc reply (fun _ => g) patch)
+          oa).run log) := by
+  simp only [withDec_decPatch ρ H key step rep proc reply _ patch hrep]
+  have h1 := Protocols.RSOR.oracle_draw ρ H
+    (do
+      let u ← $ᵗ (Vector UInt8 L)
+      let w ← $ᵗ (Vector UInt8 L)
+      let v ← $ᵗ (Vector UInt8 L)
+      pure (u, w, v))
+    (drawPatch ρ H key step rep patch)
+    (fun x : Vector UInt8 L × Vector UInt8 L × Vector UInt8 L =>
+      decPatch ρ H key step rep (fun y => if y = x.1 then x.2.1 else x.2.2) patch)
+    (fun h o => pure (proc h o)) (fun h m o => pure (reply h m o))
+    (fun h o out => by
+      by_cases hc : h = ρ ∧ o.1 = H
+      · have e : (drawPatch ρ H key step rep patch).proc h o out
+            = $ᵗ (Vector UInt8 L) >>= fun g => patch.proc h o (step o g) := ite_eq_left hc
+        have e2 : ∀ x : Vector UInt8 L × Vector UInt8 L × Vector UInt8 L,
+            (decPatch ρ H key step rep (fun y => if y = x.1 then x.2.1 else x.2.2)
+              patch).proc h o out
+              = patch.proc h o (step o (if key o = x.1 then x.2.1 else x.2.2)) :=
+          fun x => ite_eq_left hc
+        rw [e]
+        simp only [e2, bind_assoc, pure_bind]
+        exact (evalDistEq_ite_fresh (key o) fun g => patch.proc h o (step o g)).symm
+      · have e : (drawPatch ρ H key step rep patch).proc h o out = patch.proc h o out :=
+          ite_eq_right hc
+        have e2 : ∀ x : Vector UInt8 L × Vector UInt8 L × Vector UInt8 L,
+            (decPatch ρ H key step rep (fun y => if y = x.1 then x.2.1 else x.2.2)
+              patch).proc h o out = patch.proc h o out := fun x => ite_eq_right hc
+        rw [e]
+        simp only [e2]
+        exact (OracleComp.EvalDistEq.bind_const _ _).symm)
+    (fun g g' h o out hc => (ite_eq_right hc).trans (ite_eq_right hc).symm) (fun g => rfl) oa log
+  have h2 := Protocols.RSOR.oracle_draw ρ H ($ᵗ (Vector UInt8 L))
+    (drawPatch ρ H key step rep patch)
+    (fun g : Vector UInt8 L => decPatch ρ H key step rep (fun _ => g) patch)
+    (fun h o => pure (proc h o)) (fun h m o => pure (reply h m o))
+    (fun h o out => by
+      by_cases hc : h = ρ ∧ o.1 = H
+      · have e : (drawPatch ρ H key step rep patch).proc h o out
+            = $ᵗ (Vector UInt8 L) >>= fun g => patch.proc h o (step o g) := ite_eq_left hc
+        have e2 : ∀ g : Vector UInt8 L,
+            (decPatch ρ H key step rep (fun _ => g) patch).proc h o out
+              = patch.proc h o (step o g) := fun g => ite_eq_left hc
+        rw [e]
+        simp only [e2]
+        exact EvalDistEq.rfl
+      · have e : (drawPatch ρ H key step rep patch).proc h o out = patch.proc h o out :=
+          ite_eq_right hc
+        have e2 : ∀ g : Vector UInt8 L,
+            (decPatch ρ H key step rep (fun _ => g) patch).proc h o out
+              = patch.proc h o out := fun g => ite_eq_right hc
+        rw [e]
+        simp only [e2]
+        exact (OracleComp.EvalDistEq.bind_const _ _).symm)
+    (fun g g' h o out hc => (ite_eq_right hc).trans (ite_eq_right hc).symm) (fun g => rfl) oa log
+  simp only [bind_assoc, pure_bind] at h1
+  exact h1.symm.trans h2
+
+end Fresh
+
 section RestOfPath
 
 variable (kem : KEM) (geom : Geometry)

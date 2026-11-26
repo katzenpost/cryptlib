@@ -283,6 +283,21 @@ second point needs, as far as worked out:
   (`evalDistEq_ite_fresh`), so world 0 has to draw that block; then `oracle_draw` moves the
   draw to the front.
 
+Proved so far for the second point, on the backward path (`KEMSphinxSLURelay.lean`):
+
+- World 0's randomness is a mix of world 1′'s two draws (`backMix`): the seeds up to the relay
+  from the first, the later seeds and the first bytes of the padding from the second
+  (`joinDraw`). With the keystream shifted (`backShift`), the relay has the header it has in
+  world 1′, and the layers after it are the layers over the rest of the path
+  (`backShift_spec`).
+- The mix and the shifted keystream are uniform (`evalDistEq_backShift`). The tail of the
+  shifted keystream is a region of the second draw's padding, which nothing else reads
+  (`evalDistEq_headRegion`).
+- A relay processes a header once, so the ideal cipher's one answer under its header is a
+  fresh block (`withDec_fresh`).
+
+Not proved yet there: the two games are the same run at the relabelled draws; the exit case.
+
 ## How the bounds are built
 
 The structural lemmas are stated for packets built from any keys (`newKEMPacketFrom`), not only
