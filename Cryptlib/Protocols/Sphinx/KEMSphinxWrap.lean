@@ -7,6 +7,7 @@ import Cryptlib.Protocols.Sphinx.KEMSphinxPad
 
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
 
+open OracleComp OracleSpec ENNReal
 open Cryptlib.Protocols.Sphinx.Constants
 open Cryptlib.Protocols.Sphinx.Geometry (Geometry)
 open Cryptlib.Protocols.Sphinx.Commands
@@ -198,6 +199,145 @@ theorem wrapUp_append (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = 
           (fun m h1 h2 => hcmd m (by omega) (by omega))
           (fun m h1 h2 => hct m (by omega) (by omega)) hH)]
     rfl
+
+/-- **The headers in front read the hops in front.** Wrapping a header in the headers of hops
+`i` to `i + n` gives the same bytes on two paths with two draws that agree on those hops, on
+the name of the hop after each, and on their seeds. -/
+theorem hdrUp_congr (hops hops' : Array PathHop) (d d' : RSOR.Draw geom)
+    (hlen : hops.size ≤ geom.nrHops) (hlen' : hops'.size ≤ geom.nrHops) (i n : ℕ)
+    (H : ByteArray)
+    (h : ∀ k, i ≤ k → k < i + n → k + 1 < hops.size ∧ k + 1 < hops'.size
+      ∧ hops[k]! = hops'[k]! ∧ (hops[k + 1]!).id = (hops'[k + 1]!).id
+      ∧ d.1.toArray[k]! = d'.1.toArray[k]!) :
+    hdrUp kem macS kdfS streamS geom hops d i n H
+      = hdrUp kem macS kdfS streamS geom hops' d' i n H := by
+  induction n generalizing i with
+  | zero => rfl
+  | succ n ih =>
+    obtain ⟨hk, hk', e0, e1, es⟩ := h i le_rfl (by omega)
+    have hS : (d.1.toArray.extract 0 hops.size).size = hops.size := by simp; omega
+    have hS' : (d'.1.toArray.extract 0 hops'.size).size = hops'.size := by simp; omega
+    have p0 : (hops.extract i hops.size)[0]! = (hops'.extract i hops'.size)[0]! := by
+      rw [getElem!_extract_from hops i 0 (by omega), getElem!_extract_from hops' i 0 (by omega)]
+      exact e0
+    have p1 : ((hops.extract i hops.size)[1]!).id = ((hops'.extract i hops'.size)[1]!).id := by
+      rw [getElem!_extract_from hops i 1 (by omega), getElem!_extract_from hops' i 1 (by omega)]
+      exact e1
+    have s0 : ((d.1.toArray.extract 0 hops.size).extract i
+          (d.1.toArray.extract 0 hops.size).size)[0]!
+        = ((d'.1.toArray.extract 0 hops'.size).extract i
+          (d'.1.toArray.extract 0 hops'.size).size)[0]! := by
+      have hx : ∀ (a : Array (Vector UInt8 32)) (m : ℕ), i < m → m ≤ a.size →
+          (a.extract 0 m)[i + 0]! = a[i]! := fun a m h1 h2 => by
+        rw [Nat.add_zero, getElem!_pos _ _ (by simp; omega), getElem!_pos _ _ (by omega)]
+        simp
+      rw [getElem!_extract_from _ i 0 (by omega), getElem!_extract_from _ i 0 (by omega),
+        hx _ _ (by omega) (by simp; omega), hx _ _ (by omega) (by simp; omega)]
+      exact es
+    unfold hdrUp
+    rw [ih (i + 1) fun k hk1 hk2 => h k (by omega) (by omega)]
+    unfold hdrHop kemHopCt kemHopKeys
+    rw [p0, s0, kemRiFragment_path_congr geom kem _ (hops'.extract i hops'.size) _ _ _
+      (hops'.extract i hops'.size).size p0 p1 (by simp; omega)]
+
+omit kem cipher macS kdfS streamS geom in
+/-- A uniform draw pushed through a bijection is a uniform draw. -/
+theorem evalDistEq_of_bijective {γ δ : Type} [SampleableType γ] {g : γ → γ}
+    (hg : Function.Bijective g) (K : γ → ProbComp δ) :
+    ($ᵗ γ >>= fun x => K (g x)) =ᵈ ($ᵗ γ >>= K) := by
+  have hb : Function.Bijective (Function.uncurry fun (_ : Vector UInt8 0) (x : γ) => g x) :=
+    ⟨fun a b h => Prod.ext (Vector.ext fun i hi => absurd hi (Nat.not_lt_zero i)) (hg.1 h),
+      fun y => (hg.2 y).elim fun x hx => ⟨(default, x), hx⟩⟩
+  exact (OracleComp.EvalDistEq.bind_const _ _).symm.trans (evalDistEq_pair_of_bijective hb K)
+
+omit macS streamS in
+/-- A run of hops' payload encryptions keeps the payload's length. -/
+theorem payUp_size (hops : Array PathHop) (d : RSOR.Draw geom) (n i : ℕ) (P : ByteArray) :
+    (payUp kem cipher kdfS geom hops d i n P).size = P.size := by
+  induction n generalizing i with
+  | zero => rfl
+  | succ n ih =>
+    show (cipher.encrypt _ _ _).size = _
+    rw [cipher.encrypt_size, ih]
+
+omit macS streamS in
+/-- A run of hops' payload encryptions loses nothing, on payloads of at least 16 bytes. -/
+theorem payUp_injective (hops : Array PathHop) (d : RSOR.Draw geom) (n i : ℕ)
+    (P P' : ByteArray) (hP : 16 ≤ P.size) (hP' : 16 ≤ P'.size)
+    (h : payUp kem cipher kdfS geom hops d i n P = payUp kem cipher kdfS geom hops d i n P') :
+    P = P' := by
+  induction n generalizing i with
+  | zero => exact h
+  | succ n ih =>
+    have h' := congrArg (cipher.decrypt
+      (kemHopKeys kem kdfS (hops.extract i hops.size)
+        ((d.1.toArray.extract 0 hops.size).extract i (d.1.toArray.extract 0 hops.size).size)
+            0).payloadEncryption.toArray
+      (ofVector (kemHopKeys kem kdfS (hops.extract i hops.size)
+        ((d.1.toArray.extract 0 hops.size).extract i (d.1.toArray.extract 0 hops.size).size)
+            0).headerEncryptionIV)) h
+    change cipher.decrypt _ _ (cipher.encrypt _ _ _) = cipher.decrypt _ _ (cipher.encrypt _ _ _)
+      at h'
+    rw [cipher.roundTrip _ _ _ (by rw [payUp_size]; exact hP),
+      cipher.roundTrip _ _ _ (by rw [payUp_size]; exact hP')] at h'
+    exact ih (i + 1) h'
+
+omit macS streamS in
+/-- **A uniform payload stays uniform under a run of hops' payload encryptions.** -/
+theorem evalDistEq_payUp {δ : Type}
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (n i : ℕ)
+    (K : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength) → ProbComp δ) :
+    ($ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)) >>= fun e =>
+        K (toVecN _ (payUp kem cipher kdfS geom hops d i n (ofVector e))))
+      =ᵈ ($ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)) >>= K) := by
+  refine evalDistEq_of_bijective (Finite.injective_iff_bijective.1 fun e e' h => ?_) K
+  have hs : ∀ x : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength),
+      (payUp kem cipher kdfS geom hops d i n (ofVector x)).size
+        = geom.payloadTagLength + geom.forwardPayloadLength := fun x => by
+    rw [payUp_size, Util.Bytes.size_ofVector]
+  have h' := congrArg ofVector h
+  rw [ofVector_toVecN _ (hs e), ofVector_toVecN _ (hs e')] at h'
+  have h2 := payUp_injective kem cipher kdfS geom hops d n i _ _
+    (by rw [Util.Bytes.size_ofVector]; exact h16) (by rw [Util.Bytes.size_ofVector]; exact h16) h'
+  have h3 := congrArg (toVecN (geom.payloadTagLength + geom.forwardPayloadLength)) h2
+  rwa [toVecN_ofVector,
+    toVecN_ofVector] at h3
+
+/-- **A wrapped layer splits into the wrapped header and the wrapped payload.** -/
+theorem wrapUp_split (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (n i : ℕ) (H P : ByteArray)
+    (hn : i + n < hops.size) (hlen : hops.size ≤ geom.nrHops)
+    (hcmd : ∀ m, i ≤ m → m < i + n → (hops[m]!).commands = [])
+    (hct : ∀ m, i ≤ m → m < i + n → (kemHopCt kem (hops.extract m hops.size)
+      ((d.1.toArray.extract 0 hops.size).extract m (d.1.toArray.extract 0 hops.size).size)
+        0).size = kem.ciphertextSize)
+    (hH : H.size = payloadOffset kem geom) :
+    RSOR.split geom (wrapUp kem cipher macS kdfS streamS geom hops d i n (H ++ P))
+      = (toVecN _ (hdrUp kem macS kdfS streamS geom hops d i n H),
+        toVecN _ (payUp kem cipher kdfS geom hops d i n P)) := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have had : adLength = 2 := rfl
+  have hsz := hdrUp_size kem macS kdfS streamS geom hvalid hmactag hops d n i H hn hlen hcmd hct
+    hH
+  have hsz' : (hdrUp kem macS kdfS streamS geom hops d i n H).size = geom.headerLength := by
+    rw [hsz, hhdr, had]
+  rw [wrapUp_append kem cipher macS kdfS streamS geom hvalid hmactag hops d n i H P hn hlen hcmd
+    hct hH]
+  have e1 : (hdrUp kem macS kdfS streamS geom hops d i n H
+      ++ payUp kem cipher kdfS geom hops d i n P).extract 0 geom.headerLength
+      = hdrUp kem macS kdfS streamS geom hops d i n H := by
+    rw [← hsz']
+    exact Util.Bytes.extract_append_left _ _
+  have e2 : (hdrUp kem macS kdfS streamS geom hops d i n H
+      ++ payUp kem cipher kdfS geom hops d i n P).extract geom.headerLength
+        (hdrUp kem macS kdfS streamS geom hops d i n H
+          ++ payUp kem cipher kdfS geom hops d i n P).size
+      = payUp kem cipher kdfS geom hops d i n P := by
+    rw [ByteArray.size_append, ← hsz']
+    exact Util.Bytes.extract_append_right _ _
+  unfold RSOR.split
+  rw [e1, e2]
 
 end Wrap
 
