@@ -190,7 +190,8 @@ theorem nextReal_run (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversa
       ((nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).post st
         (nextView kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x
           (encapOf kem k.1.1 s').1 ((hopKeysPRG kem kdfS).gen (encapOf kem k.1.1 s').2)))
-    = forwardRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 names _ (shortDraw geom)
+    = propRunU kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names _ (shortDraw geom)
         (shortView kem cipher macS kdfS streamS geom hvalid hmactag h16 names) A
         (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
         (shortBlockU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
@@ -301,7 +302,7 @@ theorem nextReal_run (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversa
     rw [next_setSeed kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o.1 _ s' ct ss
       henc', hss]
     rfl
-  unfold forwardRunU
+  unfold propRunU
   rw [hon, hpa, hskf, hDd, hHv]
   rfl
 
@@ -317,7 +318,8 @@ def shortRunG (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
   let r' ← $ᵗ (RSOR.Randomness geom)
   let u ← $ᵗ (Block geom)
   let v ← $ᵗ (Block geom)
-  forwardRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 names _ (shortDraw geom)
+  propRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable
+      (S := 𝒮)) .relay names _ (shortDraw geom)
     (shortView kem cipher macS kdfS streamS geom hvalid hmactag h16 names) A
     (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
     (shortBlockU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
@@ -354,8 +356,8 @@ theorem shortIdeal_evalDistEq (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)
       ($ᵗ (Vector UInt8 32)) >>= fun s =>
       ($ᵗ (RSOR.Randomness geom)) >>= fun r =>
       G U km k cs s r) := by
-    unfold PRGScheme.prgIdealExperiment shortStreamAdv forwardStreamAdv keyedDraw
-    simp only [G, shortRunG, shortDraw, forwardSetupOf, bind_assoc, pure_bind]
+    unfold PRGScheme.prgIdealExperiment shortStreamAdv propStreamAdv keyedDraw
+    simp only [G, shortRunG, shortDraw, propSetupOf, bind_assoc, pure_bind]
     rfl
   rw [h0]
   refine EvalDistEq.trans
@@ -469,7 +471,8 @@ theorem shortIdeal_sub_nextReal_le
             d]).toReal := by
   let F : KeyedDraw (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
       → ProbComp Bool := fun d =>
-    forwardRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 names _ (shortDraw geom)
+    propRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable
+        (S := 𝒮)) .relay names _ (shortDraw geom)
       (shortView kem cipher macS kdfS streamS geom hvalid hmactag h16 names) A
       (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
       (shortBlockU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)

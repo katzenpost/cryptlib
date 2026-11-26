@@ -417,9 +417,10 @@ theorem nextOwn_run (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversar
 /-- **World 1's relay may draw its random payload first.** The game where the relay answers
 one header and the challenger patches its answers as in world 1 is the game that draws the
 random payload `g` first and patches with it. -/
-theorem headerRelays_patchWith_draw {pk kb ks : Key kem} (names : Role → RSOR.Name)
+theorem headerRelays_patchWith_draw {pk : Key kem} {keys : Role → Key kem × kem.PrivateKey} (names
+    : Role → RSOR.Name)
     (c : Protocols.RSOR.ForwardChallenge (S := 𝒮)
-      (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk kb ks))
+      (honAt kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay names pk keys))
     (next : RSOR.Onion geom) (r : RSOR.Randomness geom) (mine : RSOR.Onion geom)
     (sk : Role → kem.PrivateKey) (ct : kem.Ciphertext) (km : Vector UInt8 32) (U : ByteArray)
     (Hv : Vector UInt8 geom.headerLength) (D : Block geom → Block geom)
@@ -975,9 +976,10 @@ has the header of a path that goes on, and forwards the next layer `fwd` with th
 decrypts: the next layer's own payload for the unchanged block, the random block `g`
 otherwise. World 1's relay, whatever it would answer, is patched to forward the same. The two
 games are the same when the headers agree and world 1's relay would not reply. -/
-theorem headerRelays_forward_eq {pk kb ks : Key kem} (names : Role → RSOR.Name)
+theorem headerRelays_forward_eq {pk : Key kem} {keys : Role → Key kem × kem.PrivateKey} (names :
+    Role → RSOR.Name)
     (c : Protocols.RSOR.ForwardChallenge (S := 𝒮)
-      (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk kb ks))
+      (honAt kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay names pk keys))
     (hn : c.pos + 1 < c.req.fwd.hops.length)
     (r : RSOR.Randomness geom) (mine : RSOR.Onion geom) (g : Block geom)
     (sk : Role → kem.PrivateKey) (ct : kem.Ciphertext) (km : Vector UInt8 32)
@@ -1055,9 +1057,10 @@ the header of a path that ends at them, and deliver when the block they decrypt 
 the zero tag. The patch puts the original's message and reply in place of the replacement's.
 The two games are the same when the headers agree, both senders' blocks begin with the zero
 tag, and the random block for a changed payload does not. -/
-theorem headerRelays_last_eq {pk kb ks : Key kem} (names : Role → RSOR.Name)
+theorem headerRelays_last_eq {pk : Key kem} {keys : Role → Key kem × kem.PrivateKey} (names : Role
+    → RSOR.Name)
     (c : Protocols.RSOR.ForwardChallenge (S := 𝒮)
-      (honOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk kb ks))
+      (honAt kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay names pk keys))
     (hl : c.pos + 1 = c.req.fwd.hops.length)
     (next : RSOR.Onion geom) (r : RSOR.Randomness geom) (mine : RSOR.Onion geom) (g : Block geom)
     (sk : Role → kem.PrivateKey) (ct : kem.Ciphertext) (km : Vector UInt8 32)
@@ -1257,7 +1260,8 @@ theorem nextDrawn_eq_forward (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮))
               (nextLayer kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x)) g))
         (A.guess st.1 (nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x
           (ofVector U')).1.onion)).run' st.2.1
-      = forwardRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+      = propRunU kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
           (RSOR.Randomness geom) ($ᵗ RSOR.Randomness geom)
           (fun ch r c t =>
             { onion := onionK kem cipher macS kdfS streamS geom ch.c.req r ch.c.pos c t 0 }) A
@@ -1335,7 +1339,7 @@ theorem nextDrawn_eq_forward (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮))
     dsimp only
     rw [hoff]
     rfl
-  unfold forwardRunU
+  unfold propRunU
   dsimp only [KeyedDraw.c]
   rw [e1, e2]
   obtain ⟨-, -, hrouting, hhdr, -, -⟩ := id hvalid
@@ -1469,7 +1473,8 @@ theorem nextDrawn_eq_last (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Ad
               (nextLayer kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x)) g))
         (A.guess st.1 (nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x
           (ofVector U')).1.onion)).run' st.2.1
-      = forwardRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+      = propRunU kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
           (RSOR.Randomness geom) ($ᵗ RSOR.Randomness geom)
           (fun ch r c t =>
             { onion := onionK kem cipher macS kdfS streamS geom ch.c.req r ch.c.pos c t 0 }) A
@@ -1607,7 +1612,7 @@ theorem nextDrawn_eq_last (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Ad
     exact congrArg (RSOR.split geom) (RSOR.wrapUp_mixSeeds kem cipher macS kdfS streamS geom
         ch.c.req.fwd
       _ _ r r' ch.c.pos hpos _)
-  unfold forwardRunU
+  unfold propRunU
   dsimp only [KeyedDraw.c]
   rw [e1, honion]
   have hm1 := congrArg Prod.fst hsplit
@@ -1650,7 +1655,8 @@ def run0 (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
     (st : A.State × Protocols.RSOR.Log 𝒮 × (Role → kem.PrivateKey))
     (U : Keystream geom) (km s : Vector UInt8 32) (r : RSOR.Randomness geom)
     (u v : Block geom) : ProbComp Bool :=
-  forwardRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+  propRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable
+      (S := 𝒮)) .relay names
     (RSOR.Randomness geom) ($ᵗ RSOR.Randomness geom)
     (fun ch r c t =>
       { onion := onionK kem cipher macS kdfS streamS geom ch.c.req r ch.c.pos c t 0 }) A
@@ -2282,7 +2288,7 @@ theorem next_final_le (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Advers
         let v ← $ᵗ (Block geom)
         run0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A k cs.1 cs.2 U km s r u
             v)) := by
-    unfold PRGScheme.prgIdealExperiment forwardStreamAdv0 forwardStreamAdv
+    unfold PRGScheme.prgIdealExperiment forwardStreamAdv0 propStreamAdv
     simp only [keyedDraw, bind_assoc, pure_bind]
     refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ => 
       OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_

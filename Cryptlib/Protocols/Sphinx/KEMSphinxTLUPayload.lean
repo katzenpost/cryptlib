@@ -24,7 +24,7 @@ open Cryptlib.Util.Bytes (ofVector)
 
 /-! # The payload cipher step for TLU→
 
-A world of TLU→ in which the honest relay has uniform keys and answers the challenge header
+A world of a property in which the honest relay has uniform keys and answers the challenge header
 only is a `PayloadGame`, up to the draws that are not good. So its payload cipher can be
 replaced by the ideal one at the cost of the one-block cipher advantage
 (`PayloadGame.exp_eq`). -/
@@ -42,36 +42,39 @@ local notation "𝒮" => sphinx kem cipher macS kdfS streamS geom hvalid hmactag
 
 variable [SampleableType kem.Plaintext]
 
+variable (P : Protocols.RSOR.Property (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
+  (ρ : Role)
+
 variable (names : Role → RSOR.Name) (Oth : Type) (drawO : ProbComp Oth)
   (view : {pk : Key kem} →
-      ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk
     → Oth → kem.Ciphertext → KeyTuple
     → Protocols.RSOR.World (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
-  (A : (Protocols.RSOR.forwardUnlinkable
-    (S := sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary)
+  (A : P.Adversary)
   (M : {pk : Key kem} →
-      ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk
     → Oth → kem.Ciphertext → RestKeys → ByteArray)
   (pl : {pk : Key kem} →
-      ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk
     → Oth → kem.Ciphertext → Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32
     → Block geom)
   (viewE : {pk : Key kem} →
-      ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk
     → Oth → kem.Ciphertext → Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32
     → Block geom
     → Protocols.RSOR.World (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
 
 local notation "𝒜" =>
-  forwardAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth drawO view A
+  propAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO view A
 
 local notation "𝒯" =>
-  forwardSetupOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth drawO view
+  propSetupOf kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO view
 
-/-- A world of TLU→ with the relay answering the header `tagged M` only, cut at its payload
+/-- A world of a property with the relay answering the header `tagged M` only, cut at its payload
 key: `pl` is the block the sender encrypts under it, and `viewE` the world from the
 encrypted block. -/
-def forwardPayloadGame : PayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 where
+def propPayloadGame : PayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 where
+  role := ρ
   X := (Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32)
     × KeyedDraw 𝒜
   draw iv := do
@@ -79,7 +82,7 @@ def forwardPayloadGame : PayloadGame kem cipher macS kdfS streamS geom hvalid hm
     let d ← keyedDraw cipher macS kdfS streamS geom
       𝒜
     return ((iv, r), d)
-  sk x h := if h = .relay then x.2.k.2 else x.2.cs.2.2.2 h
+  sk x h := if h = ρ then x.2.k.2 else x.2.cs.2.2.2 h
   c x := x.2.c
   macKey x := x.1.2.1
   ks x := streamS.keystream (ofVector x.1.2.2) (ofVector x.1.1)
@@ -93,14 +96,15 @@ def forwardPayloadGame : PayloadGame kem cipher macS kdfS streamS geom hvalid hm
   rest x e := A.guess x.2.cs.2.1 (viewE x.2.cs.1 x.2.o x.2.c x.1 e).onion
 
 omit [SampleableType kem.Plaintext] in
-/-- **The payload cipher step, for a world of TLU→.** The world with uniform keys at the honest
+/-- **The payload cipher step, for a world of a property.** The world with uniform keys at the
+    honest
 relay and the challenge header only is the `PayloadGame` with the cipher, up to the chance of a
 draw that is not `good`. -/
-theorem forward_tagged_sub_payload_le
+theorem prop_tagged_sub_payload_le
     (good : KeyedDraw 𝒜
       → Prop)
     (hMkp : ∀ {pk : Key kem}
-      (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk)
+      (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk)
       (o : Oth) (c : kem.Ciphertext) (kp kp' : Vector UInt8 48) (iv : Vector UInt8 16)
       (ke : Vector UInt8 32), M ch o c (kp, iv, ke) = M ch o c (kp', iv, ke))
     (hsize : ∀ d r, good d →
@@ -114,12 +118,12 @@ theorem forward_tagged_sub_payload_le
     |(Pr{let x ← (keyedGameH cipher macS kdfS streamS geom
           𝒜
           (onlyHeader cipher macS streamS geom (tagged macS M)))}[x = true]).toReal
-      - (Pr{let x ← ((forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
+      - (Pr{let x ← ((propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
           names Oth drawO view A M pl viewE).exp true)}[x = true]).toReal|
     ≤ (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom
         𝒜)}[¬ good d]).toReal := by
-  let G := forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
-    names Oth drawO view A M pl viewE
+  let G := propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO
+      view A M pl viewE
   let mx : ProbComp (Vector UInt8 48 × G.X) := do
     let kp ← $ᵗ (Vector UInt8 48)
     let iv ← $ᵗ (Vector UInt8 16)
@@ -130,7 +134,7 @@ theorem forward_tagged_sub_payload_le
       𝒜
       (onlyHeader cipher macS streamS geom (tagged macS M)) z.2.2 (z.1, z.2.1)
   let Gf : Vector UInt8 48 × G.X → ProbComp Bool := fun z =>
-    (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
+    (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ
         (G.sk z.2) (G.c z.2)
         (G.macKey z.2) (G.ks z.2) (G.header z.2)
         (fun y => Util.Bytes.toVecN _
@@ -147,11 +151,11 @@ theorem forward_tagged_sub_payload_le
     rw [(keyedGameH_evalDistEq cipher macS kdfS streamS geom
       𝒜 _).prEvent_eq
       (fun x => x = true)]
-    simp only [mx, F, G, forwardPayloadGame, bind_assoc, pure_bind]
+    simp only [mx, F, G, propPayloadGame, bind_assoc, pure_bind]
   have h2 : Pr{let x ← G.exp true}[x = true] = Pr{let x ← mx >>= Gf}[x = true] := by
     refine EvalDistEq.prEvent_eq ?_ _
     unfold PayloadGame.exp
-    simp only [mx, Gf, G, forwardPayloadGame, bind_assoc, pure_bind, ↓reduceIte]
+    simp only [mx, Gf, G, propPayloadGame, bind_assoc, pure_bind, ↓reduceIte]
     refine EvalDistEq.bind_right _ fun kp => EvalDistEq.bind_right _ fun iv =>
       EvalDistEq.bind_right _ fun r => EvalDistEq.bind_right _ fun d => ?_
     exact (OracleComp.EvalDistEq.bind_const _ _).trans (OracleComp.EvalDistEq.bind_const _ _)
@@ -161,7 +165,7 @@ theorem forward_tagged_sub_payload_le
     have e : (fun z : Vector UInt8 48 × G.X => z.2.2) <$> mx
         =ᵈ keyedDraw cipher macS kdfS streamS geom
           𝒜 := by
-      simp only [mx, G, forwardPayloadGame, map_bind, map_pure, bind_assoc, pure_bind, bind_pure]
+      simp only [mx, G, propPayloadGame, map_bind, map_pure, bind_assoc, pure_bind, bind_pure]
       exact (OracleComp.EvalDistEq.bind_const _ _).trans
         ((OracleComp.EvalDistEq.bind_const _ _).trans (OracleComp.EvalDistEq.bind_const _ _))
     exact (prEvent_map _ (fun z : Vector UInt8 48 × G.X => z.2.2)
@@ -206,12 +210,12 @@ theorem forward_tagged_sub_payload_le
       funext pkt
       unfold onlyHeader
       rw [hHd]
-    have hsk : ∀ h, h ≠ Role.relay → d.cs.2.2.2 h = G.sk ((iv, r), d) h := fun h hr => by
-      simp [G, forwardPayloadGame, hr]
-    have hrel : G.sk ((iv, r), d) .relay = d.k.2 := by
-      simp [G, forwardPayloadGame]
+    have hsk : ∀ h, h ≠ ρ → d.cs.2.2.2 h = G.sk ((iv, r), d) h := fun h hr => by
+      simp [G, propPayloadGame, hr]
+    have hrel : G.sk ((iv, r), d) ρ = d.k.2 := by
+      simp [G, propPayloadGame]
     have hvo := fun patch oa =>
-      viaOracle_onlyHeader kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
+      viaOracle_onlyHeader kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ
       (G.sk ((iv, r), d)) d.c (kp, iv, r) (G.header ((iv, r), d)) hcar patch (α := Bool) oa
       d.cs.2.2.1
     simp only [hrel] at hvo
@@ -219,11 +223,11 @@ theorem forward_tagged_sub_payload_le
         (onlyHeader cipher macS streamS geom (tagged (S := 𝒯) macS M)
           d.cs.1 d.o d.c (kp, iv, r)))
       ((fun out : Bool => out) <$>
-        (simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay d.cs.2.2.2
+        (simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ d.cs.2.2.2
             (view d.cs.1 d.o d.c (kp, iv, r)).patch)
           (A.guess d.cs.2.1 (view d.cs.1 d.o d.c (kp, iv, r)).onion)).run' d.cs.2.2.1) = _
     rw [procImplF_eq_relayImpl, hh, hv, id_map',
-      viaOracle_congr kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
+      viaOracle_congr kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ
         d.cs.2.2.2 (G.sk ((iv, r), d)) hsk]
     simp only [StateT.run'_eq, simulateQ_map]
     rw [hvo]
@@ -233,11 +237,11 @@ theorem forward_tagged_sub_payload_le
 
 omit [SampleableType kem.Plaintext] in
 /-- The honest relays' log after the adversary's first phase is well-formed. -/
-theorem keyedDraw_log_wf :
+theorem propDraw_log_wf :
     ∀ d ∈ support (keyedDraw cipher macS kdfS streamS geom 𝒜), d.cs.2.2.1.WF := by
   intro d hd
   unfold keyedDraw at hd
-  simp only [forwardAdv_pre, mem_support_bind_iff, support_pure, Set.mem_singleton_iff] at hd
+  simp only [propAdv_pre, mem_support_bind_iff, support_pure, Set.mem_singleton_iff] at hd
   obtain ⟨k, -, cs, ⟨kb, -, ks, -, out, hout, rfl⟩, s, -, o, -, rfl⟩ := hd
   exact simulateQ_run_preserves_inv_of_query _ Protocols.RSOR.Log.WF
     (fun t log hw => Protocols.RSOR.oracle_wf _ _ _ t log hw) _ _
@@ -245,30 +249,30 @@ theorem keyedDraw_log_wf :
 
 omit [SampleableType kem.Plaintext] in
 /-- The logs of a world's payload game are well-formed. -/
-theorem forwardPayloadGame_wf (iv : Vector UInt8 16) :
-    ∀ x ∈ support ((forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
-        names Oth drawO view A M pl viewE).draw iv),
-      ((forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
-        names Oth drawO view A M pl viewE).log x).WF := by
+theorem propPayloadGame_wf (iv : Vector UInt8 16) :
+    ∀ x ∈ support ((propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names
+        Oth drawO view A M pl viewE).draw iv),
+      ((propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO
+          view A M pl viewE).log x).WF := by
   intro (x : (Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32) × KeyedDraw 𝒜)
     (hx : x ∈ support (($ᵗ (Vector UInt8 32 × Vector UInt8 32)) >>= fun r =>
       keyedDraw cipher macS kdfS streamS geom 𝒜 >>= fun d => pure ((iv, r), d)))
   obtain ⟨r, -, hx⟩ := (mem_support_bind_iff _ _ _).1 hx
   obtain ⟨d, hd, hx⟩ := (mem_support_bind_iff _ _ _).1 hx
   obtain rfl : x = ((iv, r), d) := by simpa using hx
-  exact keyedDraw_log_wf kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth drawO
+  exact propDraw_log_wf kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO
     view A d hd
 
 omit [SampleableType kem.Plaintext] in
-/-- **The payload cipher step with the ideal cipher, for a world of TLU→.** The world with
+/-- **The payload cipher step with the ideal cipher, for a world of a property.** The world with
 uniform keys at the honest relay and the challenge header only is its `PayloadGame` with the
 ideal cipher, up to the one-block advantage of `PayloadGame.adv` against the cipher and the
 chance of a draw that is not `good`. -/
-theorem forward_tagged_sub_ideal_le
+theorem prop_tagged_sub_ideal_le
     (good : KeyedDraw 𝒜
       → Prop)
     (hMkp : ∀ {pk : Key kem}
-      (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk)
+      (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk)
       (o : Oth) (c : kem.Ciphertext) (kp kp' : Vector UInt8 48) (iv : Vector UInt8 16)
       (ke : Vector UInt8 32), M ch o c (kp, iv, ke) = M ch o c (kp', iv, ke))
     (hsize : ∀ d r, good d →
@@ -282,33 +286,33 @@ theorem forward_tagged_sub_ideal_le
     |(Pr{let x ← (keyedGameH cipher macS kdfS streamS geom
           𝒜
           (onlyHeader cipher macS streamS geom (tagged macS M)))}[x = true]).toReal
-      - (Pr{let x ← ((forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
+      - (Pr{let x ← ((propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
           names Oth drawO view A M pl viewE).exp false)}[x = true]).toReal|
     ≤ |(Pr{let x ← (Primitives.WideBlockCipher.oneQueryExp cipher _
-          (forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
-          names Oth drawO view A M pl viewE).adv true)}[x = true]).toReal
+          (propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO
+              view A M pl viewE).adv true)}[x = true]).toReal
         - (Pr{let x ← (Primitives.WideBlockCipher.oneQueryExp cipher _
-          (forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
-          names Oth drawO view A M pl viewE).adv false)}[x = true]).toReal|
+          (propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO
+              view A M pl viewE).adv false)}[x = true]).toReal|
       + (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom 𝒜)}[¬ good d]).toReal := by
-  have h := forward_tagged_sub_payload_le kem cipher macS kdfS streamS geom hvalid hmactag h16
-    names Oth drawO view A M pl viewE good hMkp hsize hct hview
+  have h := prop_tagged_sub_payload_le kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
+      names Oth drawO view A M pl viewE good hMkp hsize hct hview
   have e := fun b => PayloadGame.exp_eq
-    (forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
-      names Oth drawO view A M pl viewE)
-    (forwardPayloadGame_wf kem cipher macS kdfS streamS geom hvalid hmactag h16
-      names Oth drawO view A M pl viewE) b
+    (propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO view
+        A M pl viewE)
+    (propPayloadGame_wf kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO
+        view A M pl viewE) b
   rw [e true] at h
   rw [e false]
   have t := abs_sub_le
     (Pr{let x ← (keyedGameH cipher macS kdfS streamS geom 𝒜
       (onlyHeader cipher macS streamS geom (tagged macS M)))}[x = true]).toReal
     (Pr{let x ← (Primitives.WideBlockCipher.oneQueryExp cipher _
-      (forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
-          names Oth drawO view A M pl viewE).adv true)}[x = true]).toReal
+      (propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO
+          view A M pl viewE).adv true)}[x = true]).toReal
     (Pr{let x ← (Primitives.WideBlockCipher.oneQueryExp cipher _
-      (forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
-          names Oth drawO view A M pl viewE).adv false)}[x = true]).toReal
+      (propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO
+          view A M pl viewE).adv false)}[x = true]).toReal
   linarith
 
 /-! ## World 0 -/
@@ -357,8 +361,9 @@ def forwardGoodP {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
 /-- World 0 with a one-header relay, as a payload game. -/
 def forwardGameP (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
     PayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 :=
-  forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
-    names (RSOR.Randomness geom) ($ᵗ RSOR.Randomness geom)
+  propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness geom) ($ᵗ
+      RSOR.Randomness geom)
     (fun ch r c t =>
       { onion := onionK kem cipher macS kdfS streamS geom ch.c.req r ch.c.pos c t 0 })
     A (forwardM kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
@@ -389,7 +394,8 @@ theorem forward_payload_le
         (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
           names A))}[¬ forwardGoodP kem cipher macS kdfS streamS geom hvalid hmactag h16 names
             d]).toReal := by
-  refine forward_tagged_sub_ideal_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+  refine prop_tagged_sub_ideal_le kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
     (RSOR.Randomness geom) ($ᵗ RSOR.Randomness geom)
     (fun ch r c t =>
       { onion := onionK kem cipher macS kdfS streamS geom ch.c.req r ch.c.pos c t 0 }) A _ _ _
@@ -499,8 +505,9 @@ def shortGoodP {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
 /-- World 1 with a one-header relay, as a payload game. -/
 def shortGameP (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
     PayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 :=
-  forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
-    names _ (shortDraw geom) (shortView kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+  propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names _ (shortDraw geom) (shortView kem
+      cipher macS kdfS streamS geom hvalid hmactag h16 names)
     A (shortM kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
     (fun ch o _ k => shortBlock kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o k)
     (shortViewE kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
@@ -529,7 +536,8 @@ theorem short_payload_le
         (shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
           names A))}[¬ shortGoodP kem cipher macS kdfS streamS geom hvalid hmactag h16 names
             d]).toReal := by
-  refine forward_tagged_sub_ideal_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+  refine prop_tagged_sub_ideal_le kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
     _ (shortDraw geom) (shortView kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
     A _ _ _
     (shortGoodP kem cipher macS kdfS streamS geom hvalid hmactag h16 names)

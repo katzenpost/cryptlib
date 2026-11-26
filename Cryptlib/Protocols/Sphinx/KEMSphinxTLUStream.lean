@@ -23,7 +23,7 @@ open Cryptlib.Util.Bytes (ofVector)
 
 /-! # The stream cipher step for TLU→
 
-After the payload cipher step, a world of TLU→ uses the honest relay's header encryption key
+After the payload cipher step, a world of a property uses the honest relay's header encryption key
 and IV for one keystream only. So the world is the real experiment of the keystream generator
 `keystreamPRG` for an adversary that plays it from the keystream, and the keystream can be
 replaced by uniform bytes at the cost of that generator's advantage. -/
@@ -41,51 +41,53 @@ local notation "𝒮" => sphinx kem cipher macS kdfS streamS geom hvalid hmactag
 
 variable [SampleableType kem.Plaintext]
 
+variable (P : Protocols.RSOR.Property (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
+  (ρ : Role)
+
 variable (names : Role → RSOR.Name) (Oth : Type) (drawO : ProbComp Oth)
   (view : {pk : Key kem} →
-      ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk
     → Oth → kem.Ciphertext → KeyTuple
     → Protocols.RSOR.World (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
-  (A : (Protocols.RSOR.forwardUnlinkable
-    (S := sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary)
+  (A : P.Adversary)
   (M : {pk : Key kem} →
-      ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk
     → Oth → kem.Ciphertext → RestKeys → ByteArray)
   (pl : {pk : Key kem} →
-      ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk
     → Oth → kem.Ciphertext → Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32
     → Block geom)
   (viewE : {pk : Key kem} →
-      ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk
     → Oth → kem.Ciphertext → Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32
     → Block geom
     → Protocols.RSOR.World (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
 
 local notation "𝒜" =>
-  forwardAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth drawO view A
+  propAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO view A
 
 local notation "𝒯" =>
-  forwardSetupOf kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth drawO view
+  propSetupOf kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO view
 
 variable
   (MU : {pk : Key kem} →
-      ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk
     → Oth → kem.Ciphertext → ByteArray → ByteArray)
   (plU : {pk : Key kem} →
-      ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk
     → Oth → ByteArray → Block geom)
   (viewU : {pk : Key kem} →
-      ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk
+      PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk
     → Oth → kem.Ciphertext → Vector UInt8 32 → ByteArray → Block geom
     → Protocols.RSOR.World (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
 
 /-- The ideal payload game of a world after its draws, from the relay's MAC key and its header
 keystream `U`: `MU` are the header bytes, `plU` the sender's block and `viewU` the world, as
 functions of the keystream. -/
-def forwardRunU (km : Vector UInt8 32) (U : ByteArray) (d : KeyedDraw 𝒜) (u v : Block geom) :
+def propRunU (km : Vector UInt8 32) (U : ByteArray) (d : KeyedDraw 𝒜) (u v : Block geom) :
     ProbComp Bool :=
-  (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
-      (fun h => if h = .relay then d.k.2 else d.cs.2.2.2 h) d.c km U
+  (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ
+      (fun h => if h = ρ then d.k.2 else d.cs.2.2.2 h) d.c km U
       (Util.Bytes.toVecN _ (MU d.cs.1 d.o d.c U
         ++ ofVector (macS.mac (ofVector km) (MU d.cs.1 d.o d.c U))))
       (fun y => if y = u then plU d.cs.1 d.o U else v)
@@ -94,41 +96,42 @@ def forwardRunU (km : Vector UInt8 32) (U : ByteArray) (d : KeyedDraw 𝒜) (u v
 
 /-- The adversary against the keystream generator that plays the ideal payload game of a world
 from the keystream. -/
-def forwardStreamAdv : PRGScheme.PRGAdversary (Keystream geom) := fun U => do
+def propStreamAdv : PRGScheme.PRGAdversary (Keystream geom) := fun U => do
   let km ← $ᵗ (Vector UInt8 32)
   let d ← keyedDraw cipher macS kdfS streamS geom 𝒜
   let u ← $ᵗ (Block geom)
   let v ← $ᵗ (Block geom)
-  forwardRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth drawO view A
+  propRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO view A
     MU plU viewU km (ofVector U) d u v
 
 omit [SampleableType kem.Plaintext] in
-/-- **The stream cipher step, for a world of TLU→.** When the header bytes, the sender's block
+/-- **The stream cipher step, for a world of a property.** When the header bytes, the sender's block
 and the world are functions of the relay's header keystream, the ideal payload game is the real
-experiment of the keystream generator for `forwardStreamAdv`. -/
-theorem forwardPayload_exp_false_eq_prg
+experiment of the keystream generator for `propStreamAdv`. -/
+theorem propPayload_exp_false_eq_prg
     (hM : ∀ {pk : Key kem}
-      (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk)
+      (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk)
       (o : Oth) (c : kem.Ciphertext) (kp : Vector UInt8 48) (iv : Vector UInt8 16)
       (ke : Vector UInt8 32), M ch o c (kp, iv, ke)
         = MU ch o c (streamS.keystream (ofVector ke) (ofVector iv)
           (geom.routingInfoLength + geom.perHopRoutingInfoLength)))
     (hpl : ∀ {pk : Key kem}
-      (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk)
+      (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk)
       (o : Oth) (c : kem.Ciphertext) (iv : Vector UInt8 16) (km ke : Vector UInt8 32),
       pl ch o c (iv, km, ke)
         = plU ch o (streamS.keystream (ofVector ke) (ofVector iv)
           (geom.routingInfoLength + geom.perHopRoutingInfoLength)))
     (hviewE : ∀ {pk : Key kem}
-      (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk)
+      (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names pk)
       (o : Oth) (c : kem.Ciphertext) (iv : Vector UInt8 16) (km ke : Vector UInt8 32)
       (e : Block geom), viewE ch o c (iv, km, ke) e
         = viewU ch o c km (streamS.keystream (ofVector ke) (ofVector iv)
           (geom.routingInfoLength + geom.perHopRoutingInfoLength)) e) :
-    Pr{let x ← ((forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
-        names Oth drawO view A M pl viewE).exp false)}[x = true]
+    Pr{let x ← ((propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
+        P ρ names Oth drawO view A M pl viewE).exp
+        false)}[x = true]
       = Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
-        (forwardStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth drawO
+        (propStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO
           view A MU plU viewU))}[x = true] := by
   refine EvalDistEq.prEvent_eq ?_ _
   have hb : ∀ {α β : Type},
@@ -139,20 +142,20 @@ theorem forwardPayload_exp_false_eq_prg
       let d ← keyedDraw cipher macS kdfS streamS geom 𝒜
       let u ← $ᵗ (Block geom)
       let v ← $ᵗ (Block geom)
-      forwardRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth drawO view A
+      propRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO view A
         MU plU viewU km (streamS.keystream (ofVector ke) (ofVector iv)
           (geom.routingInfoLength + geom.perHopRoutingInfoLength)) d u v
   have hbody : ∀ (iv : Vector UInt8 16) (km ke : Vector UInt8 32) (d : KeyedDraw 𝒜)
       (u v : Block geom),
-      (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay
-          (fun h => if h = .relay then d.k.2 else d.cs.2.2.2 h) d.c km
+      (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ
+          (fun h => if h = ρ then d.k.2 else d.cs.2.2.2 h) d.c km
           (streamS.keystream (ofVector ke) (ofVector iv)
           (geom.routingInfoLength + geom.perHopRoutingInfoLength))
           (Util.Bytes.toVecN _ (tagged (S := 𝒯) macS M d.cs.1 d.o d.c (default, iv, km, ke)))
           (fun y => if y = u then pl d.cs.1 d.o d.c (iv, km, ke) else v)
           (viewE d.cs.1 d.o d.c (iv, km, ke) u).patch)
         (A.guess d.cs.2.1 (viewE d.cs.1 d.o d.c (iv, km, ke) u).onion)).run' d.cs.2.2.1
-      = forwardRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth drawO view A
+      = propRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO view A
         MU plU viewU km (streamS.keystream (ofVector ke) (ofVector iv)
           (geom.routingInfoLength + geom.perHopRoutingInfoLength)) d u v := by
     intro iv km ke d u v
@@ -165,28 +168,29 @@ theorem forwardPayload_exp_false_eq_prg
       unfold tagged restOf
       dsimp only
       rw [hM d.cs.1 d.o d.c default iv ke]
-    unfold forwardRunU
+    unfold propRunU
     rw [hT, hpl d.cs.1 d.o d.c iv km ke, hviewE d.cs.1 d.o d.c iv km ke u]
-  have h0 : (forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
-        names Oth drawO view A M pl viewE).exp false
+  have h0 : (propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
+      P ρ names Oth drawO view A M pl viewE).exp
+      false
       = (do
         let _ ← $ᵗ (Vector UInt8 48)
         let iv ← $ᵗ (Vector UInt8 16)
         let r ← $ᵗ (Vector UInt8 32 × Vector UInt8 32)
         K iv r.1 r.2) := by
     unfold PayloadGame.exp
-    simp only [forwardPayloadGame, bind_assoc, pure_bind, Bool.false_eq_true, ↓reduceIte, K]
+    simp only [propPayloadGame, bind_assoc, pure_bind, Bool.false_eq_true, ↓reduceIte, K]
     refine bind_congr fun kp => bind_congr fun iv => bind_congr fun r => bind_congr fun d =>
       bind_congr fun u => bind_congr fun v => ?_
     exact hbody iv r.1 r.2 d u v
   have hR : PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
-        (forwardStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names Oth drawO
+        (propStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth drawO
           view A MU plU viewU)
       = (do
         let s ← $ᵗ (Vector UInt8 32 × Vector UInt8 16)
         let km ← $ᵗ (Vector UInt8 32)
         K s.2 km s.1) := by
-    unfold PRGScheme.prgRealExperiment forwardStreamAdv keystreamPRG
+    unfold PRGScheme.prgRealExperiment propStreamAdv keystreamPRG
     simp only [K, Cryptlib.Util.Bytes.ofVector_toVecN _ (streamS.keystream_size _ _ _)]
   rw [h0, hR]
   refine (OracleComp.EvalDistEq.bind_const _ _).trans ?_
@@ -235,7 +239,8 @@ def forwardViewU {pk : Key kem}
 /-- The adversary against the keystream generator that plays world 0. -/
 def forwardStreamAdv0 (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
     PRGScheme.PRGAdversary (Keystream geom) :=
-  forwardStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+  propStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
     (RSOR.Randomness geom) ($ᵗ RSOR.Randomness geom)
     (fun ch r c t =>
       { onion := onionK kem cipher macS kdfS streamS geom ch.c.req r ch.c.pos c t 0 }) A
@@ -279,7 +284,8 @@ theorem forward_stream_le (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Ad
       = Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
         (forwardStreamAdv0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names
           A))}[x = true] :=
-    forwardPayload_exp_false_eq_prg kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+    propPayload_exp_false_eq_prg kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
       (RSOR.Randomness geom) ($ᵗ RSOR.Randomness geom)
     (fun ch r c t =>
       { onion := onionK kem cipher macS kdfS streamS geom ch.c.req r ch.c.pos c t 0 }) A _ _ _ _ _ _
@@ -353,7 +359,8 @@ def shortViewU {pk : Key kem}
 /-- The adversary against the keystream generator that plays world 1. -/
 def shortStreamAdv (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
     PRGScheme.PRGAdversary (Keystream geom) :=
-  forwardStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+  propStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
     _ (shortDraw geom) (shortView kem cipher macS kdfS streamS geom hvalid hmactag h16 names) A
     (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
     (shortBlockU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
@@ -395,7 +402,8 @@ theorem short_stream_le (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adve
       = Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
         (shortStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
           A))}[x = true] :=
-    forwardPayload_exp_false_eq_prg kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+    propPayload_exp_false_eq_prg kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
       _ (shortDraw geom) (shortView kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
       A _ _ _ _ _ _
       (fun _ _ _ _ _ _ => rfl) (fun _ _ _ _ _ _ => rfl) (fun _ _ _ _ _ _ _ => rfl)
