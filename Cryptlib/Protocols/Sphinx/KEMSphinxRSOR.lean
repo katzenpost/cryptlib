@@ -181,11 +181,18 @@ def formBack (q : Request kem geom) (r : Randomness geom) (m : Msg geom)
       (r.2.1.1.toArray.extract 0 hops.size) (first.extract geom.headerLength first.size) j)
   | .error _ => default
 
-/-- The reply to an unwrapped packet, built from the SURB in its payload. -/
+/-- Whether a relay delivers a packet with these commands: they name a recipient and carry
+no reply block. -/
+def delivers (cmds : List RoutingCommand) : Bool :=
+  cmds.any (fun | .recipient _ => true | _ => false)
+    && !cmds.any (fun | .surbReply _ => true | _ => false)
+
+/-- The reply to an unwrapped packet, built from the SURB in its payload. A relay replies only
+to a packet it delivers: a reply packet's payload is not read for a SURB. -/
 def replyOf (m : Msg geom) (res : ProcResult) : Option (Name × Onion geom) :=
   match res with
-  | some (some p, _, _, none) =>
-    if p.get! 0 = 1 then
+  | some (some p, _, cmds, none) =>
+    if delivers cmds = true ∧ p.get! 0 = 1 then
       match SURB.newPacketFromSURB cipher geom (p.extract 2 (2 + geom.surbLength)) (pad geom m) with
       | .ok (pkt, next) => some (next, split geom pkt)
       | .error _ => none
@@ -350,7 +357,7 @@ theorem procWith_layer (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize =
   · intro h
     obtain ⟨tag, hun⟩ := hlast (by simp; omega)
     rw [h0] at hun
-    simp only [if_pos h] at hun
+    simp only [ite_eq_left h] at hun
     exact ⟨tag, by
       unfold procWith
       rw [show unwrapKEMWith kem cipher macS kdfS streamS geom _ pkt = _ from hun]
@@ -400,7 +407,7 @@ theorem proc_form (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macL
   rw [(join_split_layer kem cipher macS kdfS streamS geom hvalid hmactag _ _ _ _ _ hpkt).2]
   by_cases h : i + 1 < q.fwd.hops.length
   · obtain ⟨tag, mac, fwd, hp, hnext⟩ := hmid h
-    rw [hp, dif_pos h, hnext]
+    rw [hp, dite_eq_left h, hnext]
     simp
   · obtain ⟨tag, hp⟩ := hlast (by omega)
     have hmsg : msgOf geom (body kem macS kdfS streamS geom q r) = q.msg := by
@@ -411,7 +418,7 @@ theorem proc_form (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macL
       rw [Cryptlib.Util.Bytes.size_ofVector] at this
       rw [ByteArray.size_append, Cryptlib.Util.Bytes.size_ofVector, Nat.add_sub_cancel, this,
         toVecN_ofVector]
-    rw [hp, dif_neg h, hasSurbReply_eq_false (by simp), if_neg Bool.false_ne_true]
+    rw [hp, dite_eq_right h, hasSurbReply_eq_false (by simp), ite_eq_right Bool.false_ne_true]
     simp [hmsg]
 
 /-- The keys that open a reply, as `newKEMSURB` lays them out: the hops' payload keys, last hop
@@ -528,14 +535,14 @@ theorem decryptSURBPayload_surbKeys (keys : Array SPRPKey) (kp : Vector UInt8 64
             ((surbKeys keys kp).extract (a * 64 + 48) (a * 64 + 64)) b)
       (fun j => y (keys.size - j)) keys.size 0 (fun j hj => by
         simp only [Nat.zero_add]
-        rw [if_neg (by simp; omega), (hch j hj).1, (hch j hj).2]
+        rw [ite_eq_right (by simp; omega), (hch j hj).1, (hch j hj).2]
         show _ = cipher.encrypt keys[keys.size - 1 - j]!.key.toArray _ _
         rw [show keys.size - j = keys.size - 1 - j + 1 by omega, hy _ (by omega),
           encrypt_decrypt cipher _ _ _ (by rw [hys _ (by omega)]; exact h16)]
         congr 1
         omega)
     simp only [Nat.sub_zero, Nat.sub_self] at hin
-    rw [hin, if_pos (by simp), hk1, hk2, hy0,
+    rw [hin, ite_eq_left (by simp), hk1, hk2, hy0,
       cipher.roundTrip _ _ _ (by rw [ByteArray.size_append, hz]; exact h16)]
   have htag : ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ pl).extract 0
       geom.payloadTagLength = ⟨Array.replicate geom.payloadTagLength 0⟩ := by
@@ -546,12 +553,12 @@ theorem decryptSURBPayload_surbKeys (keys : Array SPRPKey) (kp : Vector UInt8 64
   simp only [sprpKeyMaterialLength, sprpKeyLength, sprpIVLength, streamIVLength, Nat.reduceAdd,
     hmod, hdiv, Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
     Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl]
-  rw [if_neg (by simp), if_neg (by rw [hys _ le_rfl]; omega)]
+  rw [ite_eq_right (by simp), ite_eq_right (by rw [hys _ le_rfl]; omega)]
   simp only [pure_bind, hfold, htag]
   have hall : ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray).data.all fun x => x == 0)
       = true := by
     exact Array.all_eq_true_iff_forall_mem.2 (by simp)
-  rw [if_neg (by rw [hall]; simp),
+  rw [ite_eq_right (by rw [hall]; simp),
     extract_append_tail _ _ _ _ hz (by rw [ByteArray.size_append, hz])]
   rfl
 
@@ -605,7 +612,7 @@ theorem newPacketFromSURB_eq (hdr : ByteArray) (id : Vector UInt8 32) (kp : Vect
       Nat.add_sub_cancel_left]
   unfold SURB.newPacketFromSURB
   simp only [nodeIDLength, sprpKeyLength]
-  rw [if_neg (by rw [hsize]; simp)]
+  rw [ite_eq_right (by rw [hsize]; simp)]
   simp only [h1, h2, h3, h4, toVec32_eq_toVecN, toVecN_ofVector]
   rfl
 
@@ -783,7 +790,7 @@ theorem reply_form (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = mac
     q.fwd [.recipient q.receiver] (by simp) (by simp) r.1 _ i i.isLt sk
     (key_of_keygen kem _ _ hk) hr.1.1 pkt hpkt
   obtain ⟨tag, hp⟩ := hlast hi
-  rw [hasSurbReply_eq_false (by simp), if_neg Bool.false_ne_true] at hp
+  rw [hasSurbReply_eq_false (by simp), ite_eq_right Bool.false_ne_true] at hp
   obtain ⟨-, x0, keys, hx0, -, -, -, hnp, hP0⟩ :=
     replyPacket_eq kem cipher macS kdfS streamS geom hvalid hmactag q r m hr hjlt
   have hss : (surb kem macS kdfS streamS geom q r).1.size = geom.surbLength := by
@@ -814,7 +821,7 @@ theorem reply_form (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = mac
   dsimp only
   rw [(join_split_layer kem cipher macS kdfS streamS geom hvalid hmactag _ _ _ _ _ hpkt).2, hp]
   dsimp only
-  rw [if_pos hfl, hsb, hnp, hx0]
+  rw [ite_eq_left ⟨rfl, hfl⟩, hsb, hnp, hx0]
   dsimp only
   rw [hP0]
   rfl

@@ -175,6 +175,15 @@ Not proved yet: those two; SLU← and STI↔ for KEM Sphinx; all three for NIKE 
 
 ### SLU← (in progress)
 
+The self-test found the game distinguishable as first stated. In world 0 the adversary could
+ask the honest sender to reply to the reply's last layer. The scheme's reply rule read any
+decrypted payload whose first byte is 1 as carrying a SURB, on a reply packet too, where the
+payload is not checked. The sender answered in 9 of 3000 runs, about 1 in 256, and never in
+world 1. The rule now replies only to a packet the relay delivers (`RSOR.delivers`,
+`RSOR.replyOf`): one that names a recipient and carries no reply block. The self-test asks the
+sender in both worlds (`runBackwardSenderReply`); neither answers. NIKE Sphinx has the old
+rule still.
+
 A reply's layers are the layers of a packet over the backward path, with only the payload
 swapped for the reply's (`formBack_fst`), and the reply block in the sender's payload is the
 header of the first of them (`surb_fst`). So the lemmas about keyed layers proved for TLU→

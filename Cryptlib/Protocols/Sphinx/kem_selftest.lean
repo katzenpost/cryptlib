@@ -621,6 +621,52 @@ def runBackwardGame (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem
     IO.eprintln "  runBackwardGame: the paths are not routes"
     pure false
 
+/-- SLU←, the sender's reply oracle. After the honest run with the honest relay on the backward
+path, the adversary asks the sender to reply to the last layer it was given. Neither world may
+answer. Counts the answers over `trials` runs. -/
+def runBackwardSenderReply (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) (trials : Nat) : IO Bool := do
+  let mut n0 := 0
+  let mut n1 := 0
+  for _ in [0:trials] do
+    let (first, firstKey) ← newRelay kem
+    let (relay, relayKey) ← newRelay kem
+    let (other, otherKey) ← newRelay kem
+    let (sender, senderKey) ← newRelay kem
+    let hon : Honest (sch kem geom hvalid h16) :=
+      fun | .relay => relay | .back => other | .sender => sender
+    let sk : Role → kem.PrivateKey :=
+      fun | .relay => relayKey | .back => otherKey | .sender => senderKey
+    let answer : RSOR.Msg geom ← randomVector _
+    let msg : RSOR.Msg geom ← randomVector _
+    let receiver : RSOR.Name ← randomVector 32
+    if h : 2 ≤ geom.nrHops ∧ ([first, other].map Hop.name).Nodup ∧
+        ([relay, sender].map Hop.name).Nodup then
+      let c : BackwardChallenge (S := sch kem geom hvalid h16) hon :=
+        { req := { msg, receiver, fwd := ⟨[first, other], h.1, h.2.1⟩,
+                   back := ⟨[relay, sender], h.1, h.2.2⟩, fwd_ne := by simp }
+          pos := ⟨1, Nat.one_lt_two⟩, relay := rfl, sender := rfl }
+      for b in [false, true] do
+        let w ← OracleComp.runIO (Cryptlib.Protocols.RSOR.backwardUnlinkable.world c b)
+        let s1 := advProc (hvalid := hvalid) (h16 := h16) firstKey w.onion
+        let o1 := passedOn w.onion s1
+        let re : Option (RSOR.Name × RSOR.Onion geom) :=
+          (sch kem geom hvalid h16).reply otherKey (default : Vector UInt8 32) answer o1
+        let ob := (re.map (·.2)).getD o1
+        let (s3, log) ← askProc hon sk w {} .relay ob
+        let last := passedOn ob s3
+        let (_, log) ← askProc hon sk w log .sender last
+        let (re2, _) ← askReply hon sk w log .sender answer last
+        if re2.isSome then
+          if b then n1 := n1 + 1 else n0 := n0 + 1
+    else
+      IO.eprintln "  runBackwardSenderReply: the paths are not routes"
+      return false
+  let ok := n0 == 0 && n1 == 0
+  IO.println (s!"SLU← game, the sender asked to reply to the last layer ({trials} runs): "
+    ++ s!"world 0 answered {n0} times, world 1 {n1} times: {if ok then "ok" else "FAIL"}")
+  pure ok
+
 /-- STI↔. The adversary is shown the layer that leaves the honest first relay, and the honest
 backward relay is the second of three. -/
 def runTailGame (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
@@ -735,6 +781,7 @@ def runSuite (schemeName : String) (kem : KEM) : IO Bool := do
     ok := (← runForwardGame kem geom5surb hvalid5s h165s atExit tag) && ok
   for atExit in [true, false] do
     ok := (← runBackwardGame kem geom5surb hvalid5s h165s atExit) && ok
+  ok := (← runBackwardSenderReply kem geom5surb hvalid5s h165s 5) && ok
   ok := (← runTailGame kem geom5surb hvalid5s h165s) && ok
 
   pure ok

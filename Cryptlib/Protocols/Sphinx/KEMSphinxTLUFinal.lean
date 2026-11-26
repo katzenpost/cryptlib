@@ -918,8 +918,9 @@ include hvalid hmactag in
 /-- **A reply from the sender's own payload is the first layer of the reply onion.** -/
 theorem replyOf_body (q : Request kem geom) (r : Randomness geom) (m : Msg geom)
     (hr : Reliable kem cipher macS kdfS streamS geom q r) (hjlt : 0 < q.back.hops.length)
-    (tag : Vector UInt8 32) (cmds : List RoutingCommand) :
-    replyOf cipher geom m (some (some (body kem macS kdfS streamS geom q r), tag, cmds, none))
+    (tag rc : Vector UInt8 32) :
+    replyOf cipher geom m
+        (some (some (body kem macS kdfS streamS geom q r), tag, [.recipient rc], none))
       = some (q.back.hops[0].name,
         formBack kem cipher macS kdfS streamS geom q r m ⟨0, hjlt⟩) := by
   obtain ⟨-, x0, keys, hx0, -, -, -, hnp, hP0⟩ :=
@@ -948,7 +949,7 @@ theorem replyOf_body (q : Request kem geom) (r : Randomness geom) (m : Msg geom)
     exact extract_append_tail _ _ _ _ rfl (by rw [hss])
   unfold replyOf formBack
   dsimp only
-  rw [ite_eq_left hfl, hsb, hnp, hx0]
+  rw [ite_eq_left ⟨rfl, hfl⟩, hsb, hnp, hx0]
   dsimp only
   rw [hP0]
   rfl
@@ -1132,9 +1133,9 @@ theorem headerRelays_last_eq {pk : Key kem} {keys : Role → Key kem × kem.Priv
     by_cases ho : o2 = mine.2
     · subst ho
       refine (ite_eq_left ⟨rfl, rfl, hl⟩).trans ?_
-      rw [ite_eq_left rfl, ite_eq_left hB₀, hbody,
-        RSOR.replyOf_body kem cipher macS kdfS streamS geom hvalid hmactag c.req r m hr hjlt]
-      rfl
+      rw [ite_eq_left rfl, ite_eq_left hB₀, hbody]
+      exact (RSOR.replyOf_body kem cipher macS kdfS streamS geom hvalid hmactag c.req r m hr hjlt
+        _ _).symm
     · refine (ite_eq_right fun hx' => ho (congrArg Prod.snd hx'.2.1)).trans ?_
       rw [ite_eq_right ho, ite_eq_right ho, ite_eq_right hv, ite_eq_right hv]
   · unfold Protocols.RSOR.ForwardChallenge.patchDrawn
@@ -1216,7 +1217,7 @@ theorem short_noreply (k : Key kem × kem.PrivateKey)
     have hfl := RSOR.body_get_zero kem macS kdfS streamS geom (ch.c.short msg nm) r' rfl
     unfold RSOR.replyOf
     dsimp only
-    rw [ite_eq_right (by rw [hfl]; decide)]
+    rw [ite_eq_right (fun h => absurd (hfl ▸ h.2) (by decide))]
   · rw [ite_eq_right hou, ite_eq_right hv]
 
 /-! ## World 1 is world 0 under the relabelling, before the end of the path -/
