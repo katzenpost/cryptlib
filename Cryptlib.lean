@@ -110,6 +110,7 @@ import Cryptlib.Protocols.Sphinx.KEMSphinxTLUPayload
 import Cryptlib.Protocols.Sphinx.KEMSphinxTLUStream
 import Cryptlib.Protocols.Sphinx.KEMSphinxTLUNext
 import Cryptlib.Protocols.Sphinx.KEMSphinxPad
+import Cryptlib.Protocols.Sphinx.KEMSphinxWrap
 import Cryptlib.Protocols.Sphinx.KEMSphinxTLUFinal
 import Cryptlib.Protocols.Sphinx.KEMSphinxProp
 import Cryptlib.Protocols.Sphinx.KEMSphinxSLU
