@@ -93,12 +93,19 @@ The cipher game gives the adversary a decryption oracle that answers for one blo
 it is asked about. The relay asks it twice about the same block when it replies to an onion it
 has processed, which is why the oracle remembers its block instead of answering once.
 
+- The stream cipher step, for each world (`forward_stream_le`, `short_stream_le`). After the
+  payload step the relay uses its header encryption key and IV for one keystream only, so the
+  world is the real experiment of the keystream generator `keystreamPRG`
+  (`forwardPayload_exp_false_eq_prg`), and the keystream can be replaced by uniform bytes at
+  the cost of that generator's advantage. Each world is then a game played from a uniform
+  keystream, a uniform encrypted block and the relay's MAC key.
+
 For this step a draw is good only if the sender's block at the relay has a payload's length.
 That it always has, when the onion can be built, is not proved yet.
 
-Not proved yet: the rest of the bound on that last distance (the stream cipher, and that the
-two ideal worlds agree); a bound on the bad draws; SLU← and STI↔ for KEM Sphinx; all three for
-NIKE Sphinx.
+Not proved yet: that the two worlds played from a uniform keystream agree, which needs the keys
+of the original onion's own layer at the relay replaced in world 1; a bound on the bad draws;
+SLU← and STI↔ for KEM Sphinx; all three for NIKE Sphinx.
 
 ## How the bounds are built
 
