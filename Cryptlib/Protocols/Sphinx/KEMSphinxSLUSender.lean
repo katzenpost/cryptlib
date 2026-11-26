@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Cryptlib.Protocols.Sphinx.KEMSphinxSLU
 import Cryptlib.Protocols.Sphinx.KEMSphinxWrap
+import Cryptlib.Protocols.Sphinx.KEMSphinxTLUFinal
 
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
 
@@ -187,6 +188,101 @@ theorem lastLayer_swap (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize =
         ++ ofVector (macS.mac (ofVector km) (relayFrontLast kem kdfS streamS geom (RSOR.path kem R
             [.surbReply sid]) d j c U))) ++ P).extract 0 geom.headerLength) = _
     rw [← hHs', Util.Bytes.extract_append_left]
+
+set_option maxHeartbeats 2000000 in
+/-- **The last hop replies to neither.** Under the last header of the reply header, with any
+decrypted payload, the last hop does not reply: a reply packet is not read for a SURB. Under
+the same header read with the shifted keystream, as the forward onion's last header, it does
+not reply either: the onion's own block carries no reply block, and the block given for a
+changed payload does not begin with the zero tag. -/
+theorem lastLayer_noreply (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem)) (n : Vector UInt8 32)
+    (sid : Vector UInt8 16) (d : RSOR.Draw geom) (j : ℕ) (hj : j + 1 = R.hops.length)
+    (c U : ByteArray) (km : Vector UInt8 32) (body : ByteArray)
+    (hc : c.size = kem.ciphertextSize)
+    (hU : U.size = geom.routingInfoLength + geom.perHopRoutingInfoLength)
+    (hbs : body.size = geom.forwardPayloadLength) (hfl : body.get! 0 = 0)
+    (hx : 0 < geom.payloadTagLength + geom.forwardPayloadLength)
+    (u v x y : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (hv : ¬ ((ofVector v).extract 0 geom.payloadTagLength).data.all (· == 0) = true)
+    (m : RSOR.Msg geom) :
+    RSOR.replyOf cipher geom m (procKeysD kem macS geom km (lastShift geom kem kdfS streamS
+        (RSOR.path kem R [.recipient n]) (RSOR.path kem R [.surbReply sid]) d d j c U)
+        (ofVector (if y = u then
+            Util.Bytes.toVecN _ (relayBackAt kem cipher macS kdfS streamS geom (RSOR.path kem R
+                [.recipient n]) d body j (lastShift geom kem kdfS streamS (RSOR.path kem R
+                [.recipient n]) (RSOR.path kem R [.surbReply sid]) d d j c U) id)
+          else v))
+        (RSOR.join (Util.Bytes.toVecN geom.headerLength ((relayFrontLast kem kdfS streamS geom
+            (RSOR.path kem R [.surbReply sid]) d j c U)
+          ++ ofVector (macS.mac (ofVector km) (relayFrontLast kem kdfS streamS geom (RSOR.path kem
+              R [.surbReply sid]) d j c U))), y))) = none
+    ∧ RSOR.replyOf cipher geom m (procKeysD kem macS geom km U (ofVector x)
+        (RSOR.join (Util.Bytes.toVecN geom.headerLength ((relayFrontLast kem kdfS streamS geom
+            (RSOR.path kem R [.surbReply sid]) d j c U)
+          ++ ofVector (macS.mac (ofVector km) (relayFrontLast kem kdfS streamS geom (RSOR.path kem
+              R [.surbReply sid]) d j c U))), y))) = none := by
+  obtain ⟨-, -, hrouting, -, -, -⟩ := id hvalid
+  have hle := R.length_le
+  have hjl : j < R.hops.length := by omega
+  have hpF : j + 1 = (RSOR.path kem R [.recipient n]).size := hj.trans (RSOR.path_size kem R _).symm
+  have hpR : j + 1 = (RSOR.path kem R [.surbReply sid]).size := hj.trans (RSOR.path_size kem R
+      _).symm
+  have hlF : (RSOR.path kem R [.recipient n]).size ≤ geom.nrHops := le_of_eq_of_le (RSOR.path_size
+      kem R _) hle
+  have hlR : (RSOR.path kem R [.surbReply sid]).size ≤ geom.nrHops := le_of_eq_of_le
+      (RSOR.path_size kem R _) hle
+  have hcF : ((RSOR.path kem R [.recipient n])[j]!).commands = [.recipient n] := by
+    rw [RSOR.path_getElem! kem R _ j hjl]
+    exact ite_eq_left hj
+  have hcR : ((RSOR.path kem R [.surbReply sid])[j]!).commands = [.surbReply sid] := by
+    rw [RSOR.path_getElem! kem R _ j hjl]
+    exact ite_eq_left hj
+  have hVs := lastShift_size geom kem kdfS streamS hrouting (RSOR.path kem R [.recipient n])
+      (RSOR.path kem R [.surbReply sid]) d d j c U
+    (by omega) hU
+  have hsF := relayFrontLast_size geom kem kdfS streamS hvalid (RSOR.path kem R [.recipient n]) d j
+      c _ hpF hlF hVs hc n
+    hcF
+  have hsR := relayFrontLast_size_reply geom kem kdfS streamS hvalid (RSOR.path kem R [.surbReply
+      sid]) d j c U hpR hlR hU
+    hc sid hcR
+  have hkeys : ∀ i, i < j → kemHopKeys kem kdfS (RSOR.path kem R [.recipient n])
+      (d.1.toArray.extract 0 (RSOR.path kem R [.recipient n]).size) i
+      = kemHopKeys kem kdfS (RSOR.path kem R [.surbReply sid]) (d.1.toArray.extract 0 (RSOR.path
+          kem R [.surbReply sid]).size) i := by
+    intro i hi
+    unfold kemHopKeys
+    rw [RSOR.path_size, RSOR.path_size, RSOR.path_getElem! kem R _ i (by omega),
+      RSOR.path_getElem! kem R _ i (by omega)]
+  have hspec := (lastShift_spec_of_size geom kem kdfS streamS hvalid (RSOR.path kem R [.recipient
+      n]) (RSOR.path kem R [.surbReply sid]) d d j c U
+    hpF hlF hpR hU hc hkeys hsF hsR).2
+  refine ⟨?_, replyOf_relayFrontLast_reply geom kem kdfS streamS cipher macS hvalid hmactag
+    (RSOR.path kem R [.surbReply sid]) d j c U km x y hpR hlR hU hc hsR hx sid hcR m⟩
+  have h := replyOf_relayFrontLast geom kem kdfS streamS cipher macS hvalid hmactag (RSOR.path kem
+      R [.recipient n]) d j c
+    (lastShift geom kem kdfS streamS (RSOR.path kem R [.recipient n]) (RSOR.path kem R [.surbReply
+        sid]) d d j c U) km
+    (if y = u then Util.Bytes.toVecN _ (relayBackAt kem cipher macS kdfS streamS geom (RSOR.path
+        kem R [.recipient n]) d body j (lastShift geom kem kdfS streamS (RSOR.path kem R
+        [.recipient n]) (RSOR.path kem R [.surbReply sid]) d d j c U) id) else v) y
+    hpF hlF hVs hc hsF hx n hcF m
+  rw [hspec] at h
+  refine h.trans ?_
+  by_cases hyu : y = u
+  · have eB : relayBackAt kem cipher macS kdfS streamS geom (RSOR.path kem R [.recipient n]) d body
+      j (lastShift geom kem kdfS streamS (RSOR.path kem R [.recipient n]) (RSOR.path kem R
+      [.surbReply sid]) d d j c U) id
+        = (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ body := by
+      unfold relayBackAt
+      exact ite_eq_right (Nat.not_lt.2 (Nat.le_of_eq hpF.symm))
+    obtain ⟨hB, hbd⟩ := RSOR.zeroTag_block geom body hbs
+    rw [ite_eq_left hyu, eB, ite_eq_left hB, hbd]
+    unfold RSOR.replyOf
+    dsimp only
+    rw [ite_eq_right (fun h => absurd (hfl ▸ h.2) (by decide))]
+  · rw [ite_eq_right hyu, ite_eq_right hv]
 
 end LastLayer
 
@@ -1684,6 +1780,124 @@ theorem swapPair_le_keyedIdeal (names : Role → RSOR.Name) (A : (Protocols.RSOR
             (swapReplyAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[x =
                 true]).toReal)
   exact abs_le.2 ⟨by linarith, by linarith⟩
+
+omit [SampleableType kem.Plaintext] in
+set_option maxHeartbeats 2000000 in
+/-- **The two worlds from a uniform keystream at the sender show the same.** World 1 with the
+fresh onion, at the sender's keystream with its head shifted, is world 1′ with the fresh
+onion's block under the hops in front as the payload sent on. -/
+theorem swapViewU_eq (names : Role → RSOR.Name) {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.swapPair
+        (Protocols.RSOR.freshSwap (S := 𝒮)) (replySwap kem cipher macS kdfS streamS geom hvalid
+        hmactag h16)) .sender names pk) (r r' : RSOR.Randomness geom)
+    (m : RSOR.Msg geom) (n : RSOR.Name) (c : kem.Ciphertext) (km : Vector UInt8 32)
+    (U : ByteArray) (u e' : Block geom)
+    (hU : U.size = geom.routingInfoLength + geom.perHopRoutingInfoLength)
+    (hctF : (∀ i, i < ((ch.c.req.back.drop ch.c.pos).hops.length - 1) → (kemHopCt kem ((RSOR.path
+        kem (ch.c.req.back.drop ch.c.pos) [.recipient n]).extract i (RSOR.path kem
+        (ch.c.req.back.drop ch.c.pos) [.recipient n]).size)
+      ((r'.1.1.toArray.extract 0 (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.recipient
+          n]).size).extract i
+        (r'.1.1.toArray.extract 0 (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.recipient
+            n]).size).size) 0).size = kem.ciphertextSize))
+    (hctR : (∀ i, i < ((ch.c.req.back.drop ch.c.pos).hops.length - 1) → (kemHopCt kem ((RSOR.path
+        kem (ch.c.req.back.drop ch.c.pos) [.surbReply r'.2.2.2]).extract i (RSOR.path kem
+        (ch.c.req.back.drop ch.c.pos) [.surbReply r'.2.2.2]).size)
+      ((r'.1.1.toArray.extract 0 (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.surbReply
+          r'.2.2.2]).size).extract i
+        (r'.1.1.toArray.extract 0 (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.surbReply
+            r'.2.2.2]).size).size) 0).size = kem.ciphertextSize)) :
+    swapFreshViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch (r, m, n, r') c km
+        (lastShift geom kem kdfS streamS (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.recipient
+        n]) (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.surbReply r'.2.2.2]) r'.1 r'.1
+        ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c)) U) u
+      = swapReplyViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch (r, r',
+          (toVecN _ (payUp kem cipher kdfS geom (RSOR.path kem (ch.c.req.back.drop ch.c.pos)
+          [.recipient n]) r'.1 0 ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ofVector u)))) c
+          km U e' := by
+  have hJ : ((ch.c.req.back.drop ch.c.pos).hops.length - 1) + 1 = (ch.c.req.back.drop
+      ch.c.pos).hops.length :=
+    Nat.sub_add_cancel (List.length_pos_iff.2 (ch.c.req.back.drop_ne ch.c.pos.isLt))
+  obtain ⟨h1, -, h3, -, h5⟩ := lastLayer_swap kem cipher macS kdfS streamS geom hvalid hmactag
+      (ch.c.req.back.drop ch.c.pos) n r'.2.2.2 r'.1 ((ch.c.req.back.drop ch.c.pos).hops.length - 1)
+    hJ (ofVector (kem.encodeCiphertext c)) U km (RSOR.body kem macS kdfS streamS geom
+        (Protocols.RSOR.BackwardChallenge.swapReq ch.c m n) r') (Util.Bytes.size_ofVector _) hU
+        hctF hctR
+  obtain ⟨-, h2, -, h4, -⟩ := lastLayer_swap kem cipher macS kdfS streamS geom hvalid hmactag
+      (ch.c.req.back.drop ch.c.pos) n r'.2.2.2 r'.1 ((ch.c.req.back.drop ch.c.pos).hops.length - 1)
+    hJ (ofVector (kem.encodeCiphertext c)) U km ⟨Array.replicate geom.forwardPayloadLength 0⟩
+        (Util.Bytes.size_ofVector _) hU hctF hctR
+  change Protocols.RSOR.BackwardChallenge.world1With ch.c
+      (RSOR.form kem cipher macS kdfS streamS geom ch.c.req r ch.c.req.first)
+      (Protocols.RSOR.BackwardChallenge.ownAt ch.c r) (Protocols.RSOR.BackwardChallenge.exitAt ch.c
+          r)
+      (RSOR.split geom (wrapUp kem cipher macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop
+          ch.c.pos) [.recipient n]) r'.1 0 ((ch.c.req.back.drop ch.c.pos).hops.length - 1)
+      ((relayFrontAt kem cipher macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop ch.c.pos)
+          [.recipient n]) r'.1 (RSOR.body kem macS kdfS streamS geom
+          (Protocols.RSOR.BackwardChallenge.swapReq ch.c m n) r') ((ch.c.req.back.drop
+          ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c)) (lastShift geom kem kdfS
+          streamS (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.recipient n]) (RSOR.path kem
+          (ch.c.req.back.drop ch.c.pos) [.surbReply r'.2.2.2]) r'.1 r'.1 ((ch.c.req.back.drop
+          ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c)) U))
+        ++ ofVector (macS.mac (ofVector km) (relayFrontAt kem cipher macS kdfS streamS geom
+            (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.recipient n]) r'.1 (RSOR.body kem macS
+            kdfS streamS geom (Protocols.RSOR.BackwardChallenge.swapReq ch.c m n) r')
+            ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c))
+            (lastShift geom kem kdfS streamS (RSOR.path kem (ch.c.req.back.drop ch.c.pos)
+            [.recipient n]) (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.surbReply r'.2.2.2])
+            r'.1 r'.1 ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ofVector
+            (kem.encodeCiphertext c)) U)))
+        ++ ofVector u)))
+      (RSOR.split geom
+      ((relayFrontAt kem cipher macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop ch.c.pos)
+          [.recipient n]) r'.1 (RSOR.body kem macS kdfS streamS geom
+          (Protocols.RSOR.BackwardChallenge.swapReq ch.c m n) r') ((ch.c.req.back.drop
+          ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c)) (lastShift geom kem kdfS
+          streamS (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.recipient n]) (RSOR.path kem
+          (ch.c.req.back.drop ch.c.pos) [.surbReply r'.2.2.2]) r'.1 r'.1 ((ch.c.req.back.drop
+          ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c)) U))
+        ++ ofVector (macS.mac (ofVector km) (relayFrontAt kem cipher macS kdfS streamS geom
+            (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.recipient n]) r'.1 (RSOR.body kem macS
+            kdfS streamS geom (Protocols.RSOR.BackwardChallenge.swapReq ch.c m n) r')
+            ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c))
+            (lastShift geom kem kdfS streamS (RSOR.path kem (ch.c.req.back.drop ch.c.pos)
+            [.recipient n]) (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.surbReply r'.2.2.2])
+            r'.1 r'.1 ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ofVector
+            (kem.encodeCiphertext c)) U)))
+        ++ ofVector u)).1
+    = Protocols.RSOR.BackwardChallenge.world1With ch.c
+      (RSOR.form kem cipher macS kdfS streamS geom ch.c.req r ch.c.req.first)
+      (Protocols.RSOR.BackwardChallenge.ownAt ch.c r) (Protocols.RSOR.BackwardChallenge.exitAt ch.c
+          r)
+      ((RSOR.split geom (wrapUp kem default macS kdfS streamS geom (RSOR.path kem
+          (ch.c.req.back.drop ch.c.pos) [.surbReply r'.2.2.2]) r'.1 0 ((ch.c.req.back.drop
+          ch.c.pos).hops.length - 1)
+      ((relayFrontAt kem default macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop
+          ch.c.pos) [.surbReply r'.2.2.2]) r'.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩
+          ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c)) U)
+        ++ ofVector (macS.mac (ofVector km) (relayFrontAt kem default macS kdfS streamS geom
+            (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.surbReply r'.2.2.2]) r'.1
+            ⟨Array.replicate geom.forwardPayloadLength 0⟩ ((ch.c.req.back.drop
+            ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c)) U))
+        ++ relayBackAt kem default macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop
+            ch.c.pos) [.surbReply r'.2.2.2]) r'.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩
+            ((ch.c.req.back.drop ch.c.pos).hops.length - 1) U id))).1, (toVecN _ (payUp kem cipher
+            kdfS geom (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.recipient n]) r'.1 0
+            ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ofVector u))))
+      (RSOR.split geom
+      ((relayFrontAt kem default macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop
+          ch.c.pos) [.surbReply r'.2.2.2]) r'.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩
+          ((ch.c.req.back.drop ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c)) U)
+        ++ ofVector (macS.mac (ofVector km) (relayFrontAt kem default macS kdfS streamS geom
+            (RSOR.path kem (ch.c.req.back.drop ch.c.pos) [.surbReply r'.2.2.2]) r'.1
+            ⟨Array.replicate geom.forwardPayloadLength 0⟩ ((ch.c.req.back.drop
+            ch.c.pos).hops.length - 1) (ofVector (kem.encodeCiphertext c)) U))
+        ++ relayBackAt kem default macS kdfS streamS geom (RSOR.path kem (ch.c.req.back.drop
+            ch.c.pos) [.surbReply r'.2.2.2]) r'.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩
+            ((ch.c.req.back.drop ch.c.pos).hops.length - 1) U id)).1
+  rw [h1, h2, h3, h4, h5, h5]
+  rfl
 
 /-- **Telling the two onions apart, with the sender's keys used up.** The advantage is at most
 the bad draws, the cost of replacing the sender's keys (KEM and KDF), a MAC forgery, the
