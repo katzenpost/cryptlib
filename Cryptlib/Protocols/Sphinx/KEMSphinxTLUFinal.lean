@@ -367,6 +367,81 @@ theorem mixSeeds_getElem! (r r' : Randomness geom) (j k : ℕ) (hk : k < geom.nr
   rw [getElem!_pos _ _ (by simpa using hk)]
   split_ifs <;> simp [mixSeeds, getElem!_pos, *]
 
+omit hvalid hmactag h16 in
+/-- After position `j` the mixed randomness has the original's seeds. -/
+theorem mixSeeds_extract_after (r r' : Randomness geom) (j n : ℕ) (hn : n ≤ geom.nrHops) :
+    ((mixSeeds geom r r' j).1.1.toArray.extract 0 n).extract (j + 1)
+        ((mixSeeds geom r r' j).1.1.toArray.extract 0 n).size
+      = (r.1.1.toArray.extract 0 n).extract (j + 1) (r.1.1.toArray.extract 0 n).size := by
+  apply Array.ext
+  · simp
+  · intro i h1 h2
+    have hi : j + 1 + i < n := by
+      simp at h1
+      omega
+    simp [mixSeeds, show ¬ (j + 1 + i < j) by omega]
+
+omit hvalid hmactag h16 in
+/-- **The layers in front of the relay are the replacement's.** On the original's path with
+the mixed randomness, the layers of the hops before the honest relay are those on the
+replacement's path with the replacement's randomness. -/
+theorem wrapUp_mixSeeds (R : Protocols.RSOR.Route geom.nrHops Name (Key kem))
+    (last last' : List RoutingCommand) (r r' : Randomness geom) (j : ℕ)
+    (hj : j < R.hops.length) (L : ByteArray) :
+    wrapUp kem cipher macS kdfS streamS geom (path kem R last) (mixSeeds geom r r' j).1 0 j L
+      = wrapUp kem cipher macS kdfS streamS geom (path kem (R.take (j + 1)) last') r'.1 0 j L := by
+  have hl : (R.take (j + 1)).hops.length = j + 1 := by simp [Protocols.RSOR.Route.take]; omega
+  have hle := R.length_le
+  refine wrapUp_congr geom kem kdfS streamS cipher macS _ _ _ _ (by rw [path_size]; exact hle)
+    (by rw [path_size, hl]; omega) 0 j L fun k _ hk => ⟨by rw [path_size]; omega,
+      by rw [path_size, hl]; omega,
+      (path_take_getElem! kem geom R last' last (j + 1) k (by omega) (by omega)).symm, ?_, ?_⟩
+  · by_cases hkj : k + 1 < j
+    · rw [path_take_getElem! kem geom R last' last (j + 1) (k + 1) (by omega) (by omega)]
+    · obtain rfl : k + 1 = j := by omega
+      rw [path_take_last kem geom R last' (k + 1) hj, path_getElem! kem R last (k + 1) hj]
+  · rw [mixSeeds_getElem! geom r r' j k (by omega), ite_eq_left (by omega)]
+
+omit h16 in
+include hvalid hmactag in
+set_option maxHeartbeats 1000000 in
+/-- **The shifted keystream on the game's paths.** Before the end of the original's path, with
+the mixed randomness and the shifted keystream, the honest relay has the next layer the
+original has with its own randomness, and the header bytes the replacement has. -/
+theorem shiftStream_path (R : Protocols.RSOR.Route geom.nrHops Name (Key kem))
+    (last last' : List RoutingCommand) (r r' : Randomness geom) (payload : ByteArray) (j : ℕ)
+    (c U U' fwd : ByteArray) (hn : j + 1 < R.hops.length)
+    (hU : U.size = geom.routingInfoLength + geom.perHopRoutingInfoLength)
+    (hU' : U'.size = geom.routingInfoLength + geom.perHopRoutingInfoLength)
+    (hc : c.size = kem.ciphertextSize)
+    (hfwd : layerPast kem cipher macS kdfS streamS geom (path kem R last) r.1 payload j U' (j + 1) = .ok fwd)
+    (hs' : (relayFrontLast kem kdfS streamS geom (path kem (R.take (j + 1)) last') r'.1 j c U).size
+      = 2 + kem.ciphertextSize + geom.routingInfoLength) :
+    layerPast kem cipher macS kdfS streamS geom (path kem R last) (mixSeeds geom r r' j).1 payload j
+        (shiftStream geom kem kdfS streamS (path kem R last) (path kem (R.take (j + 1)) last')
+          r.1 (mixSeeds geom r r' j).1 r'.1 j c U U' fwd) (j + 1) = .ok fwd
+      ∧ relayFront kem cipher macS kdfS streamS geom (path kem R last) (mixSeeds geom r r' j).1 payload j c
+          (shiftStream geom kem kdfS streamS (path kem R last) (path kem (R.take (j + 1)) last')
+            r.1 (mixSeeds geom r r' j).1 r'.1 j c U U' fwd)
+        = relayFrontLast kem kdfS streamS geom (path kem (R.take (j + 1)) last') r'.1 j c U := by
+  have hl : (R.take (j + 1)).hops.length = j + 1 := by simp [Protocols.RSOR.Route.take]; omega
+  have hle := R.length_le
+  have hx : ∀ (a : Array (Vector UInt8 32)) (n m : ℕ), m < n → n ≤ a.size →
+      (a.extract 0 n)[m]! = a[m]! := fun a n m h1 h2 => by
+    rw [getElem!_pos _ _ (by simp; omega), getElem!_pos _ _ (by omega)]
+    simp
+  refine shiftStream_spec geom kem kdfS streamS cipher macS hvalid hmactag _ _ _ _ _ payload j
+    c U U' fwd (by rw [path_size]; exact hn) (by rw [path_size]; exact hle)
+    (by rw [path_size, hl]) hU hU' hc rfl
+    (mixSeeds_extract_after geom r r' j _ (by rw [path_size]; exact hle)) (fun m hm => ?_) ?_ hfwd
+    hs'
+  · unfold kemHopKeys
+    rw [← path_take_getElem! kem geom R last' last (j + 1) m (by omega) (by omega),
+      hx _ _ m (by rw [path_size]; omega) (by rw [path_size]; simpa using hle),
+      hx _ _ m (by rw [path_size, hl]; omega) (by rw [path_size, hl]; simp; omega),
+      mixSeeds_getElem! geom r r' j m (by omega), ite_eq_left hm]
+  · rw [path_getElem! kem R last j (by omega), ite_eq_right (by omega)]
+
 end RSOR
 
 /-! ## The exit relay's reply -/
