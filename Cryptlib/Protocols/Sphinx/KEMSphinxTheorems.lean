@@ -1538,10 +1538,11 @@ def wrapKEMSURB (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (
     if hsize : surb.size = geom.surbLength then pure (⟨surb.data, hsize⟩, k)
     else throw "sphinx: internal error: newKEMSURB produced a wrong-sized SURB"
 
-/-- Process one hop with the hop's keys: check the header MAC, decrypt the routing info and the
-payload, and forward or deliver. -/
-def unwrapKEMKeys (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (streamS : StreamCipher)
-    (geom : Geometry) (keys : HopKeys) (replayTag : Vector UInt8 32) (pkt : ByteArray)
+/-- Process one hop with the hop's keys and with the payload decrypted by `dec`: check the
+header MAC, decrypt the routing info and the payload, and forward or deliver. -/
+def unwrapKEMKeysD (kem : KEM) (macS : MAC) (streamS : StreamCipher) (geom : Geometry)
+    (dec : ByteArray → ByteArray) (hdecsz : ∀ x, (dec x).size = x.size)
+    (keys : HopKeys) (replayTag : Vector UInt8 32) (pkt : ByteArray)
     (h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength) :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
@@ -1589,14 +1590,14 @@ def unwrapKEMKeys (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (streamS :
     rw [ByteArray.size_extract]
     omega
   let decPayload :=
-    if rawPayload.size > 0 then cipher.decrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV) rawPayload
+    if rawPayload.size > 0 then dec rawPayload
     else rawPayload
   have hdec : decPayload.size = rawPayload.size := by
     show (if rawPayload.size > 0
-          then cipher.decrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV) rawPayload
+          then dec rawPayload
           else rawPayload).size = rawPayload.size
     split
-    · exact cipher.decrypt_size _ _ _
+    · exact hdecsz _
     · rfl
 
   match nextNode with
@@ -1626,6 +1627,17 @@ def unwrapKEMKeys (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (streamS :
       let tag := decPayload.extract 0 geom.payloadTagLength
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
+
+/-- Process one hop with the hop's keys: the payload is decrypted by the cipher under the hop's
+payload key. -/
+def unwrapKEMKeys (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (streamS : StreamCipher)
+    (geom : Geometry) (keys : HopKeys) (replayTag : Vector UInt8 32) (pkt : ByteArray)
+    (h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength) :
+    Except String
+      (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) :=
+  unwrapKEMKeysD kem macS streamS geom
+    (cipher.decrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV))
+    (cipher.decrypt_size _ _) keys replayTag pkt h1
 
 /-- Process one hop with decapsulation given as a function of the ciphertext bytes: returns
 `(payload, replayTag, cmds, forwardPkt)`. The forwarded packet carries the next-hop ciphertext
@@ -1919,7 +1931,7 @@ theorem unwrapKEM_hopPacket_nonterminal (kem : KEM) (cipher : WideBlockCipher) (
   have hnottrunc : ¬ (hopPacket kemElements riPadding s t nrHops k).size
       < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by
     rw [hpktsize, hpayoff, hpacket']; omega
-  unfold unwrapKEM unwrapKEMWith unwrapKEMKeys
+  unfold unwrapKEM unwrapKEMWith unwrapKEMKeys unwrapKEMKeysD
   dsimp only
   rw [dif_neg hnottrunc]
   have hversion : ¬ (((hopPacket kemElements riPadding s t nrHops k).extract 0 2).data
@@ -2229,7 +2241,7 @@ theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (mac
   have hnottrunc : ¬ (hopPacket kemElements riPadding s t nrHops k).size
       < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by
     rw [hpktsize, hpayoff, hpacket']; omega
-  unfold unwrapKEM unwrapKEMWith unwrapKEMKeys
+  unfold unwrapKEM unwrapKEMWith unwrapKEMKeys unwrapKEMKeysD
   dsimp only
   rw [dif_neg hnottrunc]
   have hversion : ¬ (((hopPacket kemElements riPadding s t nrHops k).extract 0 2).data

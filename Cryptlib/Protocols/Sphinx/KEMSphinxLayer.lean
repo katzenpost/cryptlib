@@ -65,7 +65,7 @@ theorem procWith_payload_congr (dec : ByteArray → Except String ByteArray) (pk
     (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) (by unfold payloadOffset; omega)
   have e4 := extract_of_prefix_eq hhdr (2 + kem.ciphertextSize)
     (2 + kem.ciphertextSize + geom.routingInfoLength) (by unfold payloadOffset; omega)
-  unfold procWith unwrapKEMWith unwrapKEMKeys at h ⊢
+  unfold procWith unwrapKEMWith unwrapKEMKeys unwrapKEMKeysD at h ⊢
   dsimp only at h ⊢
   simp only [e0, e1, e2, e3, e4]
   by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
@@ -176,7 +176,7 @@ theorem procWith_payload_changed (dec : ByteArray → Except String ByteArray) (
     (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) (by unfold payloadOffset; omega)
   have e4 := extract_of_prefix_eq hhdr (2 + kem.ciphertextSize)
     (2 + kem.ciphertextSize + geom.routingInfoLength) (by unfold payloadOffset; omega)
-  unfold procWith unwrapKEMWith unwrapKEMKeys at h h'
+  unfold procWith unwrapKEMWith unwrapKEMKeys unwrapKEMKeysD at h h'
   dsimp only at h h'
   simp only [e0, e1, e2, e3, e4] at h'
   by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
@@ -259,7 +259,7 @@ theorem procWith_final_tag (dec : ByteArray → Except String ByteArray) (pkt ss
     tagOK geom (cipher.decrypt (deriveHopKeys kdfS ss).payloadEncryption.toArray
       (ofVector (deriveHopKeys kdfS ss).headerEncryptionIV)
       (pkt.extract (payloadOffset kem geom) pkt.size)) = true := by
-  unfold procWith unwrapKEMWith unwrapKEMKeys at h
+  unfold procWith unwrapKEMWith unwrapKEMKeys unwrapKEMKeysD at h
   dsimp only at h
   by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
   · rw [dif_pos h1] at h; cases h
@@ -360,7 +360,7 @@ theorem procWith_payload (dec : ByteArray → Except String ByteArray) (pkt pkt'
   have hp' := hrs pkt' hsz
   intro d
   generalize hR : procWith kem cipher macS kdfS streamS geom dec pkt' = R
-  unfold procWith unwrapKEMWith unwrapKEMKeys at h hR
+  unfold procWith unwrapKEMWith unwrapKEMKeys unwrapKEMKeysD at h hR
   dsimp only at h hR
   simp only [e0, e1, e2, e3, e4] at hR
   have h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by
@@ -482,6 +482,47 @@ theorem keyTuple_keysKDF (t : KeyTuple) (ss : ByteArray) :
 def procKeys (t : KeyTuple) (pkt : ByteArray) : ProcResult :=
   procWith kem cipher macS (keysKDF t) streamS geom (fun _ => .ok .empty) pkt
 
+/-- Process a packet with the hop's keys given directly and its payload decrypted by `dec`. -/
+def procKeysD (dec : ByteArray → ByteArray) (hdec : ∀ x, (dec x).size = x.size) (t : KeyTuple)
+    (pkt : ByteArray) : ProcResult :=
+  if h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength then none
+  else if (pkt.extract 0 2).data ≠ v0AD.data then none
+  else match unwrapKEMKeysD kem macS streamS geom dec hdec (deriveHopKeys (keysKDF t) .empty)
+      (Cryptlib.Primitives.Hash.Sha512.sha512_256 (pkt.extract 2 (2 + kem.ciphertextSize)))
+      pkt h1 with
+    | .ok (p, r, c, f) => some (p, r, c, f.map ofVector)
+    | .error _ => none
+
+/-- **A hop uses its payload key only to decrypt the payload.** -/
+theorem procKeys_eq_procKeysD (t : KeyTuple) (pkt : ByteArray) :
+    procKeys kem cipher macS streamS geom t pkt
+      = procKeysD kem macS streamS geom (cipher.decrypt t.1.toArray (ofVector t.2.1))
+          (cipher.decrypt_size _ _) t pkt := by
+  have hk := keyTuple_keysKDF t .empty
+  simp only [keyTuple, Prod.ext_iff] at hk
+  obtain ⟨hp, hiv, -, -⟩ := hk
+  have hA : ∀ (K : HopKeys), K.payloadEncryption = t.1 → K.headerEncryptionIV = t.2.1 →
+      ∀ tag h1, unwrapKEMKeys kem cipher macS streamS geom K tag pkt h1
+        = unwrapKEMKeysD kem macS streamS geom (cipher.decrypt t.1.toArray (ofVector t.2.1))
+            (cipher.decrypt_size _ _) K tag pkt h1 := by
+    intro K hp' hiv' tag h1
+    cases K
+    dsimp only at hp' hiv'
+    subst hp' hiv'
+    rfl
+  have hb : ∀ {α : Type} (a : ByteArray) (f : ByteArray → Except String α),
+      (Except.ok a >>= f) = f a := fun _ _ => rfl
+  unfold procKeys procWith unwrapKEMWith procKeysD
+  by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
+  · simp only [h1, ↓reduceDIte]
+    rfl
+  · by_cases hv : (pkt.extract 0 2).data ≠ v0AD.data
+    · simp only [h1, ↓reduceDIte]
+      rw [ite_cond_eq_true _ _ (eq_true hv), ite_cond_eq_true _ _ (eq_true hv)]
+      rfl
+    · simp only [h1, hv, ↓reduceDIte, ↓reduceIte, hb, hA _ hp hiv]
+      rfl
+
 /-- **A hop uses its shared secret only through its four keys.** Processing with a
 decapsulation function is processing with the keys of the secret it gives. -/
 theorem procWith_eq_procKeys (dec : ByteArray → Except String ByteArray) (pkt ss : ByteArray)
@@ -509,7 +550,7 @@ theorem procWith_mac (dec : ByteArray → Except String ByteArray) (pkt ss : Byt
         (pkt.extract 0 (2 + kem.ciphertextSize + geom.routingInfoLength)))).data
       = (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength)
         (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)).data := by
-  unfold procWith unwrapKEMWith unwrapKEMKeys at h
+  unfold procWith unwrapKEMWith unwrapKEMKeys unwrapKEMKeysD at h
   dsimp only at h
   by_cases h1 : pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength
   · rw [dif_pos h1] at h; cases h
