@@ -1545,6 +1545,56 @@ theorem procKeysD_relayFrontLast (hvalid : geom.ValidForKEM kem)
         exact hpar)
       hnext hsurb, hpre 2 _ (by omega), hMc]
 
+/-! ## The layers in front of the keyed hop -/
+
+omit kdfS streamS cipher macS in
+/-- The first hop's routing fragment reads the first two hops, and whether the path ends. -/
+theorem kemRiFragment_path_congr (path path' : Array PathHop) (ke : Array ByteArray)
+    (mac : ByteArray) (n n' : ℕ) (h0 : path[0]! = path'[0]!) (h1 : path[1]! = path'[1]!)
+    (hn : (0 == n - 1) = (0 == n' - 1)) :
+    kemRiFragment kem geom path ke mac n 0 = kemRiFragment kem geom path' ke mac n' 0 := by
+  unfold kemRiFragment
+  simp only [h0, h1, hn, Nat.zero_add]
+
+/-- **The layers in front read the hops in front.** Wrapping a layer in the layers of hops
+`i` to `i + n` gives the same bytes on two paths with two draws that agree on those hops, on
+the hop after each, and on their seeds. -/
+theorem wrapUp_congr (hops hops' : Array PathHop) (d d' : RSOR.Draw geom)
+    (hlen : hops.size ≤ geom.nrHops) (hlen' : hops'.size ≤ geom.nrHops) (i n : ℕ)
+    (L : ByteArray)
+    (h : ∀ k, i ≤ k → k < i + n → k + 1 < hops.size ∧ k + 1 < hops'.size
+      ∧ hops[k]! = hops'[k]! ∧ hops[k + 1]! = hops'[k + 1]! ∧ d.1.toArray[k]! = d'.1.toArray[k]!) :
+    wrapUp kem cipher macS kdfS streamS geom hops d i n L
+      = wrapUp kem cipher macS kdfS streamS geom hops' d' i n L := by
+  induction n generalizing i with
+  | zero => rfl
+  | succ n ih =>
+    obtain ⟨hk, hk', e0, e1, es⟩ := h i le_rfl (by omega)
+    have hS : (d.1.toArray.extract 0 hops.size).size = hops.size := by simp; omega
+    have hS' : (d'.1.toArray.extract 0 hops'.size).size = hops'.size := by simp; omega
+    have p0 : (hops.extract i hops.size)[0]! = (hops'.extract i hops'.size)[0]! := by
+      rw [getElem!_extract_from hops i 0 (by omega), getElem!_extract_from hops' i 0 (by omega)]
+      exact e0
+    have p1 : (hops.extract i hops.size)[1]! = (hops'.extract i hops'.size)[1]! := by
+      rw [getElem!_extract_from hops i 1 (by omega), getElem!_extract_from hops' i 1 (by omega)]
+      exact e1
+    have s0 : ((d.1.toArray.extract 0 hops.size).extract i
+          (d.1.toArray.extract 0 hops.size).size)[0]!
+        = ((d'.1.toArray.extract 0 hops'.size).extract i
+          (d'.1.toArray.extract 0 hops'.size).size)[0]! := by
+      have hx : ∀ (a : Array (Vector UInt8 32)) (m : ℕ), i < m → m ≤ a.size →
+          (a.extract 0 m)[i + 0]! = a[i]! := fun a m h1 h2 => by
+        rw [Nat.add_zero, getElem!_pos _ _ (by simp; omega), getElem!_pos _ _ (by omega)]
+        simp
+      rw [getElem!_extract_from _ i 0 (by omega), getElem!_extract_from _ i 0 (by omega),
+        hx _ _ (by omega) (by simp; omega), hx _ _ (by omega) (by simp; omega)]
+      exact es
+    unfold wrapUp
+    rw [ih (i + 1) fun k hk1 hk2 => h k (by omega) (by omega)]
+    unfold wrapHop kemHopCt kemHopKeys
+    rw [p0, s0, kemRiFragment_path_congr geom kem _ (hops'.extract i hops'.size) _ _ _
+      (hops'.extract i hops'.size).size p0 p1 (by simp; omega)]
+
 /-! ## The honest relay's answers as steps of the game -/
 
 /-- **The keyed hop's step before the end of the path.** On its own header with a valid tag
