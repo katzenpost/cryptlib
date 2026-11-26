@@ -1230,6 +1230,23 @@ def relayBackAt (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray
   if j + 1 < hops.size then relayBack kem cipher macS kdfS streamS geom hops d payload j U encf
   else relayBackLast geom payload encf
 
+/-- The bytes behind the tag are the payload encryption of the bytes behind the tag with no
+encryption, when those are not empty. -/
+theorem relayBackAt_enc (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray)
+    (j : ℕ) (U : ByteArray) (encf : ByteArray → ByteArray)
+    (h : (relayBackAt kem cipher macS kdfS streamS geom hops d payload j U id).size ≠ 0) :
+    relayBackAt kem cipher macS kdfS streamS geom hops d payload j U encf
+      = encf (relayBackAt kem cipher macS kdfS streamS geom hops d payload j U id) := by
+  unfold relayBackAt at h ⊢
+  split_ifs at h ⊢ with hj
+  · unfold relayBack at h ⊢
+    cases hl : layerPast kem cipher macS kdfS streamS geom hops d payload j U (j + 1) with
+    | ok fwd => rfl
+    | error e =>
+      rw [hl] at h
+      exact absurd rfl h
+  · rfl
+
 /-- **The first keyed layer in closed form.** It is the keyed hop's layer, wrapped once for each
 hop in front of it, and the keyed hop's layer is the bytes in front of its tag, their tag under
 its MAC key, and the bytes behind. The keys given are used through their keystream, one tag and

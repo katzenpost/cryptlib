@@ -584,7 +584,8 @@ def viaOracle (sk : Role → kem.PrivateKey)
     patch
 
 /-- `viaOracle` does not use the key it is given for `.relay`. -/
-theorem viaOracle_congr (sk sk' : Role → kem.PrivateKey) (hsk : ∀ h, h ≠ .relay → sk h = sk' h)
+theorem viaOracle_congr (sk sk' : Role → kem.PrivateKey)
+    (hsk : ∀ h, h ≠ .relay → sk h = sk' h)
     (patch : Protocols.RSOR.Patch (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) :
     viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 sk patch
       = viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 sk' patch := by

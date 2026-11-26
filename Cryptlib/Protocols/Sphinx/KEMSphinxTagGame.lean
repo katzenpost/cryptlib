@@ -53,7 +53,8 @@ theorem prEvent_bind_le_add_of_bad_le (mx : ProbComp α) (F G : α → ProbComp 
   · simpa [hx] using h x hx
 
 /-- Two games that agree off a bad draw differ by at most the chance of a bad draw. -/
-theorem abs_prEvent_bind_sub_le_bad (mx : ProbComp α) (F G : α → ProbComp Bool) (bad : α → Prop)
+theorem abs_prEvent_bind_sub_le_bad (mx : ProbComp α) (F G : α → ProbComp Bool)
+    (bad : α → Prop)
     (h : ∀ x, ¬ bad x → F x = G x) :
     |(Pr{let y ← mx >>= F}[y = true]).toReal - (Pr{let y ← mx >>= G}[y = true]).toReal|
       ≤ (Pr{let x ← mx}[bad x]).toReal := by

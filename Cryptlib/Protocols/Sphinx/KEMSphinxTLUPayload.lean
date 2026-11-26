@@ -230,6 +230,119 @@ theorem forward_tagged_sub_payload_le
   rw [h1, h2, ← hbad]
   exact abs_prEvent_bind_sub_le_bad mx F Gf (fun z => ¬ good z.2.2) hag
 
+/-! ## World 0 -/
+
+/-- The block the sender encrypts under the honest relay's payload key in world 0: the bytes
+behind the relay's tag, before that encryption. -/
+def forwardBlock {pk : Key kem}
+    (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk)
+    (r : RSOR.Randomness geom) (k : Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32) :
+    Block geom :=
+  Util.Bytes.toVecN _ (relayBackAt kem cipher macS kdfS streamS geom
+    (RSOR.path kem ch.c.req.fwd [.recipient ch.c.req.receiver]) r.1
+    (RSOR.body kem macS kdfS streamS geom ch.c.req r) ch.c.pos
+    (ksOf streamS geom (default, k)) id)
+
+/-- World 0 from the encrypted block: the relay's layer is the bytes in front, their tag and
+the block, wrapped once for each hop in front. -/
+def forwardViewE {pk : Key kem}
+    (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names pk)
+    (r : RSOR.Randomness geom) (c : kem.Ciphertext)
+    (k : Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32)
+    (e : Block geom) : Protocols.RSOR.World 𝒮 where
+  onion := RSOR.split geom (wrapUp kem cipher macS kdfS streamS geom
+    (RSOR.path kem ch.c.req.fwd [.recipient ch.c.req.receiver]) r.1 0 ch.c.pos
+    (forwardM kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch r c
+        (default, k.1, k.2.2)
+      ++ ofVector (macS.mac (ofVector k.2.1)
+        (forwardM kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch r c
+          (default, k.1, k.2.2)))
+      ++ ofVector e))
+
+/-- The good draws of world 0 on which the block has a payload's length. -/
+def forwardGoodP {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (d : KeyedDraw (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)) :
+    Prop :=
+  forwardGood kem cipher macS kdfS streamS geom hvalid hmactag h16 d ∧
+    ∀ k : Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32,
+      (relayBackAt kem cipher macS kdfS streamS geom
+        (RSOR.path kem (forwardChOf d).c.req.fwd
+          [.recipient (forwardChOf d).c.req.receiver])
+        (forwardRndOf d).1
+        (RSOR.body kem macS kdfS streamS geom (forwardChOf d).c.req (forwardRndOf d))
+        (forwardChOf d).c.pos (ksOf streamS geom (default, k)) id).size
+      = geom.payloadTagLength + geom.forwardPayloadLength
+
+omit [SampleableType kem.Plaintext] in
+/-- **The payload cipher step for world 0 of TLU→.** With uniform keys at the honest relay and
+the challenge header only, world 0 is its payload game with the cipher, up to the chance of a
+draw that is not good. -/
+theorem forward_payload_le
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    |(Pr{let x ← (keyedGameH cipher macS kdfS streamS geom
+          (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+          (onlyHeader cipher macS streamS geom (tagged macS
+            (forwardM kem cipher macS kdfS streamS geom hvalid hmactag h16
+              names))))}[x = true]).toReal
+      - (Pr{let x ← ((forwardPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16
+          names (RSOR.Randomness geom) ($ᵗ RSOR.Randomness geom)
+          (fun ch r c t =>
+            { onion := onionK kem cipher macS kdfS streamS geom ch.c.req r ch.c.pos c t 0 })
+          A (forwardM kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (fun ch r _ k =>
+            forwardBlock kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch r k)
+          (forwardViewE kem cipher macS kdfS streamS geom hvalid hmactag h16 names)).exp
+            true)}[x = true]).toReal|
+    ≤ (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom
+        (forwardAdv kem cipher macS kdfS streamS geom hvalid hmactag h16
+          names A))}[¬ forwardGoodP kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+            d]).toReal := by
+  refine forward_tagged_sub_payload_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+    (RSOR.Randomness geom) ($ᵗ RSOR.Randomness geom)
+    (fun ch r c t =>
+      { onion := onionK kem cipher macS kdfS streamS geom ch.c.req r ch.c.pos c t 0 }) A _ _ _
+    (forwardGoodP kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+    (fun ch o c kp kp' iv ke => rfl)
+    (fun d r hg => (forwardGood_view kem cipher macS kdfS streamS geom hvalid hmactag h16 names A d
+      (withMAC r default) hg.1).2)
+    (fun d r hg => relayFrontAt_ct kem cipher macS kdfS streamS geom _ _ _ _ _ _
+      (Cryptlib.Util.Bytes.size_ofVector _)
+      (forwardGood_view kem cipher macS kdfS streamS geom hvalid hmactag h16 names A d
+        (withMAC r default) hg.1).2)
+    (fun d u hg => ?_)
+  have h := (forwardGood_view kem cipher macS kdfS streamS geom hvalid hmactag h16 names A d u
+    hg.1).1
+  have hP := hg.2 u.2
+  have hb : relayBackAt kem cipher macS kdfS streamS geom
+        (RSOR.path kem (forwardChOf d).c.req.fwd
+          [.recipient (forwardChOf d).c.req.receiver])
+        (forwardRndOf d).1
+        (RSOR.body kem macS kdfS streamS geom (forwardChOf d).c.req (forwardRndOf d))
+        (forwardChOf d).c.pos
+        (ksOf streamS geom (withMAC (restOf u) default))
+        (encOf cipher (withMAC (restOf u) default))
+      = ofVector (Util.Bytes.toVecN (geom.payloadTagLength + geom.forwardPayloadLength)
+        (cipher.encrypt u.1.toArray (ofVector u.2.1)
+          (ofVector (forwardBlock kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+            (forwardChOf d) (forwardRndOf d) u.2)))) := by
+    have e1 := relayBackAt_enc kem cipher macS kdfS streamS geom
+        (RSOR.path kem (forwardChOf d).c.req.fwd
+          [.recipient (forwardChOf d).c.req.receiver])
+        (forwardRndOf d).1
+        (RSOR.body kem macS kdfS streamS geom (forwardChOf d).c.req (forwardRndOf d))
+        (forwardChOf d).c.pos
+        (ksOf streamS geom (default, u.2))
+        (encOf cipher (withMAC (restOf u) default)) (by rw [hP]; omega)
+    refine e1.trans ?_
+    unfold forwardBlock
+    rw [Cryptlib.Util.Bytes.ofVector_toVecN _ hP, Cryptlib.Util.Bytes.ofVector_toVecN _
+      (by rw [cipher.encrypt_size]; exact hP)]
+    rfl
+  refine h.trans ?_
+  unfold forwardViewT forwardViewE
+  rw [hb]
+  rfl
+
 end ForwardPayload
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
