@@ -190,6 +190,39 @@ theorem backwardUnlinkable_eq_with :
   funext hon c b
   exact h c b
 
+/-- World 1 of SLU← with two onions sent on: the game that tells `W` from `W'`. -/
+def swapPair (W W' : BackSwap S) : Property S where
+  Challenge := BackwardChallenge
+  world c b := match b with
+    | true => (backwardWith W).world c true
+    | false => (backwardWith W').world c true
+
+/-- An adversary of SLU← with one onion sent on, against SLU← with another. -/
+def backwardWith.cast {W : BackSwap S} (W' : BackSwap S) (A : (backwardWith W).Adversary) :
+    (backwardWith W').Adversary :=
+  ⟨A.State, A.choose, A.guess⟩
+
+/-- An adversary of SLU←, against the game that tells two onions sent on apart. -/
+def swapPair.cast {W : BackSwap S} (W' : BackSwap S) (A : (backwardWith W).Adversary) :
+    (swapPair W W').Adversary :=
+  ⟨A.State, A.choose, A.guess⟩
+
+/-- **SLU← through another onion sent on.** The advantage with `W` is at most the advantage in
+telling `W` from `W'` in world 1, and the advantage with `W'`. -/
+theorem backwardWith_advantage_le (W W' : BackSwap S) (names : Role → S.Name)
+    (A : (backwardWith W).Adversary) :
+    ((backwardWith W).advantage names A).toReal
+      ≤ ((swapPair W W').advantage names (swapPair.cast W' A)).toReal
+        + ((backwardWith W').advantage names (backwardWith.cast W' A)).toReal := by
+  rw [Property.advantage_toReal, Property.advantage_toReal, Property.advantage_toReal]
+  have e1 : Property.play names (swapPair.cast W' A) true = Property.play names A true := rfl
+  have e2 : Property.play names (swapPair.cast W' A) false
+      = Property.play names (backwardWith.cast W' A) true := rfl
+  have e3 : Property.play names (backwardWith.cast W' A) false = Property.play names A false :=
+    rfl
+  rw [e1, e2, e3]
+  exact abs_sub_le _ _ _
+
 end Cryptlib.Protocols.RSOR
 
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
