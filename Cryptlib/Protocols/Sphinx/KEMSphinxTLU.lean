@@ -353,13 +353,13 @@ def fillerAtF (hops : Array PathHop) (seeds : Array (Vector UInt8 32)) (filler :
       (hops.size - i) (fillerAtF hops seeds filler j U i)
 
 /-- With the keystream of the keys that hop `j`'s seed gives, `fillerAtF` is the filler built
-from the seeds, for a layer up to hop `j`'s. The seeds may differ at `j`, which `fillerAtF` does
-not read. -/
+from the seeds, for any layer. The seeds may differ at `j`, which `fillerAtF` does not
+read. -/
 theorem fillerAtF_real (hops : Array PathHop) (seeds seeds' : Array (Vector UInt8 32))
-    (filler : ByteArray) (j : ℕ) (c ss : ByteArray) (hj : j < hops.size)
+    (filler : ByteArray) (j : ℕ) (c ss : ByteArray)
     (hsz : seeds'.size = hops.size)
     (henc : kemEncap kem (hops[j]!).publicKey (seeds'[j]!) = .ok (c, ss))
-    (hagree : ∀ k, k ≠ j → seeds[k]! = seeds'[k]!) (i : ℕ) (hi : i ≤ j) :
+    (hagree : ∀ k, k ≠ j → seeds[k]! = seeds'[k]!) (i : ℕ) (hi : i ≤ hops.size) :
     fillerAtF kem kdfS streamS geom hops seeds filler j
         (ksOf streamS geom (keyTuple (deriveHopKeys kdfS ss))) i
       = RSOR.fillerAt kem kdfS streamS geom hops seeds' filler i := by
@@ -1324,6 +1324,44 @@ theorem layerF_eq_layerPK (hops : Array PathHop) (d : RSOR.Draw geom) (payload :
       = (layerPK kem cipher macS kdfS streamS geom hops d payload j c t i).toOption :=
   (packetK_eq_packetF kem cipher macS kdfS streamS geom _ _ _ payload (j - i) c t).symm
 
+/-- **A layer past the keyed hop depends on its keys through its keystream only.** With the
+keystream of the keys that the seed `s` gives at hop `j`, `layerPast` is the layer built from
+the draw with `s` at position `j`. -/
+theorem layerPast_real (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray)
+    (j i : ℕ) (s : Vector UInt8 32) (c ss : ByteArray) (hji : j < i) (hi : i ≤ hops.size)
+    (hlen : hops.size ≤ geom.nrHops)
+    (henc : kemEncap kem (hops[j]!).publicKey s = .ok (c, ss)) :
+    layerPast kem cipher macS kdfS streamS geom hops d payload j
+        (ksOf streamS geom (keyTuple (deriveHopKeys kdfS ss))) i
+      = RSOR.layer kem cipher macS kdfS streamS geom hops (d.1.setIfInBounds j s, d.2) payload i := by
+  have hj : j < hops.size := by omega
+  have hsz : ((d.1.setIfInBounds j s).toArray.extract 0 hops.size).size = hops.size := by
+    simp; omega
+  have hget : ∀ k, k ≠ j → (d.1.toArray.extract 0 hops.size)[k]?
+      = ((d.1.setIfInBounds j s).toArray.extract 0 hops.size)[k]? := fun k hk => by
+    simp [Array.getElem?_extract, Ne.symm hk]
+  have hs : ((d.1.setIfInBounds j s).toArray.extract 0 hops.size)[j]! = s := by
+    rw [getElem!_extract_zero _ _ _ hj (by rw [Vector.size_toArray]; exact hlen)]
+    simp [lt_of_lt_of_le hj hlen]
+  have hseeds : (d.1.toArray.extract 0 hops.size).extract i
+        (d.1.toArray.extract 0 hops.size).size
+      = ((d.1.setIfInBounds j s).toArray.extract 0 hops.size).extract i
+        ((d.1.setIfInBounds j s).toArray.extract 0 hops.size).size := by
+    apply Array.ext
+    · simp
+    · intro m h1 h2
+      have hb : i + m < d.1.toArray.size := by
+        rw [Vector.size_toArray]
+        simp at h1
+        omega
+      simp
+      exact (Array.getElem_setIfInBounds_ne hb (by omega)).symm
+  unfold layerPast RSOR.layer
+  dsimp only
+  rw [fillerAtF_real kem kdfS streamS geom hops _ _ _ j c ss hsz (by rw [hs]; exact henc)
+    (fun k hk => by
+      simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?, hget k hk]) i hi, hseeds]
+
 /-- With the ciphertext that the seed `s` gives at hop `j` and the keystream, tagging function
 and payload encryption of its keys, `layerF` is the layer built from the draw with `s` at
 position `j`, for a layer up to hop `j`'s. -/
@@ -1356,9 +1394,10 @@ theorem layerF_real (hops : Array PathHop) (d : RSOR.Draw geom) (payload pkt : B
       exact henc) hpkt
   unfold layerF
   dsimp only
-  rw [fillerAtF_real kem kdfS streamS geom hops _ _ _ j c ss hj hsz (by rw [hs]; exact henc)
+  rw [fillerAtF_real kem kdfS streamS geom hops _ _ _ j c ss hsz (by rw [hs]; exact henc)
     (fun k hk => by
-      simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?, hget k hk]) i hi,
+      simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?, hget k hk]) i
+      (le_trans hi (Nat.le_of_lt hj)),
     ← packetK_eq_packetF,
     packetK_congr kem cipher macS kdfS streamS geom _ _ _ _ _ _ _ _ fun m hm =>
       extract_getElem!_congr _ _ i m hSS (hget (i + m) (by omega)),

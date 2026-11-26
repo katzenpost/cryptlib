@@ -110,9 +110,75 @@ def headerRelays (sk : Role → kem.PrivateKey) (c : kem.Ciphertext) (km : Vecto
       else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o)
     dec patch
 
-/-- **The relay that answers one header, in the game.** Answering the relay's oracle for a
-handler that accepts the header `Hv` only gives `headerRelays` with the cipher's decryption
-under the payload key. -/
+/-- **The relay that answers one header, in the game.** If the relay's answers `f` to the
+ciphertext `c` are, on an onion with the header `Hv`, what its MAC key and keystream give from
+the decryption `D` of the payload, and nothing under any other header, then answering the
+relay's oracle with them gives `headerRelays`. -/
+theorem viaOracle_header (sk : Role → kem.PrivateKey) (c : kem.Ciphertext)
+    (f : ByteArray → ProcResult) (km : Vector UInt8 32) (U : ByteArray)
+    (Hv : Vector UInt8 geom.headerLength)
+    (D : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+      → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (hf : ∀ o : RSOR.Onion geom,
+      relayAns kem cipher macS kdfS streamS geom (sk .relay) c f (RSOR.join o)
+        = if o.1 = Hv then procKeysD kem macS geom km U (ofVector (D o.2)) (RSOR.join o)
+          else relayAns kem cipher macS kdfS streamS geom (sk .relay) c (fun _ => none)
+            (RSOR.join o))
+    (patch : Protocols.RSOR.Patch
+      (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
+    {α : Type}
+    (oa : OracleComp
+      (Protocols.RSOR.oracleSpec (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) α)
+    (log : Protocols.RSOR.Log (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) :
+    simulateQ (relayImpl (relayAns kem cipher macS kdfS streamS geom (sk .relay) c f))
+        ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 sk patch)
+          oa).run log)
+      = (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk c km U Hv D
+          patch) oa).run log := by
+  have hstep : ∀ (h : Role) (o : RSOR.Onion geom),
+      (if h = .relay then
+          RSOR.stepOf geom
+            (relayAns kem cipher macS kdfS streamS geom (sk .relay) c f (RSOR.join o))
+        else RSOR.proc kem cipher macS kdfS streamS geom (sk h) o)
+      = if h = .relay ∧ o.1 = Hv then
+          RSOR.stepOf geom (procKeysD kem macS geom km U (ofVector (D o.2)) (RSOR.join o))
+        else if h = .relay then
+          RSOR.stepOf geom
+            (relayAns kem cipher macS kdfS streamS geom (sk .relay) c (fun _ => none) (RSOR.join o))
+        else RSOR.proc kem cipher macS kdfS streamS geom (sk h) o := by
+    intro h o
+    by_cases hr : h = .relay
+    · subst hr
+      rw [hf o]
+      by_cases ho : o.1 = Hv <;> simp [ho]
+    · simp [hr]
+  have hreply : ∀ (h : Role) (msg : RSOR.Msg geom) (o : RSOR.Onion geom),
+      (if h = .relay then RSOR.replyOf cipher geom msg
+          (relayAns kem cipher macS kdfS streamS geom (sk .relay) c f (RSOR.join o))
+        else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o)
+      = if h = .relay ∧ o.1 = Hv then
+          RSOR.replyOf cipher geom msg
+            (procKeysD kem macS geom km U (ofVector (D o.2)) (RSOR.join o))
+        else if h = .relay then
+          RSOR.replyOf cipher geom msg
+            (relayAns kem cipher macS kdfS streamS geom (sk .relay) c (fun _ => none) (RSOR.join o))
+        else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o := by
+    intro h msg o
+    by_cases hr : h = .relay
+    · subst hr
+      rw [hf o]
+      by_cases ho : o.1 = Hv <;> simp [ho]
+    · simp [hr]
+  rw [viaOracle_relayImpl]
+  unfold headerRelays Protocols.RSOR.withDec
+  congr 3
+  · funext h o
+    exact congrArg pure (hstep h o)
+  · funext h msg o
+    exact congrArg pure (hreply h msg o)
+
+/-- The relay with the keys `u` that accepts the header `Hv` only is `headerRelays` with the
+cipher's decryption under the payload key. -/
 theorem viaOracle_onlyHeader (sk : Role → kem.PrivateKey) (c : kem.Ciphertext) (u : KeyTuple)
     (Hv : Vector UInt8 geom.headerLength)
     (hcar : ∀ pkt, pkt.extract 0 (payloadOffset kem geom) = ofVector Hv
@@ -133,57 +199,57 @@ theorem viaOracle_onlyHeader (sk : Role → kem.PrivateKey) (c : kem.Ciphertext)
             (geom.routingInfoLength + geom.perHopRoutingInfoLength)) Hv
           (fun x => Util.Bytes.toVecN _
             (cipher.decrypt u.1.toArray (ofVector u.2.1) (ofVector x)))
-          patch) oa).run log := by
-  have hstep : ∀ (h : Role) (o : RSOR.Onion geom),
-      (if h = .relay then RSOR.stepOf geom (relayAns kem cipher macS kdfS streamS geom (sk .relay) c
-          (fun pkt => if pkt.extract 0 (payloadOffset kem geom) = ofVector Hv
-            then procKeys kem cipher macS streamS geom u pkt else none) (RSOR.join o))
-        else RSOR.proc kem cipher macS kdfS streamS geom (sk h) o)
-      = if h = .relay ∧ o.1 = Hv then
-          RSOR.stepOf geom (procKeysD kem macS geom u.2.2.1
-            (streamS.keystream (ofVector u.2.2.2) (ofVector u.2.1)
-              (geom.routingInfoLength + geom.perHopRoutingInfoLength))
-            (ofVector (Util.Bytes.toVecN (geom.payloadTagLength + geom.forwardPayloadLength)
-              (cipher.decrypt u.1.toArray (ofVector u.2.1) (ofVector o.2)))) (RSOR.join o))
-        else if h = .relay then
-          RSOR.stepOf geom
-            (relayAns kem cipher macS kdfS streamS geom (sk .relay) c (fun _ => none) (RSOR.join o))
-        else RSOR.proc kem cipher macS kdfS streamS geom (sk h) o := by
-    intro h o
-    by_cases hr : h = .relay
-    · subst hr
-      rw [relayAns_header kem cipher macS kdfS streamS geom hvalid (sk .relay) c u Hv hcar o]
-      by_cases ho : o.1 = Hv <;> simp [ho]
-    · simp [hr]
-  have hreply : ∀ (h : Role) (msg : RSOR.Msg geom) (o : RSOR.Onion geom),
-      (if h = .relay then RSOR.replyOf cipher geom msg
-          (relayAns kem cipher macS kdfS streamS geom (sk .relay) c
-          (fun pkt => if pkt.extract 0 (payloadOffset kem geom) = ofVector Hv
-            then procKeys kem cipher macS streamS geom u pkt else none) (RSOR.join o))
-        else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o)
-      = if h = .relay ∧ o.1 = Hv then
-          RSOR.replyOf cipher geom msg (procKeysD kem macS geom u.2.2.1
-            (streamS.keystream (ofVector u.2.2.2) (ofVector u.2.1)
-              (geom.routingInfoLength + geom.perHopRoutingInfoLength))
-            (ofVector (Util.Bytes.toVecN (geom.payloadTagLength + geom.forwardPayloadLength)
-              (cipher.decrypt u.1.toArray (ofVector u.2.1) (ofVector o.2)))) (RSOR.join o))
-        else if h = .relay then
-          RSOR.replyOf cipher geom msg
-            (relayAns kem cipher macS kdfS streamS geom (sk .relay) c (fun _ => none) (RSOR.join o))
-        else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o := by
-    intro h msg o
-    by_cases hr : h = .relay
-    · subst hr
-      rw [relayAns_header kem cipher macS kdfS streamS geom hvalid (sk .relay) c u Hv hcar o]
-      by_cases ho : o.1 = Hv <;> simp [ho]
-    · simp [hr]
-  rw [viaOracle_relayImpl]
-  unfold headerRelays Protocols.RSOR.withDec
-  congr 3
-  · funext h o
-    exact congrArg pure (hstep h o)
-  · funext h msg o
-    exact congrArg pure (hreply h msg o)
+          patch) oa).run log :=
+  viaOracle_header kem cipher macS kdfS streamS geom hvalid hmactag h16 sk c _ _ _ Hv _
+    (relayAns_header kem cipher macS kdfS streamS geom hvalid (sk .relay) c u Hv hcar) patch oa log
+
+/-- The relay's answers under the header `Hv` only, from its MAC key, its header keystream and
+a decryption `D` of the payload. -/
+def headerHand (km : Vector UInt8 32) (U : ByteArray) (Hv : Vector UInt8 geom.headerLength)
+    (D : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+      → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (pkt : ByteArray) : ProcResult :=
+  if pkt.extract 0 (payloadOffset kem geom) = ofVector Hv then
+    procKeysD kem macS geom km U
+      (ofVector (D (Util.Bytes.toVecN _ (pkt.extract (payloadOffset kem geom) pkt.size)))) pkt
+  else none
+
+omit hmactag h16 in
+include hvalid in
+/-- What a relay with the answers `headerHand` does with an onion. -/
+theorem relayAns_headerHand (sk : kem.PrivateKey) (c : kem.Ciphertext) (km : Vector UInt8 32)
+    (U : ByteArray) (Hv : Vector UInt8 geom.headerLength)
+    (D : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+      → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (hcar : ∀ pkt, pkt.extract 0 (payloadOffset kem geom) = ofVector Hv
+      → carries kem c pkt = true)
+    (o : RSOR.Onion geom) :
+    relayAns kem cipher macS kdfS streamS geom sk c (headerHand kem macS geom km U Hv D)
+        (RSOR.join o)
+      = if o.1 = Hv then procKeysD kem macS geom km U (ofVector (D o.2)) (RSOR.join o)
+        else relayAns kem cipher macS kdfS streamS geom sk c (fun _ => none) (RSOR.join o) := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have hoff : payloadOffset kem geom = geom.headerLength := by
+    unfold payloadOffset
+    rw [hhdr]
+    rfl
+  have e1 : (RSOR.join o).extract 0 (payloadOffset kem geom) = ofVector o.1 := by
+    unfold RSOR.join
+    rw [hoff]
+    simpa using Cryptlib.Util.Bytes.extract_append_left (ofVector o.1) (ofVector o.2)
+  have e2 : (RSOR.join o).extract (payloadOffset kem geom) (RSOR.join o).size = ofVector o.2 := by
+    unfold RSOR.join
+    rw [hoff]
+    simpa using Cryptlib.Util.Bytes.extract_append_right (ofVector o.1) (ofVector o.2)
+  by_cases ho : o.1 = Hv
+  · have hc := hcar _ (e1.trans (by rw [ho]))
+    unfold relayAns headerHand
+    simp only [hc, ho, e1, ↓reduceIte]
+    rw [e2, Cryptlib.Util.Bytes.toVecN_ofVector]
+  · have hne : (RSOR.join o).extract 0 (payloadOffset kem geom) ≠ ofVector Hv := fun h =>
+      ho (by simpa using congrArg (Util.Bytes.toVecN geom.headerLength) (e1.symm.trans h))
+    unfold relayAns headerHand
+    simp only [hne, ho, ↓reduceIte]
 
 /-! ## The cipher game for a relay that answers one header -/
 
