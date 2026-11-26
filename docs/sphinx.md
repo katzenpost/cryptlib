@@ -81,10 +81,24 @@ packets with the game's keys (`keyedChain_le`).
   relay's keys are uniform and it answers the challenge ciphertext under the challenge header
   only.
 
-Not proved yet: the rest of the bound on that last distance (the payload cipher, the stream
-cipher, and that the two ideal worlds agree); SLU← and STI↔ for KEM Sphinx; all three for NIKE
-Sphinx. The game for a payload key used for one block (`WideBlockCipher.oneQueryExp`) is stated
-for that work and not yet used.
+- The payload cipher step, for each world of TLU→ (`forward_payload_le`, `short_payload_le`).
+  Once the relay answers one header only, it decrypts one block per header: its log admits a
+  header once (`viaDec_decOnce`). So the world is the game for a payload key used for one block
+  (`WideBlockCipher.oneQueryExp`, through `PayloadGame.exp_eq`), and the cipher can be replaced
+  by the ideal one at the cost of that game's advantage and the bad draws. In the ideal world
+  the encrypted block is uniform, and the relay decrypts it to the sender's block and any other
+  block to one uniform block.
+
+The cipher game gives the adversary a decryption oracle that answers for one block, the first
+it is asked about. The relay asks it twice about the same block when it replies to an onion it
+has processed, which is why the oracle remembers its block instead of answering once.
+
+For this step a draw is good only if the sender's block at the relay has a payload's length.
+That it always has, when the onion can be built, is not proved yet.
+
+Not proved yet: the rest of the bound on that last distance (the stream cipher, and that the
+two ideal worlds agree); a bound on the bad draws; SLU← and STI↔ for KEM Sphinx; all three for
+NIKE Sphinx.
 
 ## How the bounds are built
 
