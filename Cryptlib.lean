@@ -108,6 +108,7 @@ import Cryptlib.Protocols.Sphinx.KEMSphinxKeyedMac
 import Cryptlib.Protocols.Sphinx.KEMSphinxTLU
 import Cryptlib.Protocols.Sphinx.KEMSphinxTLUPayload
 import Cryptlib.Protocols.Sphinx.KEMSphinxTLUStream
+import Cryptlib.Protocols.Sphinx.KEMSphinxTLUNext
 import Cryptlib.Protocols.Sphinx.NIKESphinxRSOR
 import Cryptlib.Protocols.Sphinx.Schemes
 import Cryptlib.Protocols.GroupComm

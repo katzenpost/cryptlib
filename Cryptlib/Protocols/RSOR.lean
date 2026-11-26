@@ -389,12 +389,12 @@ def shortPos {msg : S.Msg} {receiver : S.Receiver} : Fin (c.short msg receiver).
   ⟨c.pos, by simp [short, Route.take]⟩
 
 /-- What the honest relay answers in the second world, where `mine` is the replacement's layer
-at the relay and `r` the randomness of the adversary's own onion. -/
-def patch (r : S.Randomness) (mine : S.Onion) : Patch S where
+at the relay, `next` the layer the original has after the relay, and `r` the randomness of the
+adversary's own onion. -/
+def patchWith (next : S.Onion) (r : S.Randomness) (mine : S.Onion) : Patch S where
   proc h o out :=
     if h = .relay ∧ o.1 = mine.1 then
       if hn : c.pos + 1 < c.req.fwd.hops.length then
-        let next := S.form c.req r ⟨c.pos + 1, hn⟩
         let name := c.req.fwd.hops[c.pos.val + 1].name
         if o.2 = mine.2 then pure (some (.forward name next))
         else do return some (.forward name (next.1, ← $ᵗ S.Payload))
@@ -406,6 +406,15 @@ def patch (r : S.Randomness) (mine : S.Onion) : Patch S where
         Fin c.req.back.hops.length)].name,
         S.formBack c.req r m ⟨0, List.length_pos_iff.2 fun h => by simpa [h] using c.sender⟩)
     else out
+
+/-- The original's layer after the honest relay, when there is one. -/
+def next (r : S.Randomness) (mine : S.Onion) : S.Onion :=
+  if hn : c.pos + 1 < c.req.fwd.hops.length then S.form c.req r ⟨c.pos + 1, hn⟩ else mine
+
+/-- What the honest relay answers in the second world: `patchWith` at the original's own next
+layer. -/
+def patch (r : S.Randomness) (mine : S.Onion) : Patch S :=
+  c.patchWith (c.next r mine) r mine
 
 end ForwardChallenge
 
