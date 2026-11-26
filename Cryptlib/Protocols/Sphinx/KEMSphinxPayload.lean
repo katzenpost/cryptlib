@@ -106,6 +106,20 @@ def headerRelays (sk : Role → kem.PrivateKey) (c : kem.Ciphertext) (u : KeyTup
       else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o)
     dec patch
 
+/-- Those relays do not use the payload key. -/
+theorem headerRelays_payloadKey (sk : Role → kem.PrivateKey) (c : kem.Ciphertext)
+    (kp kp' : Vector UInt8 48) (r : Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32)
+    (Hv : Vector UInt8 geom.headerLength)
+    (dec : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+      → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (patch : Protocols.RSOR.Patch
+      (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16)) :
+    headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk c (kp, r) Hv dec patch
+      = headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 sk c (kp', r) Hv dec
+          patch := by
+  unfold headerRelays
+  simp only [procKeysD_payloadKey kem macS streamS geom _ kp kp' r]
+
 /-- **The relay that answers one header, in the game.** Answering the relay's oracle for a
 handler that accepts the header `Hv` only gives `headerRelays` with the cipher's decryption
 under the payload key. -/

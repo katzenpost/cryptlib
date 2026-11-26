@@ -52,6 +52,20 @@ theorem prEvent_bind_le_add_of_bad_le (mx : ProbComp α) (F G : α → ProbComp 
   · simp [hx]
   · simpa [hx] using h x hx
 
+/-- Two games that agree off a bad draw differ by at most the chance of a bad draw. -/
+theorem abs_prEvent_bind_sub_le_bad (mx : ProbComp α) (F G : α → ProbComp Bool) (bad : α → Prop)
+    (h : ∀ x, ¬ bad x → F x = G x) :
+    |(Pr{let y ← mx >>= F}[y = true]).toReal - (Pr{let y ← mx >>= G}[y = true]).toReal|
+      ≤ (Pr{let x ← mx}[bad x]).toReal := by
+  have h12 := prEvent_bind_le_add_of_bad_le mx F G bad (· = true) fun x hx => by rw [h x hx]
+  have h21 := prEvent_bind_le_add_of_bad_le mx G F bad (· = true) fun x hx => by rw [h x hx]
+  have r12 := ENNReal.toReal_mono
+    (ENNReal.add_ne_top.mpr ⟨prEvent_ne_top _, prEvent_ne_top _⟩) h12
+  have r21 := ENNReal.toReal_mono
+    (ENNReal.add_ne_top.mpr ⟨prEvent_ne_top _, prEvent_ne_top _⟩) h21
+  rw [ENNReal.toReal_add (prEvent_ne_top _) (prEvent_ne_top _)] at r12 r21
+  exact abs_sub_le_iff.2 ⟨by linarith, by linarith⟩
+
 theorem prEvent_pure_bool_mono (a b : Bool) (h : a = true → b = true) :
     Pr{let x ← (pure a : ProbComp Bool)}[x = true] ≤ Pr{let x ← (pure b : ProbComp Bool)}[x = true] := by
   rw [prEvent_pure, prEvent_pure]
