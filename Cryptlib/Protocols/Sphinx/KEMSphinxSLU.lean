@@ -450,6 +450,150 @@ theorem backView0_real_exit (names : Role → RSOR.Name) {pk : Key kem}
                                patch := (Protocols.RSOR.BackwardChallenge.world0 ch.c r).patch } :
     Protocols.RSOR.World 𝒮)) honion
 
+/-- The draws that the exact steps do not cover: the honest relay's public key is not the one
+its private key gives, its seed may make the KEM fail, or the first layer that carries its
+ciphertext cannot be built. -/
+def backBad0 {names : Role → RSOR.Name} {A : (Protocols.RSOR.backwardUnlinkable (S := 𝒮)).Adversary}
+    (d : PropDraw kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness geom) A) : Prop
+        :=
+  ¬ (d.k.1.1 = kem.derivePublicKey d.k.2 ∧ kem.Reliable (kem.stateFromSeed d.s) ∧
+    match d.c.pos.val with
+    | 0 => ∃ pkt, RSOR.layer kem cipher macS kdfS streamS geom
+        (RSOR.path kem d.c.req.fwd [.recipient d.c.req.receiver])
+        (setSeed geom d.o (d.c.req.fwd.hops.length - 1) d.s).1
+        (RSOR.body kem macS kdfS streamS geom d.c.req
+          (setSeed geom d.o (d.c.req.fwd.hops.length - 1) d.s)) 0 = .ok pkt
+    | k + 1 => ∃ x0, RSOR.layer kem cipher macS kdfS streamS geom
+        (RSOR.path kem d.c.req.back [.surbReply d.o.2.2.2])
+        (setSeedBack geom d.o k d.s).2.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩ 0
+          = .ok x0)
+
+variable [SampleableType kem.Plaintext]
+
+set_option maxHeartbeats 2000000 in
+/-- **World 0 of SLU← is the keyed game with the real keys, off the bad draws.** -/
+theorem backward_false_sub_keyedReal_le (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.backwardUnlinkable (S := 𝒮)).Adversary) :
+    |(Pr{let x ← Protocols.RSOR.Property.play names A false}[x = true]).toReal
+      - (Pr{let x ← (keyedReal cipher macS kdfS streamS geom
+          (backAdv0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[x =
+              true]).toReal|
+    ≤ (Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness geom)
+        ($ᵗ RSOR.Randomness geom) A)}[backBad0 kem cipher macS kdfS streamS geom hvalid hmactag h16
+            d]).toReal := by
+  rw [(backward_play_false_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+      A).prEvent_eq (fun x => x = true),
+    (keyedReal_propAdvOf_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names _ _ _ A).prEvent_eq
+      (fun x => x = true)]
+  refine prEvent_bind_toReal_sub_le_of_bad _ _ _
+    (backBad0 kem cipher macS kdfS streamS geom hvalid hmactag h16) (fun d hd => ?_) (fun x => x =
+        true)
+  obtain ⟨hpk, hrel, hbuild⟩ := Classical.not_not.mp hd
+  have hrelay := d.c.relay
+  cases hp : d.c.pos.val with
+  | zero =>
+    rw [hp] at hbuild hrelay
+    obtain ⟨pkt, hpkt⟩ := hbuild
+    have hj : d.c.req.fwd.hops.length - 1 < d.c.req.fwd.hops.length :=
+      Nat.sub_one_lt (Nat.ne_of_gt (List.length_pos_iff.2 d.c.req.fwd_ne))
+    have hle : d.c.req.fwd.hops.length ≤ geom.nrHops := d.c.req.fwd.length_le
+    obtain ⟨ct, ss, henc⟩ := layer_zero_encap kem cipher macS kdfS streamS geom d.c.req.fwd _ _ _
+        pkt hpkt
+      (d.c.req.fwd.hops.length - 1) hj
+    have hkey : (d.c.req.fwd.hops[d.c.req.fwd.hops.length - 1]'hj).key = d.k.1 := by
+      have h1 : d.c.req.fwd.hops[d.c.req.fwd.hops.length - 1]'hj
+          = honAt kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay names d.k.1 d.keys
+              .relay :=
+        Option.some.inj ((List.getElem?_eq_getElem hj).symm.trans
+          (List.getLast?_eq_getElem?.symm.trans hrelay))
+      rw [h1]
+      rfl
+    have hs : (setSeed geom d.o (d.c.req.fwd.hops.length - 1) d.s).1.1.toArray[
+        d.c.req.fwd.hops.length - 1]! = d.s := by
+      simp [setSeed, lt_of_lt_of_le hj hle]
+    rw [hs] at henc
+    replace henc : kemEncap kem (ofVector (kem.encodePublicKey d.k.1.1)) d.s = .ok (ct, ss) :=
+      (congrArg (fun key : Key kem => kemEncap kem (ofVector (kem.encodePublicKey key.1)) d.s)
+        hkey).symm.trans henc
+    obtain ⟨rfl, rfl⟩ := kemEncap_encapOf kem d.k.1.1 d.s ct ss henc
+    have hdec : decapOf kem d.k.2 (encapOf kem d.k.1.1 d.s).1
+        = some (encapOf kem d.k.1.1 d.s).2 := by
+      have h := decapOf_encapOf kem d.k.2 d.s hrel _ _ (hpk ▸ henc)
+      rwa [← hpk] at h
+    have hview := backView0_real_exit kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        ⟨d.keys, d.c⟩ d.o hp d.s _ _ pkt henc hpkt
+    have hseed : relaySeed kem geom d.c.req 0 d.o d.s
+        = setSeed geom d.o (d.c.req.fwd.hops.length - 1) d.s := rfl
+    rw [propAdv_post kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names _ _ _ A d.k d.keys _ _ hdec d.st
+        d.log _, hseed,
+      ← hview]
+    rfl
+  | succ k =>
+    rw [hp] at hbuild hrelay
+    obtain ⟨x0, hx0⟩ := hbuild
+    have hlt : d.c.pos.val < d.c.req.back.hops.length := d.c.pos.isLt
+    have hk : k < d.c.req.back.hops.length := by omega
+    have hle : d.c.req.back.hops.length ≤ geom.nrHops := d.c.req.back.length_le
+    obtain ⟨ct, ss, henc⟩ := layer_zero_encap kem cipher macS kdfS streamS geom d.c.req.back _ _ _
+        x0 hx0 k hk
+    have hkey : (d.c.req.back.hops[k]'hk).key = d.k.1 := by
+      have h1 : d.c.req.back.hops[k]'hk
+          = honAt kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay names d.k.1 d.keys
+              .relay :=
+        Option.some.inj ((List.getElem?_eq_getElem hk).symm.trans hrelay)
+      rw [h1]
+      rfl
+    have hs : (setSeedBack geom d.o k d.s).2.1.1.toArray[k]! = d.s := by
+      simp [setSeedBack, lt_of_lt_of_le hk hle]
+    rw [hs] at henc
+    replace henc : kemEncap kem (ofVector (kem.encodePublicKey d.k.1.1)) d.s = .ok (ct, ss) :=
+      (congrArg (fun key : Key kem => kemEncap kem (ofVector (kem.encodePublicKey key.1)) d.s)
+        hkey).symm.trans henc
+    obtain ⟨rfl, rfl⟩ := kemEncap_encapOf kem d.k.1.1 d.s ct ss henc
+    have hdec : decapOf kem d.k.2 (encapOf kem d.k.1.1 d.s).1
+        = some (encapOf kem d.k.1.1 d.s).2 := by
+      have h := decapOf_encapOf kem d.k.2 d.s hrel _ _ (hpk ▸ henc)
+      rwa [← hpk] at h
+    have hview := backView0_real_back kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        ⟨d.keys, d.c⟩ d.o k hp d.s _ _ x0 henc hx0
+    have hseed : relaySeed kem geom d.c.req (k + 1) d.o d.s = setSeedBack geom d.o k d.s := rfl
+    rw [propAdv_post kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names _ _ _ A d.k d.keys _ _ hdec d.st
+        d.log _, hseed,
+      ← hview]
+    rfl
+
+/-- **The honest relay's keys in world 0 of SLU← may be uniform.** World 0 differs from the
+keyed game with uniform keys at the relay by at most the chance of a bad draw and the cost of
+replacing the keys (KEM and KDF). -/
+theorem backward_false_sub_keyedIdeal_le (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.backwardUnlinkable (S := 𝒮)).Adversary) :
+    |(Pr{let x ← Protocols.RSOR.Property.play names A false}[x = true]).toReal
+      - (Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+          (backAdv0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[x =
+              true]).toReal|
+    ≤ (Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness geom)
+        ($ᵗ RSOR.Randomness geom) A)}[backBad0 kem cipher macS kdfS streamS geom hvalid hmactag h16
+            d]).toReal
+      + keyedCost cipher macS kdfS streamS geom (backAdv0 kem cipher macS kdfS streamS geom hvalid
+          hmactag h16 names A) := by
+  have h1 := backward_false_sub_keyedReal_le kem cipher macS kdfS streamS geom hvalid hmactag h16
+      names A
+  have h2 := keyedChain_le cipher macS kdfS streamS geom (backAdv0 kem cipher macS kdfS streamS
+      geom hvalid hmactag h16 names A)
+  have t := abs_sub_le
+    (Pr{let x ← Protocols.RSOR.Property.play names A false}[x = true]).toReal
+    (Pr{let x ← (keyedReal cipher macS kdfS streamS geom
+      (backAdv0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[x = true]).toReal
+    (Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom
+      (backAdv0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[x = true]).toReal
+  linarith
+
 end BackGame
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
