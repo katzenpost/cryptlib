@@ -530,6 +530,34 @@ theorem procKeys_eq_procKeysD (t : KeyTuple) (pkt : ByteArray) :
     · simp only [h1, hv, ↓reduceDIte, ↓reduceIte, hb, hA _ hp hiv, cipher.decrypt_size]
       rfl
 
+/-- Given the decrypted payload, a hop uses its MAC key, its header encryption key and its IV
+only. -/
+theorem unwrapKEMKeysD_congr (K₁ K₂ : HopKeys) (hm : K₁.headerMAC = K₂.headerMAC)
+    (he : K₁.headerEncryption = K₂.headerEncryption)
+    (hi : K₁.headerEncryptionIV = K₂.headerEncryptionIV) (tag : Vector UInt8 32)
+    (pkt dec : ByteArray) (hd : dec.size = (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) pkt.size).size)
+    (h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength) :
+    unwrapKEMKeysD kem macS streamS geom K₁ tag pkt dec hd h1
+      = unwrapKEMKeysD kem macS streamS geom K₂ tag pkt dec hd h1 := by
+  cases K₁
+  cases K₂
+  dsimp only at hm he hi
+  subst hm he hi
+  rfl
+
+/-- **Given the decrypted payload, a hop does not use its payload key.** -/
+theorem procKeysD_payloadKey (dec : ByteArray) (kp kp' : Vector UInt8 48)
+    (r : Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32) (pkt : ByteArray) :
+    procKeysD kem macS streamS geom dec (kp, r) pkt
+      = procKeysD kem macS streamS geom dec (kp', r) pkt := by
+  have h1 := keyTuple_keysKDF (kp, r) .empty
+  have h2 := keyTuple_keysKDF (kp', r) .empty
+  simp only [keyTuple, Prod.ext_iff] at h1 h2
+  unfold procKeysD
+  simp only [unwrapKEMKeysD_congr kem macS streamS geom
+    (deriveHopKeys (keysKDF (kp, r)) .empty) (deriveHopKeys (keysKDF (kp', r)) .empty)
+    (h1.2.2.1.trans h2.2.2.1.symm) (h1.2.2.2.trans h2.2.2.2.symm) (h1.2.1.trans h2.2.1.symm)]
+
 /-- **A hop uses its shared secret only through its four keys.** Processing with a
 decapsulation function is processing with the keys of the secret it gives. -/
 theorem procWith_eq_procKeys (dec : ByteArray → Except String ByteArray) (pkt ss : ByteArray)

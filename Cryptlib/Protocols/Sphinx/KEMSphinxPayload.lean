@@ -175,6 +175,87 @@ theorem viaOracle_onlyHeader (sk : Role → kem.PrivateKey) (c : kem.Ciphertext)
   · funext h msg o
     exact congrArg pure (hreply h msg o)
 
+/-! ## The cipher game for a relay that answers one header -/
+
+local notation "𝒮" => sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16
+
+/-- A payload: the block the payload cipher works on. -/
+abbrev Block (geom : Geometry) := Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+
+/-- A game in which the honest relay answers its challenge ciphertext under one header only,
+cut where its payload key is used: everything drawn besides that key, given the IV; the block
+the sender encrypts under it; and how the game goes on from the encrypted block. -/
+structure PayloadGame where
+  X : Type
+  draw : Vector UInt8 16 → ProbComp X
+  sk : X → Role → kem.PrivateKey
+  c : X → kem.Ciphertext
+  /-- The relay's MAC key and header encryption key. -/
+  keys : X → Vector UInt8 32 × Vector UInt8 32
+  header : X → Vector UInt8 geom.headerLength
+  plain : X → Block geom
+  log : X → Protocols.RSOR.Log 𝒮
+  patch : X → Block geom → Protocols.RSOR.Patch 𝒮
+  rest : X → Block geom → OracleComp (Protocols.RSOR.oracleSpec 𝒮) Bool
+
+namespace PayloadGame
+
+variable {kem cipher macS kdfS streamS geom hvalid hmactag h16}
+  (G : PayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16)
+
+/-- The game, with the cipher for `b = true`. For `b = false` the encrypted block is uniform,
+and the relay decrypts it to the sender's block and any other block to one uniform block. -/
+def exp (b : Bool) : ProbComp Bool := do
+  let kp ← $ᵗ (Vector UInt8 48)
+  let iv ← $ᵗ (Vector UInt8 16)
+  let x ← G.draw iv
+  let u ← $ᵗ (Block geom)
+  let v ← $ᵗ (Block geom)
+  let e := if b then
+    Util.Bytes.toVecN _ (cipher.encrypt kp.toArray (ofVector iv) (ofVector (G.plain x))) else u
+  (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 (G.sk x) (G.c x)
+      (default, iv, G.keys x) (G.header x)
+      (fun y => if b then
+          Util.Bytes.toVecN _ (cipher.decrypt kp.toArray (ofVector iv) (ofVector y))
+        else if y = e then G.plain x else v)
+      (G.patch x e)) (G.rest x e)).run' (G.log x)
+
+/-- The adversary against the cipher that plays the game: it asks for the sender's block to be
+encrypted, and the relay asks the decryption oracle. -/
+def adv : Primitives.WideBlockCipher.OneQueryAdversary
+    (geom.payloadTagLength + geom.forwardPayloadLength) where
+  St := G.X × Vector UInt8 16
+  choose iv := (fun x => (G.plain x, x, iv)) <$> G.draw iv
+  guess st e :=
+    (simulateQ (Protocols.RSOR.viaDec (S := 𝒮)
+        (G.header st.1) (fun o => o.2)
+        (fun o x => RSOR.stepOf geom
+          (procKeysD kem macS streamS geom (ofVector x) (default, st.2, G.keys st.1)
+            (RSOR.join o)))
+        (fun msg o x => RSOR.replyOf cipher geom msg
+          (procKeysD kem macS streamS geom (ofVector x) (default, st.2, G.keys st.1)
+            (RSOR.join o)))
+        (fun h o => if h = .relay then
+            RSOR.stepOf geom (relayAns kem cipher macS kdfS streamS geom
+              (G.sk st.1 .relay) (G.c st.1) (fun _ => none) (RSOR.join o))
+          else RSOR.proc kem cipher macS kdfS streamS geom (G.sk st.1 h) o)
+        (fun h msg o => if h = .relay then
+            RSOR.replyOf cipher geom msg (relayAns kem cipher macS kdfS streamS geom
+              (G.sk st.1 .relay) (G.c st.1) (fun _ => none) (RSOR.join o))
+          else RSOR.reply kem cipher macS kdfS streamS geom (G.sk st.1 h) msg o)
+        (G.patch st.1 e)) (G.rest st.1 e)).run' (G.log st.1)
+
+/-- **The game is the cipher game played by `adv`**, when its logs are well-formed. -/
+theorem exp_eq (hwf : ∀ iv, ∀ x ∈ support (G.draw iv), (G.log x).WF) (b : Bool) :
+    G.exp b = Primitives.WideBlockCipher.oneQueryExp cipher _ G.adv b := by
+  unfold exp Primitives.WideBlockCipher.oneQueryExp adv
+  simp only [bind_map_left]
+  refine bind_congr fun kp => bind_congr fun iv =>
+    bind_congr_of_forall_mem_support _ fun x hx => bind_congr fun u => bind_congr fun v => ?_
+  exact (Protocols.RSOR.viaDec_decOnce _ _ _ _ _ _ _ _ _ _ (hwf iv x hx)).symm
+
+end PayloadGame
+
 end Payload
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
