@@ -129,6 +129,120 @@ theorem next_hidden_le (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adver
   rw [ENNReal.toReal_add (prEvent_ne_top _) (prEvent_ne_top _)] at r12 r21
   exact abs_sub_le_iff.2 ⟨by linarith, by linarith⟩
 
+/-! ## World 1 as a relay that answers one header -/
+
+/-- With its own answers for the ciphertext `c`, the keyed oracle is the honest node's. -/
+theorem procImplF_ownAns (sk : kem.PrivateKey) (c : kem.Ciphertext) :
+    procImplF kem cipher macS kdfS streamS geom sk c (ownAns kem cipher macS kdfS streamS geom sk)
+      = procImpl kem cipher macS kdfS streamS geom sk := by
+  rw [procImplF_eq_relayImpl]
+  have h : relayAns kem cipher macS kdfS streamS geom sk c
+      (ownAns kem cipher macS kdfS streamS geom sk)
+      = ownAns kem cipher macS kdfS streamS geom sk := by
+    funext pkt
+    unfold relayAns ownAns
+    split_ifs <;> rfl
+  rw [h]
+  rfl
+
+set_option maxHeartbeats 1000000 in
+/-- **World 1 after its draws, as a relay that answers one header.** With the honest relay's
+own answers for the hidden ciphertext, the second phase of world 1 is the game where the relay
+answers the replacement's ciphertext under the replacement's header only, from its MAC key, its
+uniform keystream and the ideal payload cipher. -/
+theorem nextOwn_run (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (k : Key kem × kem.PrivateKey)
+    (ch : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1)
+    (st : A.State × Protocols.RSOR.Log 𝒮 × (Role → kem.PrivateKey))
+    (s' : Vector UInt8 32) (x : NextOth geom) (U' : ByteArray)
+    (hsz : (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x.2.2.2.1
+      (encapOf kem k.1.1 x.2.2.1).1 (ofVector x.1)).size
+        = 2 + kem.ciphertextSize + geom.routingInfoLength) :
+    simulateQ (procImplF kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s').1
+        (ownAns kem cipher macS kdfS streamS geom k.2))
+      ((nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).post st
+        (nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x U'))
+    = (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (fun h => if h = .relay then k.2 else st.2.2 h) (encapOf kem k.1.1 x.2.2.1).1 x.2.1
+          (ofVector x.1)
+          (Util.Bytes.toVecN _
+            (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x.2.2.2.1
+                (encapOf kem k.1.1 x.2.2.1).1 (ofVector x.1)
+              ++ ofVector (macS.mac (ofVector x.2.1)
+                (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x.2.2.2.1
+                  (encapOf kem k.1.1 x.2.2.1).1 (ofVector x.1)))))
+          (fun y => if y = x.2.2.2.2.1 then
+              shortBlockU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x.2.2.2.1 (ofVector x.1)
+            else x.2.2.2.2.2)
+          (nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x U').1.patch)
+        (A.guess st.1 (nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch x U').1.onion)).run' st.2.1 := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  obtain ⟨U, km, s, o, u, v⟩ := x
+  obtain ⟨W, hW⟩ : ∃ W,
+      W = nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch (U, km, s, o, u, v) U' := ⟨_, rfl⟩
+  rw [procImplF_ownAns, ← hW]
+  show simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
+    (simulateQ (relayFirst kem W.2.1 W.2.2)
+      ((simulateQ (viaOracle kem cipher macS kdfS streamS geom hvalid hmactag h16 st.2.2 W.1.patch)
+        (A.guess st.1 W.1.onion)).run' st.2.1)) = _
+  have hcomp : procImpl kem cipher macS kdfS streamS geom k.2 ∘ₛ relayFirst kem W.2.1 W.2.2
+      = relayImpl (relayAns kem cipher macS kdfS streamS geom k.2 W.2.1 W.2.2) :=
+    relayImpl_comp_relayFirst kem _ W.2.1 W.2.2
+  rw [← QueryImpl.simulateQ_compose, hcomp]
+  obtain ⟨Hv, hHv⟩ : ∃ Hv : Vector UInt8 geom.headerLength, Hv = Util.Bytes.toVecN _
+      (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o
+        (encapOf kem k.1.1 s).1 (ofVector U)
+        ++ ofVector (macS.mac (ofVector km)
+          (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o
+        (encapOf kem k.1.1 s).1 (ofVector U)))) := ⟨_, rfl⟩
+  have hsize : (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o
+        (encapOf kem k.1.1 s).1 (ofVector U)
+      ++ ofVector (macS.mac (ofVector km)
+        (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o
+        (encapOf kem k.1.1 s).1 (ofVector U)))).size = geom.headerLength := by
+    rw [ByteArray.size_append, hsz, Cryptlib.Util.Bytes.size_ofVector, hmactag, hhdr]
+    rfl
+  have hcar : ∀ pkt : ByteArray, pkt.extract 0 (payloadOffset kem geom) = ofVector Hv
+      → carries kem (encapOf kem k.1.1 s).1 pkt = true := by
+    intro pkt hp
+    refine carries_of_extract kem _ pkt ?_
+    have h' := congrArg (fun x : ByteArray => x.extract 2 (2 + kem.ciphertextSize)) hp
+    simp only [ByteArray.extract_extract] at h'
+    rw [Nat.zero_add, Nat.zero_add, Nat.min_eq_left (by unfold payloadOffset; omega)] at h'
+    rw [h', hHv, Cryptlib.Util.Bytes.ofVector_toVecN _ hsize,
+      Cryptlib.Util.Bytes.extract_append_of_le _ _ (by rw [hsz]; omega)]
+    exact relayFrontAt_ct kem cipher macS kdfS streamS geom _ _ _ _ _ _
+      (Cryptlib.Util.Bytes.size_ofVector _) hsz
+  obtain ⟨skf, hskf⟩ : ∃ skf : Role → kem.PrivateKey,
+      skf = fun h => if h = .relay then k.2 else st.2.2 h := ⟨_, rfl⟩
+  have hrel' : skf .relay = k.2 := by rw [hskf]; simp
+  have hsk : ∀ h, h ≠ Role.relay → st.2.2 h = skf h := fun h hr => by rw [hskf]; simp [hr]
+  obtain ⟨Dd, hDd⟩ : ∃ Dd : Block geom → Block geom, Dd = (fun y => if y = u then
+          shortBlockU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o (ofVector U)
+        else v) := ⟨_, rfl⟩
+  have hW1 : W.2.1 = (encapOf kem k.1.1 s).1 := by rw [hW]; rfl
+  have hW2 : W.2.2 = headerHand kem macS geom km (ofVector U) Hv Dd := by
+    rw [hW, hHv, hDd]
+    rfl
+  rw [viaOracle_congr kem cipher macS kdfS streamS geom hvalid hmactag h16 st.2.2 skf hsk, hW1, hW2]
+  simp only [StateT.run'_eq, simulateQ_map]
+  have hf : ∀ o' : RSOR.Onion geom,
+      relayAns kem cipher macS kdfS streamS geom (skf .relay) (encapOf kem k.1.1 s).1
+          (headerHand kem macS geom km (ofVector U) Hv Dd) (RSOR.join o')
+        = if o'.1 = Hv then procKeysD kem macS geom km (ofVector U)
+            (ofVector (Dd o'.2)) (RSOR.join o')
+          else relayAns kem cipher macS kdfS streamS geom (skf .relay)
+            (encapOf kem k.1.1 s).1 (fun _ => none) (RSOR.join o') := fun o' => by
+    rw [hrel']
+    exact relayAns_headerHand kem cipher macS kdfS streamS geom hvalid k.2 _ km (ofVector U) Hv Dd
+      hcar o'
+  have hvo := viaOracle_header kem cipher macS kdfS streamS geom hvalid hmactag h16 skf
+    (encapOf kem k.1.1 s).1 (headerHand kem macS geom km (ofVector U) Hv Dd) km (ofVector U)
+    Hv Dd hf W.1.patch (A.guess st.1 W.1.onion) st.2.1
+  rw [hrel'] at hvo
+  rw [hvo]
+  rw [hskf, hDd, hHv]
+
 end ForwardFinal
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
