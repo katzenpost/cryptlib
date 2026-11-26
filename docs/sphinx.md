@@ -235,12 +235,14 @@ built like a reply layer, a header over the rest of the backward path with a uni
   cipher under the reply's payload key.
 
 Proved so far for the first: the triangle inequality through world 1′
-(`backwardWith_advantage_le`), and in `KEMSphinxSLUSender.lean` both onions around the sender's
-ciphertext with the sender's keys replaced by uniform ones (`swapPair_le_keyedIdeal`). World 1′
-is `replySwap`.
+(`backwardWith_advantage_le`), and in `KEMSphinxSLUSender.lean` the whole chain around the
+sender's ciphertext for both onions (`swapPair_le_uniform`): the advantage in telling them
+apart is at most the bad draws, the KEM and KDF terms, a MAC forgery, the one-block cipher
+advantage and the keystream generator's advantage, each for both onions, and the distance
+between the two games played from a uniform keystream at the sender. World 1′ is `replySwap`.
 
-Not proved yet: the MAC, cipher and keystream steps at the sender and the comparison of the two
-onions; and the second point.
+Not proved yet: that last distance, a comparison of the two onions with the sender's layer
+uniform; and the second point.
 
 ## How the bounds are built
 
