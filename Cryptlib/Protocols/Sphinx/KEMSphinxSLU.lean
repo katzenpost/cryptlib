@@ -775,6 +775,107 @@ theorem backward_false_sub_keyedIdeal_le (names : Role → RSOR.Name)
       (backAdv0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[x = true]).toReal
   linarith
 
+/-! ## World 1 around the honest relay's ciphertext -/
+
+/-- World 1 of SLU← around the honest relay's ciphertext and keys: `world1With` at the keyed
+first layer, the keyed header of the relay's own reply layer, and the keyed header of the
+relay's own forward layer. -/
+def backView1 (names : Role → RSOR.Name) {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names pk)
+    (o : RSOR.Randomness geom × RSOR.Msg geom × RSOR.Name × RSOR.Randomness geom)
+    (c : kem.Ciphertext) (t : KeyTuple) : Protocols.RSOR.World 𝒮 :=
+  Protocols.RSOR.BackwardChallenge.world1With ch.c
+    (match ch.c.pos.val with
+      | 0 => onionK kem cipher macS kdfS streamS geom ch.c.req o.1 (ch.c.req.fwd.hops.length - 1) c
+          t 0
+      | k + 1 => backOnionF kem cipher macS kdfS streamS geom ch.c.req o.1 (Nat.zero_lt_of_lt
+          ch.c.pos.isLt) k
+          (ofVector (kem.encodeCiphertext c)) (ksOf streamS geom t) (tagOf macS t)
+          (encOf cipher t))
+    (match ch.c.pos.val with
+      | 0 => none
+      | k + 1 => if k < ch.c.req.back.hops.length then
+          some (backHeaderF kem cipher macS kdfS streamS geom ch.c.req o.1 k (ofVector
+              (kem.encodeCiphertext c))
+            (ksOf streamS geom t) (tagOf macS t) (encOf cipher t) k)
+        else none)
+    (if ch.c.pos.val = 0 then
+        some (onionK kem cipher macS kdfS streamS geom ch.c.req o.1 (ch.c.req.fwd.hops.length - 1)
+            c t
+          (ch.c.req.fwd.hops.length - 1)).1
+      else none)
+    o.2.1 o.2.2.1 o.2.2.2
+
+/-- The keyed game of world 1 of SLU← around the honest relay's ciphertext. -/
+abbrev backSetup1 (names : Role → RSOR.Name) :
+    KeyedSetup kem (Protocols.RSOR.World 𝒮) Bool :=
+  propSetupOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names _ (shortDraw geom) (backView1 kem
+      cipher macS kdfS streamS geom hvalid hmactag h16 names)
+
+/-- The adversary of that keyed game. -/
+abbrev backAdv1 (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardUnlinkable (S :=
+    𝒮)).Adversary) :
+    KeyedAdversary (backSetup1 kem cipher macS kdfS streamS geom hvalid hmactag h16 names) :=
+  propAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardUnlinkable
+      (S := 𝒮)) .relay names _ _ _ A
+
+omit [SampleableType kem.Plaintext] in
+set_option maxHeartbeats 1000000 in
+/-- **On the backward path, the keyed world 1 with the real keys is world 1.** -/
+theorem backView1_real_back (names : Role → RSOR.Name) {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardUnlinkable (S := 𝒮)) .relay names pk)
+    (o : RSOR.Randomness geom × RSOR.Msg geom × RSOR.Name × RSOR.Randomness geom)
+    (k : ℕ) (hp : ch.c.pos.val = k + 1) (s : Vector UInt8 32)
+    (c : kem.Ciphertext) (ss x0 xk : ByteArray)
+    (henc : kemEncap kem (ofVector (kem.encodePublicKey pk.1)) s
+      = .ok (ofVector (kem.encodeCiphertext c), ss))
+    (hx0 : RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem ch.c.req.back [.surbReply
+        o.1.2.2.2])
+      (setSeedBack geom o.1 k s).2.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩ 0 = .ok x0)
+    (hxk : RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem ch.c.req.back [.surbReply
+        o.1.2.2.2])
+      (setSeedBack geom o.1 k s).2.1 ⟨Array.replicate geom.forwardPayloadLength 0⟩ k = .ok xk) :
+    backView1 kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o c (keyTuple
+        (deriveHopKeys kdfS ss))
+      = Protocols.RSOR.BackwardChallenge.world1 ch.c (setSeedBack geom o.1 k s) o.2.1 o.2.2.1
+        o.2.2.2 := by
+  have hlt : ch.c.pos.val < ch.c.req.back.hops.length := ch.c.pos.isLt
+  have hk : k < ch.c.req.back.hops.length := by omega
+  have hrel := ch.c.relay
+  rw [hp] at hrel
+  have hkey : (ch.c.req.back.hops[k]'hk).key = pk := by
+    have h1 : ch.c.req.back.hops[k]'hk
+        = honAt kem cipher macS kdfS streamS geom hvalid hmactag h16 .relay names pk ch.keys .relay
+            :=
+      Option.some.inj ((List.getElem?_eq_getElem hk).symm.trans hrel)
+    rw [h1]
+    rfl
+  have hpub : ((RSOR.path kem ch.c.req.back [.surbReply o.1.2.2.2])[k]!).publicKey
+      = ofVector (kem.encodePublicKey pk.1) := by
+    rw [RSOR.path_getElem! kem _ _ _ hk]
+    exact congrArg (fun key : Key kem => ofVector (kem.encodePublicKey key.1)) hkey
+  have henc' : kemEncap kem ((RSOR.path kem ch.c.req.back [.surbReply o.1.2.2.2])[k]!).publicKey
+      s = .ok (ofVector (kem.encodeCiphertext c), ss) := by
+    rw [hpub]
+    exact henc
+  have honion := backOnionF_real kem cipher macS kdfS streamS geom hvalid hmactag ch.c.req o.1
+      (Nat.zero_lt_of_lt hlt) k hk
+    s _ ss x0 henc' hx0
+  have hown := formBack_fst_realF kem cipher macS kdfS streamS geom hvalid hmactag ch.c.req o.1
+      ch.c.req.msg k hk ⟨k, hk⟩
+    le_rfl s _ ss xk henc' hxk
+  refine Eq.trans ?_ (Protocols.RSOR.BackwardChallenge.world1_eq (S := 𝒮) ch.c
+    (setSeedBack geom o.1 k s) o.2.1 o.2.2.1 o.2.2.2).symm
+  unfold backView1 Protocols.RSOR.BackwardChallenge.ownAt Protocols.RSOR.BackwardChallenge.exitAt
+  rw [hp]
+  dsimp only
+  rw [ite_eq_left hk, dite_eq_left hk, ite_eq_right (Nat.succ_ne_zero k),
+    ite_eq_right (Nat.succ_ne_zero k), honion, ← hown]
+  rfl
+
 end BackGame
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
