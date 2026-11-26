@@ -296,6 +296,84 @@ theorem newKEMPacket_parts (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSi
     simp only [hp, ne_eq, not_false_eq_true, ↓reduceIte] at h
     cases h
 
+/-- **A packet's header is the same with any payload cipher**, and a packet that cannot be
+built with one cipher cannot be built with another. -/
+theorem newKEMPacket_header (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (c c' : WideBlockCipher) (seeds : Array (Vector UInt8 32)) (filler : ByteArray)
+    (path : Array PathHop) (payload : ByteArray) :
+    (match newKEMPacket kem c macS kdfS streamS geom seeds filler path payload with
+      | .ok p => (RSOR.split geom p).1
+      | .error _ => (default : RSOR.Onion geom).1)
+      = (match newKEMPacket kem c' macS kdfS streamS geom seeds filler path payload with
+        | .ok p => (RSOR.split geom p).1
+        | .error _ => (default : RSOR.Onion geom).1) := by
+  cases h : newKEMPacket kem c macS kdfS streamS geom seeds filler path payload with
+  | ok x =>
+    obtain ⟨hdr, hs, hall, -⟩ := newKEMPacket_parts kem c macS kdfS streamS geom hvalid hmactag
+      seeds filler path payload x h
+    obtain ⟨b, -, e⟩ := hall c
+    obtain ⟨b', -, e'⟩ := hall c'
+    rw [h] at e
+    obtain rfl := Except.ok.inj e
+    rw [e']
+    unfold RSOR.split
+    dsimp only
+    rw [Util.Bytes.extract_append_of_le _ _ (le_of_eq hs.symm),
+      Util.Bytes.extract_append_of_le _ _ (le_of_eq hs.symm)]
+  | error e =>
+    cases h' : newKEMPacket kem c' macS kdfS streamS geom seeds filler path payload with
+    | error e' => rfl
+    | ok x' =>
+      obtain ⟨hdr, -, hall, -⟩ := newKEMPacket_parts kem c' macS kdfS streamS geom hvalid hmactag
+        seeds filler path payload x' h'
+      obtain ⟨b, -, e2⟩ := hall c
+      rw [h] at e2
+      cases e2
+
+/-- A packet that can be built with the cipher that changes nothing can be built with any
+cipher, with the same header. -/
+theorem newKEMPacket_ok_header (hvalid : geom.ValidForKEM kem)
+    (hmactag : macS.tagSize = macLength) (seeds : Array (Vector UInt8 32)) (filler : ByteArray)
+    (path : Array PathHop) (payload x : ByteArray)
+    (h : newKEMPacket kem default macS kdfS streamS geom seeds filler path payload = .ok x) :
+    ∃ p, newKEMPacket kem cipher macS kdfS streamS geom seeds filler path payload = .ok p
+      ∧ (RSOR.split geom p).1 = Util.Bytes.toVecN _ (x.extract 0 geom.headerLength) := by
+  obtain ⟨hdr, hs, hall, -⟩ := newKEMPacket_parts kem default macS kdfS streamS geom hvalid
+    hmactag seeds filler path payload x h
+  obtain ⟨b, -, e⟩ := hall cipher
+  obtain ⟨b', -, e'⟩ := hall default
+  rw [h] at e'
+  obtain rfl := Except.ok.inj e'
+  refine ⟨_, e, ?_⟩
+  unfold RSOR.split
+  dsimp only
+  rw [Util.Bytes.extract_append_of_le _ _ (le_of_eq hs.symm),
+    Util.Bytes.extract_append_of_le _ _ (le_of_eq hs.symm)]
+  rfl
+
+/-- **Behind the tag of a hop in the middle of a path, with the cipher that changes nothing,
+is the zero tag and the payload.** -/
+theorem relayBack_default (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (payload : ByteArray) (j : ℕ)
+    (U fwd : ByteArray)
+    (hfwd : layerPast kem default macS kdfS streamS geom hops d payload j U (j + 1) = .ok fwd) :
+    relayBack kem default macS kdfS streamS geom hops d payload j U id
+      = (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have had : adLength = 2 := rfl
+  unfold relayBack
+  rw [hfwd]
+  unfold layerPast at hfwd
+  obtain ⟨hdr, hs, -, hd⟩ := newKEMPacket_parts kem default macS kdfS streamS geom hvalid hmactag
+    _ _ _ _ _ hfwd
+  rw [hfwd] at hd
+  obtain rfl := Except.ok.inj hd
+  have ho : payloadOffset kem geom = hdr.size := by
+    rw [hs, hhdr, had]
+  show (hdr ++ _).extract (payloadOffset kem geom) (hdr ++ _).size = _
+  rw [ho, ByteArray.size_append]
+  exact Util.Bytes.extract_append_right hdr _
+
 end Parts
 
 section RestOfPath
@@ -1408,6 +1486,44 @@ theorem replyOf_relayFront_default (hops : Array PathHop) (d : RSOR.Draw geom)
       (by rw [hcmd]; simp) (by rw [hcmd]; simp)]
   rfl
 
+/-- **A relay that answers one header hands on one fresh block.** When its patched reply
+under that header does not depend on the decrypted block, the relay whose payload under the
+header decrypts as the ideal cipher does after one encryption is the relay whose payload
+decrypts to one uniform block. -/
+theorem headerRelays_fresh (ρ : Role) (sk : Role → kem.PrivateKey) (ct : kem.Ciphertext)
+    (km : Vector UInt8 32) (U : ByteArray) (Hv : Vector UInt8 geom.headerLength)
+    (patch : Protocols.RSOR.Patch 𝒮)
+    (hrep : ∀ (m : RSOR.Msg geom) (o : RSOR.Onion geom) (x : Block geom), o.1 = Hv →
+      patch.reply ρ m o (RSOR.replyOf cipher geom m
+          (procKeysD kem macS geom km U (ofVector x) (RSOR.join o)))
+        = patch.reply ρ m o (RSOR.replyOf cipher geom m
+          (procKeysD kem macS geom km U (ofVector (default : Block geom)) (RSOR.join o))))
+    {α : Type} (oa : OracleComp (Protocols.RSOR.oracleSpec 𝒮) α) (log : Protocols.RSOR.Log 𝒮) :
+    (do
+      let u ← $ᵗ (Block geom)
+      let w ← $ᵗ (Block geom)
+      let v ← $ᵗ (Block geom)
+      (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk ct km U
+        Hv (fun y => if y = u then w else v) patch) oa).run' log)
+      =ᵈ ($ᵗ (Block geom) >>= fun g =>
+        (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk ct km U
+          Hv (fun _ => g) patch) oa).run' log) := by
+  have h := (withDec_fresh (S := 𝒮) ρ Hv (fun o => o.2)
+    (fun o x => RSOR.stepOf geom (procKeysD kem macS geom km U (ofVector x) (RSOR.join o)))
+    (fun msg o x => RSOR.replyOf cipher geom msg
+      (procKeysD kem macS geom km U (ofVector x) (RSOR.join o)))
+    (fun h o => if h = ρ then
+        RSOR.stepOf geom
+          (relayAns kem cipher macS kdfS streamS geom (sk ρ) ct (fun _ => none) (RSOR.join o))
+      else RSOR.proc kem cipher macS kdfS streamS geom (sk h) o)
+    (fun h msg o => if h = ρ then
+        RSOR.replyOf cipher geom msg
+          (relayAns kem cipher macS kdfS streamS geom (sk ρ) ct (fun _ => none) (RSOR.join o))
+      else RSOR.reply kem cipher macS kdfS streamS geom (sk h) msg o)
+    patch hrep oa log).map Prod.fst
+  simp only [map_bind] at h
+  exact h
+
 set_option maxHeartbeats 2000000 in
 /-- **On the backward path, world 1′'s patched relay is world 0's relay with one fresh block.**
 World 0's relay has the header of a hop in the middle of the reply's path, and forwards the
@@ -1536,6 +1652,109 @@ theorem headerRelays_back_eq {hon : Protocols.RSOR.Honest 𝒮}
       exact ((ite_eq_left h4).trans (hrp₁ m _ o2)).trans
         ((ite_eq_left h4).trans (hrp₀ m o2)).symm
     · exact (ite_eq_right hc').trans (ite_eq_right hc').symm
+
+omit h16 in
+include hvalid hmactag in
+set_option maxHeartbeats 2000000 in
+/-- **The reply at the honest relay, at the relabelled draws.** With the joined draw and the
+shifted keystream, the relay's layer of the reply has the bytes it has with the first draw: in
+front of the tag, behind it, and in the layers around it. The next layer is the first layer
+over the rest of the path with the second draw, and every later header is that draw's. -/
+theorem backPieces (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem))
+    (r r' : RSOR.Randomness geom) (payload : ByteArray) (j : ℕ) (cc U fwd' fwdS : ByteArray)
+    (hj : j + 1 < R.hops.length) (hU : U.size = (geom.routingInfoLength +
+        geom.perHopRoutingInfoLength)) (hc : cc.size = kem.ciphertextSize)
+    (hfwd' : layerPast kem default macS kdfS streamS geom (RSOR.path kem R [.surbReply r.2.2.2])
+        r.2.1 payload j U (j + 1) = .ok fwd')
+    (hfwdS : RSOR.layer kem default macS kdfS streamS geom (RSOR.path kem (R.drop (j + 1))
+        [.surbReply r'.2.2.2]) r'.1 payload 0 = .ok fwdS) :
+    (backShift kem geom kdfS streamS (RSOR.path kem R [.surbReply r'.2.2.2])
+        (RSOR.path kem R [.surbReply r.2.2.2]) (joinDraw geom r.2.1 r'.1 j ((geom.nrHops -
+            R.hops.length) * geom.perHopRoutingInfoLength)) r.2.1 r'.1 j U fwdS fwd').size =
+            (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+    ∧ relayFrontAt kem default macS kdfS streamS geom (RSOR.path kem R [.surbReply r'.2.2.2])
+        (joinDraw geom r.2.1 r'.1 j ((geom.nrHops - R.hops.length) * geom.perHopRoutingInfoLength))
+        payload j cc
+        (backShift kem geom kdfS streamS (RSOR.path kem R [.surbReply r'.2.2.2])
+        (RSOR.path kem R [.surbReply r.2.2.2]) (joinDraw geom r.2.1 r'.1 j ((geom.nrHops -
+            R.hops.length) * geom.perHopRoutingInfoLength)) r.2.1 r'.1 j U fwdS fwd')
+      = relayFront kem default macS kdfS streamS geom (RSOR.path kem R [.surbReply r.2.2.2]) r.2.1
+          payload j cc U
+    ∧ relayFrontAt kem default macS kdfS streamS geom (RSOR.path kem R [.surbReply r.2.2.2]) r.2.1
+        payload j cc U
+      = relayFront kem default macS kdfS streamS geom (RSOR.path kem R [.surbReply r.2.2.2]) r.2.1
+          payload j cc U
+    ∧ relayBackAt kem default macS kdfS streamS geom (RSOR.path kem R [.surbReply r'.2.2.2])
+        (joinDraw geom r.2.1 r'.1 j ((geom.nrHops - R.hops.length) * geom.perHopRoutingInfoLength))
+        payload j
+        (backShift kem geom kdfS streamS (RSOR.path kem R [.surbReply r'.2.2.2])
+        (RSOR.path kem R [.surbReply r.2.2.2]) (joinDraw geom r.2.1 r'.1 j ((geom.nrHops -
+            R.hops.length) * geom.perHopRoutingInfoLength)) r.2.1 r'.1 j U fwdS fwd') id
+      = relayBackAt kem default macS kdfS streamS geom (RSOR.path kem R [.surbReply r.2.2.2]) r.2.1
+          payload j U id
+    ∧ (∀ L : ByteArray, wrapUp kem default macS kdfS streamS geom (RSOR.path kem R [.surbReply
+        r'.2.2.2]) (joinDraw geom r.2.1 r'.1 j ((geom.nrHops - R.hops.length) *
+        geom.perHopRoutingInfoLength)) 0 j L
+      = wrapUp kem default macS kdfS streamS geom (RSOR.path kem R [.surbReply r.2.2.2]) r.2.1 0 j
+          L)
+    ∧ layerPast kem default macS kdfS streamS geom (RSOR.path kem R [.surbReply r'.2.2.2])
+        (joinDraw geom r.2.1 r'.1 j ((geom.nrHops - R.hops.length) * geom.perHopRoutingInfoLength))
+        payload j
+        (backShift kem geom kdfS streamS (RSOR.path kem R [.surbReply r'.2.2.2])
+        (RSOR.path kem R [.surbReply r.2.2.2]) (joinDraw geom r.2.1 r'.1 j ((geom.nrHops -
+            R.hops.length) * geom.perHopRoutingInfoLength)) r.2.1 r'.1 j U fwdS fwd') (j + 1) = .ok
+            fwdS
+    ∧ ∀ i, j + 1 + i ≤ R.hops.length →
+      (match layerPast kem cipher macS kdfS streamS geom (RSOR.path kem R [.surbReply r'.2.2.2])
+          (joinDraw geom r.2.1 r'.1 j ((geom.nrHops - R.hops.length) *
+          geom.perHopRoutingInfoLength)) payload j
+          (backShift kem geom kdfS streamS (RSOR.path kem R [.surbReply r'.2.2.2])
+        (RSOR.path kem R [.surbReply r.2.2.2]) (joinDraw geom r.2.1 r'.1 j ((geom.nrHops -
+            R.hops.length) * geom.perHopRoutingInfoLength)) r.2.1 r'.1 j U fwdS fwd') (j + 1 + i)
+            with
+        | .ok p => (RSOR.split geom p).1
+        | .error _ => (default : RSOR.Onion geom).1)
+      = (match RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem (R.drop (j + 1))
+          [.surbReply r'.2.2.2]) r'.1 payload i with
+        | .ok p => (RSOR.split geom p).1
+        | .error _ => (default : RSOR.Onion geom).1) := by
+  have hle := R.length_le
+  have hsz : ∀ l : List RoutingCommand, (RSOR.path kem R l).size = R.hops.length :=
+    fun l => RSOR.path_size kem R l
+  obtain ⟨hs, hF, hL⟩ := backShift_spec kem geom kdfS streamS default macS hvalid hmactag R
+    [.surbReply r'.2.2.2] [.surbReply r.2.2.2] r.2.1 r'.1 payload j ((geom.nrHops - R.hops.length)
+        * geom.perHopRoutingInfoLength) cc U fwdS fwd'
+    (by rw [hsz]) hj hU hc hfwd' hfwdS
+  have hif : ∀ l : List RoutingCommand, j + 1 < (RSOR.path kem R l).size := fun l => by
+    rw [hsz]
+    exact hj
+  have h0 := (hL 0 (by omega)).trans hfwdS
+  refine ⟨hs, ?_, ?_, ?_, ?_, h0, fun i hi => ?_⟩
+  · unfold relayFrontAt
+    exact (ite_eq_left (hif _)).trans hF
+  · unfold relayFrontAt
+    exact ite_eq_left (hif _)
+  · unfold relayBackAt
+    refine (ite_eq_left (hif _)).trans (Eq.trans ?_ (ite_eq_left (hif _)).symm)
+    rw [relayBack_default kem macS kdfS streamS geom hvalid hmactag _ _ payload j _ fwdS h0,
+      relayBack_default kem macS kdfS streamS geom hvalid hmactag _ _ payload j _ fwd' hfwd']
+  · intro L
+    refine wrapUp_congr geom kem kdfS streamS default macS _ _ _ _ (by rw [hsz]; exact hle)
+      (by rw [hsz]; exact hle) 0 j L fun k _ hk => ⟨by rw [hsz]; omega, by rw [hsz]; omega, ?_,
+        ?_, ?_⟩
+    · rw [RSOR.path_getElem! kem R _ k (by omega), RSOR.path_getElem! kem R _ k (by omega),
+        ite_eq_right (by omega), ite_eq_right (by omega)]
+    · rw [RSOR.path_getElem! kem R _ (k + 1) (by omega),
+        RSOR.path_getElem! kem R _ (k + 1) (by omega)]
+    · rw [getElem!_pos _ _ (by simp; omega), getElem!_pos _ _ (by simp; omega)]
+      simp [joinDraw, show k ≤ j by omega]
+  · have e1 := newKEMPacket_header kem macS kdfS streamS geom hvalid hmactag cipher default
+    have e2 := congrArg (fun e : Except String ByteArray => match e with
+      | .ok p => (RSOR.split geom p).1
+      | .error _ => (default : RSOR.Onion geom).1) (hL i hi)
+    exact (e1 _ _ _ _).trans (e2.trans (newKEMPacket_header kem macS kdfS streamS geom hvalid
+      hmactag default cipher _ _ _ _))
+
 
 end BackRelay
 
