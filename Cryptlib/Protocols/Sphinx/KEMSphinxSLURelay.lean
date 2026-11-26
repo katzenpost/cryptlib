@@ -1756,6 +1756,151 @@ theorem backPieces (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem))
       hmactag default cipher _ _ _ _))
 
 
+omit hvalid hmactag h16 in
+/-- A header's bytes followed by anything split off as the header. -/
+theorem split_fst_append (H B : ByteArray) (hH : H.size = geom.headerLength) :
+    (RSOR.split geom (H ++ B)).1 = Util.Bytes.toVecN geom.headerLength H := by
+  unfold RSOR.split
+  dsimp only
+  rw [Util.Bytes.extract_append_of_le _ _ (le_of_eq hH.symm), extract_all _ _ hH]
+  rfl
+
+/-- **The onion sent on, after backward position `j`**: the header of the first layer over the
+rest of the backward path, built with any payload cipher, and the drawn block. -/
+theorem replySwap_fst {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.BackwardChallenge hon)
+    (x : RSOR.Randomness geom × Block geom) (j : ℕ) (hp : c.pos.val = j + 1) (fwdS : ByteArray)
+    (hfwdS : RSOR.layer kem default macS kdfS streamS geom (RSOR.path kem (c.req.back.drop (j + 1))
+        [.surbReply x.1.2.2.2]) x.1.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) 0
+        = .ok fwdS) :
+    ((replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16).of c x).1
+      = (Util.Bytes.toVecN _ (fwdS.extract 0 geom.headerLength), x.2) := by
+  obtain ⟨p, hpk, hph⟩ := newKEMPacket_ok_header kem cipher macS kdfS streamS geom hvalid hmactag
+    _ _ _ _ _ hfwdS
+  have hpk' : RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem (c.req.back.drop (j + 1))
+      [.surbReply x.1.2.2.2]) x.1.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) 0 =
+      .ok p := hpk
+  unfold replySwap
+  dsimp only
+  rw [hp, hpk']
+  exact Prod.ext hph rfl
+
+/-- **The header the sender refuses, after backward position `j`**: that of the last layer over
+the rest of the backward path. -/
+theorem replySwap_snd {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.BackwardChallenge hon)
+    (x : RSOR.Randomness geom × Block geom) (j : ℕ) (hp : c.pos.val = j + 1) :
+    ((replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16).of c x).2
+      = (match RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem (c.req.back.drop (j +
+          1)) [.surbReply x.1.2.2.2]) x.1.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ :
+          ByteArray)
+          ((c.req.back.drop (j + 1)).hops.length - 1) with
+        | .ok pkt => (RSOR.split geom pkt).1
+        | .error _ => (default : RSOR.Onion geom).1) := by
+  unfold replySwap
+  dsimp only
+  rw [hp]
+  rfl
+
+section Canon
+
+variable (names : Role → RSOR.Name)
+
+/-- On the backward path the relay's header bytes are those of its layer of the reply. -/
+theorem backMU_back (W : Protocols.RSOR.BackSwap 𝒮) {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardWith W) .relay names pk)
+    (r : RSOR.Randomness geom) (c : kem.Ciphertext) (U : ByteArray) (j : ℕ)
+    (hp : ch.c.pos.val = j + 1) :
+    backMU kem cipher macS kdfS streamS geom hvalid hmactag h16 W names ch r c U
+      = (relayFrontAt kem default macS kdfS streamS geom (RSOR.path kem ch.c.req.back [.surbReply
+          r.2.2.2])
+          r.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) j (ofVector
+              (kem.encodeCiphertext c)) U) := by
+  unfold backMU
+  rw [hp]
+
+/-- On the backward path world 0 shows the adversary's onion with the reply's first header in
+its payload, and its sender does not answer the reply's last layer. -/
+theorem backViewU0_back (W : Protocols.RSOR.BackSwap 𝒮) {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardWith W) .relay names pk)
+    (ow : RSOR.Randomness geom × Block geom) (c : kem.Ciphertext) (km : Vector UInt8 32)
+    (U : ByteArray) (e : Block geom) (j : ℕ) (hp : ch.c.pos.val = j + 1) :
+    backViewU0 kem cipher macS kdfS streamS geom hvalid hmactag h16 W names ch ow c km U e
+      = { onion := (backOnionX kem cipher macS kdfS streamS geom ch.c.req ow.1
+        (Nat.zero_lt_of_lt ch.c.pos.isLt)
+        (some (wrapUp kem default macS kdfS streamS geom (RSOR.path kem ch.c.req.back [.surbReply
+            ow.1.2.2.2]) ow.1.2.1 0 j
+        ((relayFrontAt kem default macS kdfS streamS geom (RSOR.path kem ch.c.req.back [.surbReply
+            ow.1.2.2.2])
+          ow.1.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) j (ofVector
+              (kem.encodeCiphertext c)) U)
+          ++ ofVector (macS.mac (ofVector km) (relayFrontAt kem default macS kdfS streamS geom
+              (RSOR.path kem ch.c.req.back [.surbReply ow.1.2.2.2])
+          ow.1.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) j (ofVector
+              (kem.encodeCiphertext c)) U))
+          ++ (relayBackAt kem default macS kdfS streamS geom (RSOR.path kem ch.c.req.back
+              [.surbReply ow.1.2.2.2])
+          ow.1.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) j U id)))))
+          patch :=
+            { proc := fun (h : Role) (o : RSOR.Onion geom) out =>
+                if h = .sender ∧ o.1 = backHeaderU kem cipher macS kdfS streamS geom ch.c.req ow.1
+                    j U (ch.c.req.back.hops.length - 1) then pure none
+                else pure out } } := by
+  unfold backViewU0
+  split
+  · next h0 => omega
+  · next k hk =>
+    obtain rfl : k = j := by omega
+    rfl
+
+/-- On the backward path the world where an onion is sent on shows the same onion, and its
+relay sends that onion on under the header of its layer of the reply. -/
+theorem backViewU1_back (W : Protocols.RSOR.BackSwap 𝒮) {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardWith W) .relay names pk)
+    (o : RSOR.Randomness geom × W.X) (c : kem.Ciphertext) (km : Vector UInt8 32)
+    (U : ByteArray) (e : Block geom) (j : ℕ) (hp : ch.c.pos.val = j + 1) :
+    backViewU1 kem cipher macS kdfS streamS geom hvalid hmactag h16 W names ch o c km U e
+      = Protocols.RSOR.BackwardChallenge.world1With ch.c
+        (backOnionX kem cipher macS kdfS streamS geom ch.c.req o.1
+        (Nat.zero_lt_of_lt ch.c.pos.isLt)
+        (some (wrapUp kem default macS kdfS streamS geom (RSOR.path kem ch.c.req.back [.surbReply
+            o.1.2.2.2]) o.1.2.1 0 j
+        ((relayFrontAt kem default macS kdfS streamS geom (RSOR.path kem ch.c.req.back [.surbReply
+            o.1.2.2.2])
+          o.1.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) j (ofVector
+              (kem.encodeCiphertext c)) U)
+          ++ ofVector (macS.mac (ofVector km) (relayFrontAt kem default macS kdfS streamS geom
+              (RSOR.path kem ch.c.req.back [.surbReply o.1.2.2.2])
+          o.1.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) j (ofVector
+              (kem.encodeCiphertext c)) U))
+          ++ (relayBackAt kem default macS kdfS streamS geom (RSOR.path kem ch.c.req.back
+              [.surbReply o.1.2.2.2])
+          o.1.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) j U id)))))
+        (if j < ch.c.req.back.hops.length then
+          some (RSOR.split geom
+            ((relayFrontAt kem default macS kdfS streamS geom (RSOR.path kem ch.c.req.back
+                [.surbReply o.1.2.2.2])
+          o.1.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) j (ofVector
+              (kem.encodeCiphertext c)) U)
+          ++ ofVector (macS.mac (ofVector km) (relayFrontAt kem default macS kdfS streamS geom
+              (RSOR.path kem ch.c.req.back [.surbReply o.1.2.2.2])
+          o.1.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) j (ofVector
+              (kem.encodeCiphertext c)) U))
+          ++ (relayBackAt kem default macS kdfS streamS geom (RSOR.path kem ch.c.req.back
+              [.surbReply o.1.2.2.2])
+          o.1.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) j U id))).1
+        else none)
+        none (W.of ch.c o.2).1 (W.of ch.c o.2).2 := by
+  unfold backViewU1
+  split
+  · next h0 => omega
+  · next k hk =>
+    obtain rfl : k = j := by omega
+    rfl
+
+end Canon
+
 end BackRelay
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
