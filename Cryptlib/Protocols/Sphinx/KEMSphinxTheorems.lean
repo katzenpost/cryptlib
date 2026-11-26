@@ -1538,10 +1538,11 @@ def wrapKEMSURB (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (
     if hsize : surb.size = geom.surbLength then pure (⟨surb.data, hsize⟩, k)
     else throw "sphinx: internal error: newKEMSURB produced a wrong-sized SURB"
 
-/-- Process one hop with the hop's keys, given the decryption `dec` of its payload: check the
-header MAC, decrypt the routing info, and forward or deliver. -/
-def unwrapKEMKeysD (kem : KEM) (macS : MAC) (streamS : StreamCipher) (geom : Geometry)
-    (keys : HopKeys) (replayTag : Vector UInt8 32) (pkt dec : ByteArray)
+/-- Process one hop with its MAC key, given its header keystream `ks` and the decryption `dec`
+of its payload: check the header MAC, decrypt the routing info, and forward or deliver. -/
+def unwrapKEMKeysD (kem : KEM) (macS : MAC) (geom : Geometry)
+    (macKey : Vector UInt8 32) (ks : ByteArray) (replayTag : Vector UInt8 32)
+    (pkt dec : ByteArray)
     (hdecsz : dec.size
       = (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) pkt.size).size)
     (h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength) :
@@ -1551,7 +1552,7 @@ def unwrapKEMKeysD (kem : KEM) (macS : MAC) (streamS : StreamCipher) (geom : Geo
   let riOff := geOff + kem.ciphertextSize
   let macOff := riOff + geom.routingInfoLength
   let payloadOff := macOff + macLength
-  let gotMac := macS.mac (ofVector keys.headerMAC) (pkt.extract 0 macOff)
+  let gotMac := macS.mac (ofVector macKey) (pkt.extract 0 macOff)
   if (ofVector gotMac).data ≠ (pkt.extract macOff (macOff + macLength)).data then
     throw "sphinx: invalid packet, MAC mismatch"
 
@@ -1563,7 +1564,7 @@ def unwrapKEMKeysD (kem : KEM) (macS : MAC) (streamS : StreamCipher) (geom : Geo
       = geom.routingInfoLength + geom.perHopRoutingInfoLength
     rw [ByteArray.size_append, ByteArray.size_extract, hpad]
     omega
-  b := xorBytes b (streamS.keystream (ofVector keys.headerEncryption) (ofVector keys.headerEncryptionIV) b.size)
+  b := xorBytes b ks
   have hb' : b.size = geom.routingInfoLength + geom.perHopRoutingInfoLength := by
     show (xorBytes _ _).size = _
     rw [size_xorBytes]; exact hb
@@ -1637,7 +1638,10 @@ def unwrapKEMKeys (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (streamS :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand
         × Option (Vector UInt8 pkt.size)) :=
-  unwrapKEMKeysD kem macS streamS geom keys replayTag pkt
+  unwrapKEMKeysD kem macS geom keys.headerMAC
+    (streamS.keystream (ofVector keys.headerEncryption) (ofVector keys.headerEncryptionIV)
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    replayTag pkt
     (cipher.decrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV)
       (pkt.extract (2 + kem.ciphertextSize + geom.routingInfoLength + macLength) pkt.size))
     (cipher.decrypt_size _ _ _) h1

@@ -81,7 +81,9 @@ def forwardPayloadGame : PayloadGame kem cipher macS kdfS streamS geom hvalid hm
     return ((iv, r), d)
   sk x h := if h = .relay then x.2.k.2 else x.2.cs.2.2.2 h
   c x := x.2.c
-  keys x := x.1.2
+  macKey x := x.1.2.1
+  ks x := streamS.keystream (ofVector x.1.2.2) (ofVector x.1.1)
+    (geom.routingInfoLength + geom.perHopRoutingInfoLength)
   header x := Util.Bytes.toVecN _
     (tagged (S := 𝒯)
       macS M x.2.cs.1 x.2.o x.2.c (default, x.1))
@@ -130,7 +132,7 @@ theorem forward_tagged_sub_payload_le
   let Gf : Vector UInt8 48 × G.X → ProbComp Bool := fun z =>
     (simulateQ (headerRelays kem cipher macS kdfS streamS geom hvalid hmactag h16
         (G.sk z.2) (G.c z.2)
-        (default, z.2.1.1, G.keys z.2) (G.header z.2)
+        (G.macKey z.2) (G.ks z.2) (G.header z.2)
         (fun y => Util.Bytes.toVecN _
           (cipher.decrypt z.1.toArray (ofVector z.2.1.1) (ofVector y)))
         (G.patch z.2 (Util.Bytes.toVecN _
@@ -224,8 +226,7 @@ theorem forward_tagged_sub_payload_le
       viaOracle_congr kem cipher macS kdfS streamS geom hvalid hmactag h16
         d.cs.2.2.2 (G.sk ((iv, r), d)) hsk]
     simp only [StateT.run'_eq, simulateQ_map]
-    rw [hvo,
-      headerRelays_payloadKey kem cipher macS kdfS streamS geom hvalid hmactag h16 _ _ kp default]
+    rw [hvo]
     rfl
   rw [h1, h2, ← hbad]
   exact abs_prEvent_bind_sub_le_bad mx F Gf (fun z => ¬ good z.2.2) hag
