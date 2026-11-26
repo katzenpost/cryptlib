@@ -4127,6 +4127,41 @@ theorem backIdeal1_evalDistEq (names : Role → RSOR.Name) (A : (Protocols.RSOR.
   refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
   exact EvalDistEq.rfl
 
+set_option maxHeartbeats 4000000 in
+/-- **The hybrid and the world where an onion is sent on.** The game that plays the sent-on
+world when the relay is the exit, and world 0 when it is on the backward path, differs from the
+sent-on world by at most the chance that the relay is on the backward path and the draws there
+are not good. -/
+theorem hybrid_back_le (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith (replySwap kem
+    cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    |(Pr{let y ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+          if x.cs.1.c.pos.val = 0 then backInner1 kem cipher macS kdfS streamS geom hvalid hmactag
+              h16 names A x
+          else backInner0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x)}[y =
+              true]).toReal
+      - (Pr{let y ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+          >>= backInner1 kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[y =
+              true]).toReal|
+    ≤ (Pr{let z ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+          (fun p => (x, p)) <$> (do
+          let r ← $ᵗ (RSOR.Randomness geom)
+          let r' ← $ᵗ (RSOR.Randomness geom)
+          let U ← $ᵗ (Keystream geom)
+          pure (r, r', U)))}[z.1.cs.1.c.pos.val ≠ 0
+            ∧ ¬ backGoodF kem macS kdfS streamS geom z.1.cs.1.c.req.back
+              (z.1.cs.1.c.pos.val - 1) z.2]).toReal := by
+  refine abs_prEvent_bind_sub_le _ _ _ _ _ fun x => ?_
+  by_cases hp : x.cs.1.c.pos.val = 0
+  · rw [ite_eq_left hp, sub_self, abs_zero]
+    exact ENNReal.toReal_nonneg
+  · obtain ⟨j, hj⟩ := Nat.exists_eq_succ_of_ne_zero hp
+    have h := back_fixed_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names A x.km x.k
+        x.cs x.s j hj x.cs.1.c.req.back rfl
+    rw [ite_eq_right hp, prEvent_map]
+    refine h.trans (le_of_eq (congrArg ENNReal.toReal (prEvent_congr _ _ _ fun p => ?_)))
+    rw [hj]
+    exact ⟨fun hg => ⟨Nat.succ_ne_zero j, hg⟩, fun hg => hg.2⟩
+
 end BackRelay
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
