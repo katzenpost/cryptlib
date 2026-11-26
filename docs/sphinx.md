@@ -307,12 +307,33 @@ At the exit the relay builds the reply from the SURB in its payload: the reply's
 encryption of the adversary's message under the SURB's payload key. The adversary picks that
 message during the game, so this step rests on a second cipher assumption, `oneEncExp`: one
 encryption asked during the game, under a uniform key and IV, against a uniform block. David
-agreed to this assumption on 2026-11-26. Proved so far for the exit: a relay that asks an oracle
-only for its reply under one header asks once (`viaEnc_once`), and what the exit relay does
-under its own header (`exitRelay`, `replyOf_body_enc`).
+agreed to this assumption on 2026-11-26. The adversary of `oneEncExp` first prepares the game it
+will play, without the key, and then asks its one encryption.
 
-Not proved yet there: the exit game as the encrypt-once game, its comparison with the world
-where an onion is sent on, and the bound over the whole game.
+Proved for the exit, for fixed keys and challenge:
+
+- A relay that asks an oracle only for its reply under one header asks once (`viaEnc_once`);
+  the relays' log holds no onion twice (`propDraw_log_nodup`).
+- Under its own header the exit relay delivers the sender's message and replies with one
+  encryption (`exitRelay`, `replyOf_body_enc`), so it is a relay asking for one encryption
+  (`headerRelays_exit`). Nothing else in world 0's game reads the SURB's payload key
+  (`exitRun0_eq`; `world0_patch` for the header the sender refuses).
+- World 0 is the encrypt-once game with the cipher, up to the draws that are not good
+  (`exit_real_le`, `exit_real_evalDistEq`). Good (`exitGood`): the onion and the reply can be
+  built, the sender's payload has a payload's length, and the block for a changed payload has
+  no zero tag.
+- The world where an onion is sent on is the encrypt-once game with a uniform block, up to the
+  draws that are not good or for which the onion sent on cannot be built (`exitRun1_eq`,
+  `exit_ideal_le`).
+
+Not proved yet: the bound over the whole game. The plan: after the first phase the challenge
+says whether the relay is the exit or on the backward path. The encrypt-once adversary plays
+the exit game through its oracle (`exitOracle`) in the first case and world 0 in the second.
+A hybrid that plays the sent-on world at the exit and world 0 elsewhere is then compared with
+world 0 by the exit bounds and with the sent-on world by `back_fixed_le`. The lemma for a
+common prefix has to use the prefix's support, because the log is well-formed only for draws
+the game can make. Then one statement for `backwardUnlinkable`, and bounds on the explicit
+events.
 
 ## How the bounds are built
 
