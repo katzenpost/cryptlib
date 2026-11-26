@@ -53,6 +53,23 @@ def decOnce {L : Nat} (dec : Vector UInt8 L → Vector UInt8 L) :
   (QueryImpl.ofLift unifSpec ProbComp).liftTarget (StateT (Option (Vector UInt8 L)) ProbComp)
     + decFirst dec
 
+/-- The game's oracles answer a sampling query by sampling. -/
+theorem simulateQ_decOnce_liftM {L : Nat} (dec : Vector UInt8 L → Vector UInt8 L) {α : Type}
+    (x : ProbComp α) :
+    simulateQ (decOnce dec) (liftM x : OracleComp (decSpec L) α) = liftM x := by
+  unfold decOnce
+  rw [QueryImpl.simulateQ_add_liftM_left]
+  simp
+
+/-- The game's oracles answer a decryption query by `decFirst`. -/
+theorem simulateQ_decOnce_query {L : Nat} (dec : Vector UInt8 L → Vector UInt8 L)
+    (x : Vector UInt8 L) :
+    simulateQ (decOnce dec)
+        (liftM ((Vector UInt8 L →ₒ Vector UInt8 L).query x) : OracleComp (decSpec L) _)
+      = decFirst dec x := by
+  unfold decOnce
+  rw [QueryImpl.simulateQ_add_liftM_query_right]
+
 /-- The experiment for `OneQueryAdversary`, with the cipher for `b = true`. -/
 def oneQueryExp (cipher : WideBlockCipher) (L : Nat) (B : OneQueryAdversary L) (b : Bool) :
     ProbComp Bool := do

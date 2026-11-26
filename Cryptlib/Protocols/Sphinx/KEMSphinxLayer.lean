@@ -518,7 +518,7 @@ theorem procKeys_eq_procKeysD (t : KeyTuple) (pkt : ByteArray) :
     rfl
   · by_cases hv : (pkt.extract 0 2).data ≠ v0AD.data
     · simp only [h1, ↓reduceDIte]
-      rw [ite_cond_eq_true _ _ (eq_true hv), ite_cond_eq_true _ _ (eq_true hv)]
+      rw [ite_eq_left_of_eq_true _ _ (eq_true hv), ite_eq_left_of_eq_true _ _ (eq_true hv)]
       rfl
     · simp only [h1, hv, ↓reduceDIte, ↓reduceIte, hb, hA _ hp hiv]
       rfl

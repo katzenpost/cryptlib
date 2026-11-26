@@ -100,6 +100,7 @@ import Cryptlib.Protocols.Sphinx.KEMSphinxTagGame
 import Cryptlib.Protocols.Sphinx.KEMSphinxLayerIn
 import Cryptlib.Protocols.Sphinx.KEMSphinxLU
 import Cryptlib.Protocols.RSOR
+import Cryptlib.Protocols.RSOROnce
 import Cryptlib.Protocols.Sphinx.KEMSphinxRSOR
 import Cryptlib.Protocols.Sphinx.KEMSphinxKeyed
 import Cryptlib.Protocols.Sphinx.KEMSphinxKeyedMac

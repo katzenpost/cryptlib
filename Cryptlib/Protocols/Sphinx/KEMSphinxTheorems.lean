@@ -1634,7 +1634,8 @@ def unwrapKEMKeys (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (streamS :
     (geom : Geometry) (keys : HopKeys) (replayTag : Vector UInt8 32) (pkt : ByteArray)
     (h1 : ¬ pkt.size < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength) :
     Except String
-      (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) :=
+      (Option ByteArray × Vector UInt8 32 × List RoutingCommand
+        × Option (Vector UInt8 pkt.size)) :=
   unwrapKEMKeysD kem macS streamS geom
     (cipher.decrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV))
     (cipher.decrypt_size _ _) keys replayTag pkt h1

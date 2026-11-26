@@ -232,6 +232,65 @@ def oracle (proc : Role → S.Onion → m (Option S.Step))
 
 end Oracle
 
+/-- A log as honest relays keep it: an onion is held only under a header that was seen, and at
+most one onion is held per relay and header. -/
+def Log.WF (log : Log S) : Prop :=
+  (∀ h o, (h, o) ∈ log.held → (h, o.1) ∈ log.seen) ∧
+    ∀ h o o', (h, o) ∈ log.held → (h, o') ∈ log.held → o.1 = o'.1 → o = o'
+
+theorem Log.WF.cons {log : Log S} (hw : log.WF) (h : Role) (o : S.Onion)
+    (hs : (h, o.1) ∉ log.seen) :
+    ({ seen := (h, o.1) :: log.seen, held := (h, o) :: log.held } : Log S).WF := by
+  refine ⟨fun h' o' hm => ?_, fun h' o' o'' hm hm' he => ?_⟩
+  · rcases List.mem_cons.1 hm with he | hm
+    · cases he
+      exact List.mem_cons_self
+    · exact List.mem_cons_of_mem _ (hw.1 h' o' hm)
+  · rcases List.mem_cons.1 hm with he1 | hm
+    · rcases List.mem_cons.1 hm' with he2 | hm'
+      · cases he1
+        cases he2
+        rfl
+      · cases he1
+        exact absurd (by rw [he]; exact hw.1 _ _ hm') hs
+    · rcases List.mem_cons.1 hm' with he2 | hm'
+      · cases he2
+        exact absurd (by rw [← he]; exact hw.1 _ _ hm) hs
+      · exact hw.2 _ _ _ hm hm' he
+
+theorem Log.WF.erase {log : Log S} (hw : log.WF) (x : Role × S.Onion) :
+    ({ log with held := log.held.erase x } : Log S).WF :=
+  ⟨fun h o hm => hw.1 h o (List.mem_of_mem_erase hm), fun h o o' hm hm' =>
+    hw.2 h o o' (List.mem_of_mem_erase hm) (List.mem_of_mem_erase hm')⟩
+
+/-- The honest relays keep their log well-formed, whatever they answer. -/
+theorem oracle_wf {ι' : Type} {spec' : OracleSpec ι'} [MonadLiftT ProbComp (OracleComp spec')]
+    (proc : Role → S.Onion → OracleComp spec' (Option S.Step))
+    (reply : Role → S.Msg → S.Onion → OracleComp spec' (Option (S.Name × S.Onion)))
+    (patch : Patch S) (t : (oracleSpec S).Domain) (log : Log S) (hw : log.WF) :
+    ∀ y ∈ support ((oracle proc reply patch t).run log), y.2.WF := by
+  intro y hy
+  rcases t with (u | ⟨h, o⟩) | ⟨h, msg, o⟩
+  · simp [oracle] at hy
+    obtain ⟨x, -, rfl⟩ := hy
+    exact hw
+  · simp [oracle, process] at hy
+    by_cases hs : (h, o.1) ∈ log.seen
+    · simp [hs] at hy
+      subst hy
+      exact hw
+    · simp [hs] at hy
+      obtain ⟨-, -, -, -, rfl⟩ := hy
+      exact hw.cons h o hs
+  · simp [oracle, answer] at hy
+    by_cases hs : (h, o) ∈ log.held
+    · simp [hs] at hy
+      obtain ⟨-, -, rfl⟩ := hy
+      exact hw.erase (h, o)
+    · simp [hs] at hy
+      subst hy
+      exact hw
+
 /-- The honest relays running the scheme with their secret keys. -/
 def honest (hon : Honest S) (sk : Role → S.Secret) (patch : Patch S) :
     QueryImpl (oracleSpec S) (StateT (Log S) ProbComp) :=
