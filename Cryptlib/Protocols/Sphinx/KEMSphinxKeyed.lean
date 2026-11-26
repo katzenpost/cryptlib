@@ -179,6 +179,32 @@ theorem procImplF_eq_relayImpl (sk : kem.PrivateKey) (c : kem.Ciphertext)
     exact (QueryImpl.simulateQ_add_liftM_query_left (QueryImpl.id' unifSpec) _ t).trans (by simp)
   | inr pkt => exact procImplF_apply_inr kem cipher macS kdfS streamS geom sk c f pkt
 
+/-- In front of the node's oracle: packets that carry `c` are answered by `f`, and the rest
+are passed on. -/
+def relayFirst (c : kem.Ciphertext) (f : ByteArray → ProcResult) :
+    QueryImpl procSpec (OracleComp procSpec) :=
+  QueryImpl.add unifSpec.passthrough fun pkt =>
+    if carries kem c pkt = true then pure (f pkt)
+    else (liftM ((ByteArray →ₒ ProcResult).query pkt) : OracleComp procSpec ProcResult)
+
+/-- `relayFirst` in front of a node with the answers `ans` is a node with the answers `f` for
+packets that carry `c`, and `ans` for the rest. -/
+theorem relayImpl_comp_relayFirst (ans : ByteArray → ProcResult) (c : kem.Ciphertext)
+    (f : ByteArray → ProcResult) :
+    relayImpl ans ∘ₛ relayFirst kem c f
+      = relayImpl (fun pkt => if carries kem c pkt = true then f pkt else ans pkt) := by
+  funext t
+  cases t with
+  | inl t =>
+    simp [relayFirst, relayImpl, QueryImpl.add_eq_hAdd]
+    exact (QueryImpl.simulateQ_add_liftM_query_left (QueryImpl.id' unifSpec) _ t).trans (by simp)
+  | inr pkt =>
+    simp only [relayFirst, relayImpl, QueryImpl.apply_compose, QueryImpl.add_eq_hAdd,
+      QueryImpl.add_apply_inr]
+    split_ifs
+    · simp
+    · rw [QueryImpl.simulateQ_add_liftM_query_right]
+
 /-- **Two handlers that agree except on bad packets.** The node's oracles with them differ, for
 any adversary and event, by at most the chance that the adversary sends a bad packet carrying
 `c`. The bad packets are counted in the run with the second handler. -/
