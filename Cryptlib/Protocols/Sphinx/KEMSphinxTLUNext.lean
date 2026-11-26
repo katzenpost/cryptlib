@@ -195,8 +195,8 @@ theorem nextReal_run (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversa
   have hdec : decapOf kem k.2 (encapOf kem k.1.1 s').1 = some (encapOf kem k.1.1 s').2 := by
     have h := decapOf_encapOf kem k.2 s' hrel ct ss (by rw [← hpk]; exact henc)
     rwa [← hpk] at h
-  obtain ⟨W, hW⟩ : ∃ W, W = nextView kem cipher macS kdfS streamS geom hvalid hmactag h16 names
-      ch
+  obtain ⟨W, hW⟩ : ∃ W,
+      W = nextView kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch
       (U, km, s, o, u, v) (encapOf kem k.1.1 s').1
       ((hopKeysPRG kem kdfS).gen (encapOf kem k.1.1 s').2) := ⟨_, rfl⟩
   rw [procImplK_real kem cipher macS kdfS streamS geom k.2 _ _ hdec, ← hW]
@@ -294,6 +294,216 @@ theorem nextReal_run (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversa
   unfold forwardRunU
   rw [hon, hpa, hskf, hDd, hHv]
   rfl
+
+/-- World 1 from a uniform keystream after its draws up to the challenger's randomness `r` for
+the original onion. -/
+def shortRunG (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (U : Keystream geom) (km : Vector UInt8 32) (k : Key kem × kem.PrivateKey)
+    (cs : ForwardCh kem cipher macS kdfS streamS geom hvalid hmactag h16 names k.1
+      × (A.State × Protocols.RSOR.Log 𝒮 × (Role → kem.PrivateKey)))
+    (s : Vector UInt8 32) (r : RSOR.Randomness geom) : ProbComp Bool := do
+  let m ← $ᵗ (RSOR.Msg geom)
+  let n ← $ᵗ RSOR.Name
+  let r' ← $ᵗ (RSOR.Randomness geom)
+  let u ← $ᵗ (Block geom)
+  let v ← $ᵗ (Block geom)
+  forwardRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 names _ (shortDraw geom)
+    (shortView kem cipher macS kdfS streamS geom hvalid hmactag h16 names) A
+    (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+    (shortBlockU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+    (shortViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+    km (ofVector U) ⟨k, cs, s, (r, m, n, r')⟩ u v
+
+omit [SampleableType kem.Plaintext] in
+/-- **World 1 from a uniform keystream, with the seed of the original's layer at the honest
+relay drawn apart**, and the draws in the order of the keyed game around that layer's
+ciphertext. -/
+theorem shortIdeal_evalDistEq (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    PRGScheme.prgIdealExperiment
+        (shortStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+      =ᵈ ((keygen kem) >>= fun k =>
+      (simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
+      ((shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).pre
+        k.1)) >>= fun cs =>
+      ($ᵗ (Vector UInt8 32)) >>= fun s' =>
+      ($ᵗ (Keystream geom)) >>= fun U =>
+      ($ᵗ (Vector UInt8 32)) >>= fun km =>
+      ($ᵗ (Vector UInt8 32)) >>= fun s =>
+      ($ᵗ (RSOR.Randomness geom)) >>= fun r =>
+      shortRunG kem cipher macS kdfS streamS geom hvalid hmactag h16 names A U km k cs s
+        (setSeed geom r cs.1.c.pos s')) := by
+  let G := shortRunG kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  have h0 : PRGScheme.prgIdealExperiment
+        (shortStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+      = (($ᵗ (Keystream geom)) >>= fun U =>
+      ($ᵗ (Vector UInt8 32)) >>= fun km =>
+      (keygen kem) >>= fun k =>
+      (simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
+      ((shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).pre
+        k.1)) >>= fun cs =>
+      ($ᵗ (Vector UInt8 32)) >>= fun s =>
+      ($ᵗ (RSOR.Randomness geom)) >>= fun r =>
+      G U km k cs s r) := by
+    unfold PRGScheme.prgIdealExperiment shortStreamAdv forwardStreamAdv keyedDraw
+    simp only [G, shortRunG, shortDraw, forwardSetupOf, bind_assoc, pure_bind]
+    rfl
+  rw [h0]
+  refine EvalDistEq.trans
+    (EvalDistEq.bind_right _ fun U =>
+    (OracleComp.EvalDistEq.bind_bind_swap ($ᵗ (Vector UInt8 32)) (keygen kem) fun km k =>
+      (simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
+      ((shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).pre
+        k.1)) >>= fun cs =>
+      ($ᵗ (Vector UInt8 32)) >>= fun s =>
+      ($ᵗ (RSOR.Randomness geom)) >>= fun r =>
+      G U km k cs s r)) ?_
+  refine EvalDistEq.trans
+    (EvalDistEq.bind_right _ fun U =>
+    (EvalDistEq.bind_right _ fun k =>
+    (OracleComp.EvalDistEq.bind_bind_swap ($ᵗ (Vector UInt8 32))
+      (simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
+      ((shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).pre
+        k.1)) fun km cs =>
+      ($ᵗ (Vector UInt8 32)) >>= fun s =>
+      ($ᵗ (RSOR.Randomness geom)) >>= fun r =>
+      G U km k cs s r))) ?_
+  refine EvalDistEq.trans
+    (OracleComp.EvalDistEq.bind_bind_swap ($ᵗ (Keystream geom)) (keygen kem) fun U k =>
+      (simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
+      ((shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).pre
+        k.1)) >>= fun cs =>
+      ($ᵗ (Vector UInt8 32)) >>= fun km =>
+      ($ᵗ (Vector UInt8 32)) >>= fun s =>
+      ($ᵗ (RSOR.Randomness geom)) >>= fun r =>
+      G U km k cs s r) ?_
+  refine EvalDistEq.trans
+    (EvalDistEq.bind_right _ fun k =>
+    (OracleComp.EvalDistEq.bind_bind_swap ($ᵗ (Keystream geom))
+      (simulateQ (procImpl kem cipher macS kdfS streamS geom k.2)
+      ((shortAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).pre k.1)) fun U cs =>
+      ($ᵗ (Vector UInt8 32)) >>= fun km =>
+      ($ᵗ (Vector UInt8 32)) >>= fun s =>
+      ($ᵗ (RSOR.Randomness geom)) >>= fun r =>
+      G U km k cs s r)) ?_
+  refine EvalDistEq.trans
+    (EvalDistEq.bind_right _ fun k =>
+    (EvalDistEq.bind_right _ fun cs =>
+    (EvalDistEq.bind_right _ fun U =>
+    (EvalDistEq.bind_right _ fun km =>
+    (EvalDistEq.bind_right _ fun s =>
+      ((evalDistEq_setSeed geom cs.1.c.pos
+        (lt_of_lt_of_le cs.1.c.pos.isLt cs.1.c.req.fwd.length_le)
+      (fun r => G U km k cs s r)).symm)))))) ?_
+  refine EvalDistEq.trans
+    (EvalDistEq.bind_right _ fun k =>
+    (EvalDistEq.bind_right _ fun cs =>
+    (EvalDistEq.bind_right _ fun U =>
+    (EvalDistEq.bind_right _ fun km =>
+    (EvalDistEq.bind_right _ fun s =>
+    (OracleComp.EvalDistEq.bind_bind_swap ($ᵗ (RSOR.Randomness geom))
+      ($ᵗ (Vector UInt8 32)) fun r s' =>
+      G U km k cs s (setSeed geom r cs.1.c.pos s'))))))) ?_
+  refine EvalDistEq.trans
+    (EvalDistEq.bind_right _ fun k =>
+    (EvalDistEq.bind_right _ fun cs =>
+    (EvalDistEq.bind_right _ fun U =>
+    (EvalDistEq.bind_right _ fun km =>
+    (OracleComp.EvalDistEq.bind_bind_swap ($ᵗ (Vector UInt8 32))
+      ($ᵗ (Vector UInt8 32)) fun s s' =>
+      ($ᵗ (RSOR.Randomness geom)) >>= fun r =>
+      G U km k cs s (setSeed geom r cs.1.c.pos s')))))) ?_
+  refine EvalDistEq.trans
+    (EvalDistEq.bind_right _ fun k =>
+    (EvalDistEq.bind_right _ fun cs =>
+    (EvalDistEq.bind_right _ fun U =>
+    (OracleComp.EvalDistEq.bind_bind_swap ($ᵗ (Vector UInt8 32))
+      ($ᵗ (Vector UInt8 32)) fun km s' =>
+      ($ᵗ (Vector UInt8 32)) >>= fun s =>
+      ($ᵗ (RSOR.Randomness geom)) >>= fun r =>
+      G U km k cs s (setSeed geom r cs.1.c.pos s'))))) ?_
+  exact
+    (EvalDistEq.bind_right _ fun k =>
+    (EvalDistEq.bind_right _ fun cs =>
+    (OracleComp.EvalDistEq.bind_bind_swap ($ᵗ (Keystream geom))
+      ($ᵗ (Vector UInt8 32)) fun U s' =>
+      ($ᵗ (Vector UInt8 32)) >>= fun km =>
+      ($ᵗ (Vector UInt8 32)) >>= fun s =>
+      ($ᵗ (RSOR.Randomness geom)) >>= fun r =>
+      G U km k cs s (setSeed geom r cs.1.c.pos s'))))
+
+/-- The draws of the keyed game around the original's ciphertext on which it is world 1: the
+honest relay's public key is the one its private key gives, the seed of the original's layer
+at the relay does not make the KEM fail, and the replacement's header bytes have a header's
+length. -/
+def nextGood {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (d : KeyedDraw (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)) : Prop :=
+  d.k.1.1 = kem.derivePublicKey d.k.2 ∧ kem.Reliable (kem.stateFromSeed d.s) ∧
+    (∃ ct ss, kemEncap kem (ofVector (kem.encodePublicKey d.k.1.1)) d.s = .ok (ct, ss)) ∧
+    (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.cs.1 d.o.2.2.2.1
+      (encapOf kem d.k.1.1 d.o.2.2.1).1 (ofVector d.o.1)).size
+        = 2 + kem.ciphertextSize + geom.routingInfoLength
+
+/-- **World 1 from a uniform keystream is the keyed game around the original's ciphertext with
+the real keys**, up to the chance of a draw that is not good. -/
+theorem shortIdeal_sub_nextReal_le
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    |(Pr{let x ← (PRGScheme.prgIdealExperiment
+          (shortStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+            A))}[x = true]).toReal
+      - (Pr{let x ← (keyedReal cipher macS kdfS streamS geom
+          (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+            A))}[x = true]).toReal|
+    ≤ (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom
+        (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+          A))}[¬ nextGood kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+            d]).toReal := by
+  let F : KeyedDraw (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+      → ProbComp Bool := fun d =>
+    forwardRunU kem cipher macS kdfS streamS geom hvalid hmactag h16 names _ (shortDraw geom)
+      (shortView kem cipher macS kdfS streamS geom hvalid hmactag h16 names) A
+      (shortMU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (shortBlockU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (shortViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      d.o.2.1 (ofVector d.o.1)
+      ⟨d.k, d.cs, d.o.2.2.1,
+        (setSeed geom d.o.2.2.2.1.1 d.cs.1.c.pos d.s, d.o.2.2.2.1.2)⟩
+      d.o.2.2.2.2.1 d.o.2.2.2.2.2
+  let Gr : KeyedDraw (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+      → ProbComp Bool := fun d =>
+    simulateQ (procImplK kem cipher macS kdfS streamS geom d.k.2 (encapOf kem d.k.1.1 d.s).1
+        ((hopKeysPRG kem kdfS).gen (encapOf kem d.k.1.1 d.s).2))
+      ((nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A).post d.cs.2
+        (nextView kem cipher macS kdfS streamS geom hvalid hmactag h16 names d.cs.1 d.o
+          (encapOf kem d.k.1.1 d.s).1 ((hopKeysPRG kem kdfS).gen (encapOf kem d.k.1.1 d.s).2)))
+  have hL : Pr{let x ← (PRGScheme.prgIdealExperiment
+        (shortStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+          A))}[x = true]
+      = Pr{let x ← (keyedDraw cipher macS kdfS streamS geom
+        (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+          A) >>= F)}[x = true] := by
+    rw [(shortIdeal_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+      A).prEvent_eq
+      (fun x => x = true)]
+    unfold keyedDraw
+    simp only [F, nextDraw, shortDraw, shortRunG, nextSetup, bind_assoc, pure_bind]
+    rfl
+  have hR : Pr{let x ← (keyedReal cipher macS kdfS streamS geom
+        (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[x = true]
+      = Pr{let x ← (keyedDraw cipher macS kdfS streamS geom
+        (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+          A) >>= Gr)}[x = true] := by
+    refine EvalDistEq.prEvent_eq ?_ _
+    unfold keyedReal keyedGame keyedDraw
+    simp only [Gr, nextSetup, bind_assoc, pure_bind, bind_pure]
+    exact (OracleComp.EvalDistEq.bind_const _ _).trans (OracleComp.EvalDistEq.bind_const _ _)
+  rw [hL, hR]
+  refine abs_prEvent_bind_sub_le_bad _ F Gr
+    (fun d => ¬ nextGood kem cipher macS kdfS streamS geom hvalid hmactag h16 names d)
+    fun d hd => ?_
+  obtain ⟨hpk, hrel, ⟨ct, ss, henc⟩, hsz⟩ := not_not.mp hd
+  exact (nextReal_run kem cipher macS kdfS streamS geom hvalid hmactag h16 names A d.k d.cs.1
+    d.cs.2 d.s d.o
+    ct ss hpk hrel henc hsz).symm
 
 end ForwardNext
 
