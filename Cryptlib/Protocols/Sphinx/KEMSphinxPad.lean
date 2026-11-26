@@ -785,6 +785,119 @@ theorem relayFront_canon (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize
       geom.routingInfoLength hG1 hG2 (by rw [ByteArray.size_append, hE]; omega) (by omega),
     ← ByteArray.append_assoc]
 
+/-! ## The padding of the hops in front -/
+
+/-- The padding the hops before hop `j` leave at hop `j`: one block for each of the first `k`
+of them, from their keystreams only. -/
+def frontPadOf (hops : Array PathHop) (seeds : Array (Vector UInt8 32)) (j : ℕ) : ℕ → ByteArray
+  | 0 => ByteArray.empty
+  | k + 1 => frontPadOf hops seeds j k
+      ++ tailPadOf geom (fun m => if k + m = j then zeroBytes 𝓃
+          else headerKeystream streamS geom (kemHopKeys kem kdfS hops seeds (k + m))) (j - k)
+
+/-- **Before the end of the path, the keyed hop's padding is the padding of the hops in
+front.** -/
+theorem midPad_front (hvalid : geom.ValidForKEM kem) (hops : Array PathHop)
+    (d : RSOR.Draw geom) (j : ℕ) (hj : j + 1 < hops.size) (hlen : hops.size ≤ geom.nrHops)
+    (k : ℕ) (hk : k ≤ j) :
+    (midPad geom kem kdfS streamS hops d j).extract ((geom.nrHops - hops.size) * 𝓅)
+        ((geom.nrHops - hops.size) * 𝓅 + k * 𝓅)
+      = frontPadOf geom kem kdfS streamS hops (d.1.toArray.extract 0 hops.size) j k := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hap : (geom.nrHops - hops.size) * 𝓅 ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm 𝓅]
+    exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+  have hf : ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * 𝓅)).size
+      = (geom.nrHops - hops.size) * 𝓅 := by
+    rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+    omega
+  have hseeds : (d.1.toArray.extract 0 hops.size).size = hops.size := by
+    simp
+    omega
+  have hnm : (geom.nrHops - (hops.size - (j + 1))) * 𝓅
+      = (geom.nrHops - hops.size) * 𝓅 + (j + 1) * 𝓅 := by
+    rw [← Nat.add_mul]
+    congr 1
+    omega
+  have hΦsz := fillerAtF_size kem kdfS streamS geom hrouting hops
+    (d.1.toArray.extract 0 hops.size) _ j (zeroBytes 𝓃) hlen hf (zeroBytes_size _) (j + 1) hj
+  rw [Nat.add_mul] at hΦsz
+  induction k with
+  | zero =>
+    simp only [frontPadOf, Nat.zero_mul, Nat.add_zero]
+    exact eq_empty_of_size_zero _ (by simp)
+  | succ k ih =>
+    have hk1 : (k + 1) * 𝓅 = k * 𝓅 + 𝓅 := Nat.succ_mul _ _
+    have hkj : (k + 1) * 𝓅 ≤ (j + 1) * 𝓅 := Nat.mul_le_mul_right _ (by omega)
+    have hWsz : (midPad geom kem kdfS streamS hops d j).size
+        = (geom.nrHops - hops.size) * 𝓅 + (j + 1) * 𝓅 := by
+      unfold midPad
+      rw [size_xorBytes, hΦsz]
+    rw [← extract_adjacent _ ((geom.nrHops - hops.size) * 𝓅)
+      ((geom.nrHops - hops.size) * 𝓅 + k * 𝓅) ((geom.nrHops - hops.size) * 𝓅 + (k + 1) * 𝓅)
+      (by omega) (by omega) (by omega), ih (by omega)]
+    simp only [frontPadOf]
+    congr 1
+    unfold midPad
+    rw [xorBytes_extract _ _ _ _ (by omega) (by rw [traceMask_size]; omega),
+      fillerAtF_block geom kem kdfS streamS hrouting hops _ _ j _ (zeroBytes_size _) hlen hf
+        (j + 1) k (by omega) hj]
+    have h := tailPadOf_traceMask geom kem kdfS streamS hrouting hops
+      (d.1.toArray.extract 0 hops.size) hseeds hlen j k (by omega) hj (hops.size - (j + 1))
+      le_rfl
+    rw [show hops.size - k - 1 - (hops.size - (j + 1)) = j - k by omega] at h
+    exact h
+
+/-- **At the end of the path, the keyed hop's padding is the padding of the hops in front.** -/
+theorem zeroFiller_front (hrouting : geom.routingInfoLength
+      = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hops : Array PathHop) (d : RSOR.Draw geom) (j : ℕ) (hj : j + 1 = hops.size)
+    (hlen : hops.size ≤ geom.nrHops) (k : ℕ) (hk : k ≤ j) :
+    (zeroFiller geom kem kdfS streamS hops d j).extract ((geom.nrHops - hops.size) * 𝓅)
+        ((geom.nrHops - hops.size) * 𝓅 + k * 𝓅)
+      = frontPadOf geom kem kdfS streamS hops (d.1.toArray.extract 0 hops.size) j k := by
+  have hap : (geom.nrHops - hops.size) * 𝓅 ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm 𝓅]
+    exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+  have hf : ((ofVector d.2).extract 0 ((geom.nrHops - hops.size) * 𝓅)).size
+      = (geom.nrHops - hops.size) * 𝓅 := by
+    rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+    omega
+  have hsz := fillerAtF_size kem kdfS streamS geom hrouting hops
+    (d.1.toArray.extract 0 hops.size) _ j (zeroBytes 𝓃) hlen hf (zeroBytes_size _) j (by omega)
+  rw [Nat.add_mul] at hsz
+  induction k with
+  | zero =>
+    simp only [frontPadOf, Nat.zero_mul, Nat.add_zero]
+    exact eq_empty_of_size_zero _ (by simp)
+  | succ k ih =>
+    have hk1 : (k + 1) * 𝓅 = k * 𝓅 + 𝓅 := Nat.succ_mul _ _
+    have hkj : (k + 1) * 𝓅 ≤ j * 𝓅 := Nat.mul_le_mul_right _ (by omega)
+    rw [← extract_adjacent _ ((geom.nrHops - hops.size) * 𝓅)
+      ((geom.nrHops - hops.size) * 𝓅 + k * 𝓅) ((geom.nrHops - hops.size) * 𝓅 + (k + 1) * 𝓅)
+      (by omega) (by omega) (by unfold zeroFiller; omega), ih (by omega)]
+    simp only [frontPadOf]
+    congr 1
+    unfold zeroFiller
+    rw [fillerAtF_block geom kem kdfS streamS hrouting hops _ _ j _ (zeroBytes_size _) hlen hf
+      j k (by omega) (by omega), show hops.size - k - 1 = j - k by omega]
+
+/-- The padding of the hops in front reads their keys only. -/
+theorem frontPadOf_congr (hops hops' : Array PathHop) (seeds seeds' : Array (Vector UInt8 32))
+    (j : ℕ) (h : ∀ m, m < j → kemHopKeys kem kdfS hops seeds m = kemHopKeys kem kdfS hops' seeds' m)
+    (k : ℕ) (hk : k ≤ j) :
+    frontPadOf geom kem kdfS streamS hops seeds j k
+      = frontPadOf geom kem kdfS streamS hops' seeds' j k := by
+  induction k with
+  | zero => rfl
+  | succ k ih =>
+    simp only [frontPadOf, ih (by omega)]
+    congr 1
+    refine tailPadOf_congr geom _ _ _ fun m hm => ?_
+    by_cases hkm : k + m = j
+    · simp only [hkm, ↓reduceIte]
+    · simp only [hkm, ↓reduceIte, h (k + m) (by omega)]
+
 end Pad
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
