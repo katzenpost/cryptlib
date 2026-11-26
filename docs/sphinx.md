@@ -326,14 +326,27 @@ Proved for the exit, for fixed keys and challenge:
   draws that are not good or for which the onion sent on cannot be built (`exitRun1_eq`,
   `exit_ideal_le`).
 
-Not proved yet: the bound over the whole game. The plan: after the first phase the challenge
-says whether the relay is the exit or on the backward path. The encrypt-once adversary plays
-the exit game through its oracle (`exitOracle`) in the first case and world 0 in the second.
-A hybrid that plays the sent-on world at the exit and world 0 elsewhere is then compared with
-world 0 by the exit bounds and with the sent-on world by `back_fixed_le`. The lemma for a
-common prefix has to use the prefix's support, because the log is well-formed only for draws
-the game can make. Then one statement for `backwardUnlinkable`, and bounds on the explicit
-events.
+The bound over the whole game (`backUniform_le`): after the first phase the challenge says
+whether the relay is the exit or on the backward path. The encrypt-once adversary (`exitAdv`)
+plays the exit game through its oracle in the first case and world 0 in the second. A hybrid
+that plays the sent-on world at the exit and world 0 elsewhere is compared with world 0 by the
+exit bounds and with the sent-on world by `back_fixed_le`. The lemma for a common prefix uses
+the prefix's support (`abs_prEvent_bind_sub_le_support`), because the log is well-formed only
+for draws the game can make.
+
+The statement for SLU← is `backwardUnlinkable_le`, for `backwardWith freshSwap`, which is
+`backwardUnlinkable` (`backwardUnlinkable_eq_with`). Its right side has three groups of terms:
+
+- telling the fresh forward onion from an onion built like a reply layer, at the sender
+  (`swapPair_le`);
+- replacing the honest relay's keys (`backwardUnlinkable_le_uniform`): bad draws, the cost of
+  the keys (KEM and KDF), a MAC forgery, the one-block cipher advantage and the keystream
+  generator's advantage, each for both worlds;
+- the two worlds from a uniform keystream (`backUniform_le`): the advantage against one
+  encryption, and three events of draws that are not good.
+
+Not proved yet: bounds on the explicit events (bad draws, draws that are not good). Each is a
+statement about the KEM not failing, a layer being built, or a uniform block having a zero tag.
 
 ## How the bounds are built
 
