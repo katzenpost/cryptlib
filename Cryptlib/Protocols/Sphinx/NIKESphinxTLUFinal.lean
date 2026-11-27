@@ -1313,6 +1313,148 @@ theorem strRun_fwd0_eq (names : Role → Name)
       hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) A x U
       u)).run' x.2.2.log) h
 
+/-! ## World 1's relay answers the original's element again -/
+
+/-- A draw of world 1's last game as a draw of the replacement's run. -/
+def next4X {names : Role → Name} {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (z : Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) : StrX nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names) A :=
+  (z.km, z.seed, ⟨z.p.k, z.p.keys, z.p.c, z.p.st, z.p.log, z.o, z.d'⟩)
+
+/-- The original's next layer in world 1's last game, from the keystream `W`: past the end of
+the path it is the replacement's own layer. -/
+def next4Nxt {names : Role → Name} {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (z : Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) (W : ByteArray) (mine
+        : Onion geom) : Onion geom :=
+  if (z.p.c.pos : ℕ) + 1 < z.p.c.req.fwd.hops.length then
+    nextOfStream nike cipher macS kdfS streamS geom z.p.c.req z.o.1
+      (groupElem nike ((nike.decodePrivateKey z.p.d0).getD default)
+        (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 default z.y,
+            z.p)).toArray 0)
+      (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 default z.y, z.p))
+          z.p.c.pos W
+  else mine
+
+/-- The draws of world 1's last game: the keystream of the original's next layer, then the
+rest. -/
+def finDraw (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    ProbComp (KEMSphinx.Keystream geom × Next4 nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names A) := do
+  let W ← $ᵗ (KEMSphinx.Keystream geom)
+  let y ← $ᵗ (Vector UInt8 48 × Vector UInt8 32 × Vector UInt8 32)
+  let z ← next4Rest nike cipher macS kdfS streamS geom hvalid hmactag h16 names A default y
+  return (W, z)
+
+/-- The packets that carry the original's element at the relay. -/
+def finChal {names : Role → Name} {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (x : KEMSphinx.Keystream geom × Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) (pkt : ByteArray) : Bool :=
+  decide (pkt.extract 2 (2 + nike.publicKeySize) = nextElemI nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 (keys4 default x.2.y, x.2.p))
+
+/-- The relay's own answers. -/
+def finOwn {names : Role → Name} {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (x : KEMSphinx.Keystream geom × Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) : ByteArray → ProcResult :=
+  procWith nike cipher macS streamS geom (relayKeys nike kdfS x.2.p.k.2)
+
+/-- The adversary's second phase in world 1's last game, on a draw. -/
+def finRun (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (x : KEMSphinx.Keystream geom × Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) : OracleComp procSpec Bool :=
+  nextPostN nike cipher macS kdfS streamS geom hvalid hmactag h16 names A (⟨x.2.p.keys, x.2.p.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names x.2.p.k.1) x.2.p.st
+      x.2.p.log
+    x.2.U x.2.km x.2.seed x.2.o x.2.d' x.2.u x.2.v
+    (next4Nxt nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2 (Util.Bytes.ofVector x.1))
+
+/-- **World 1's last game is a relay game**: the relay refuses the original's element. -/
+theorem prgIdeal_nextStreamAdv (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) :
+    PRGScheme.prgIdealExperiment (nextStreamAdv nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names A)
+      = Relay.gameHand (finDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+          (finChal nike cipher macS kdfS streamS geom hvalid hmactag h16) (finOwn nike cipher macS
+          kdfS streamS geom hvalid hmactag h16) (finRun nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names A)
+        fun _ _ => none := by
+  unfold PRGScheme.prgIdealExperiment nextStreamAdv Relay.gameHand finDraw
+  simp only [bind_assoc, pure_bind]
+  rfl
+
+/-- The draws of world 1's last game on which the bytes under the relay's tag carry the
+replacement's element. -/
+def finCar {names : Role → Name} {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (x : KEMSphinx.Keystream geom × Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) : Prop :=
+  (strMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2) x.2.U).extract 2 (2 + nike.publicKeySize)
+    = drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+      (forwardPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names)) (next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2
+
+/-- World 1 with the relay answering the original's element itself: the replacement's run,
+the relay patched around the replacement's layer with the original's next layer. -/
+def finOwnRun (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (x : KEMSphinx.Keystream geom × Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) : ProbComp Bool :=
+  strRunP nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) A (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2) x.2.U x.2.u x.2.v
+    fun mine => x.2.p.c.patchWith (next4Nxt nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2 (Util.Bytes.ofVector x.1) mine) x.2.o.1 mine
+
+/-- **The relay may answer the original's element again.** World 1's last game differs from
+the replacement's run with the patched relay by at most the chance that the adversary sends a
+packet carrying the original's element, and the chance of a draw on which the bytes under the
+relay's tag do not carry the replacement's element. -/
+theorem prgIdeal_nextStreamAdv_sub_le (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable
+    (S := 𝒮)).Adversary) :
+    |(Pr{let b ← (PRGScheme.prgIdealExperiment (nextStreamAdv nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names A))}[b = true]).toReal
+      - (Pr{let b ← (finDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A >>=
+          finOwnRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[b =
+          true]).toReal|
+    ≤ (Pr{let b ← (Relay.gameChal (finDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) (finChal nike cipher macS kdfS streamS geom hvalid hmactag h16) (finOwn nike
+        cipher macS kdfS streamS geom hvalid hmactag h16)
+          (finRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) fun _ _ =>
+              none)}[b = true]).toReal
+      + (Pr{let x ← (finDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[¬
+          finCar nike cipher macS kdfS streamS geom hvalid hmactag h16 x]).toReal := by
+  rw [prgIdeal_nextStreamAdv]
+  have h1 := Relay.gameHand_sub_le (finDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names A) (finChal nike cipher macS kdfS streamS geom hvalid hmactag h16) (finOwn nike cipher
+      macS kdfS streamS geom hvalid hmactag h16)
+    (finRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) (finOwn nike cipher macS
+        kdfS streamS geom hvalid hmactag h16) fun _ _ => none
+  rw [abs_sub_comm] at h1
+  have h2 := KEMSphinx.abs_prEvent_bind_sub_le_bad (finDraw nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names A)
+    (fun x => simulateQ (relayImpl (Relay.ansOf (finChal nike cipher macS kdfS streamS geom hvalid
+        hmactag h16) (finOwn nike cipher macS kdfS streamS geom hvalid hmactag h16) x (finOwn nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x)))
+      (finRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A x))
+    (finOwnRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) (fun x => ¬ finCar
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 x) fun x hx => by
+      have hans : Relay.ansOf (finChal nike cipher macS kdfS streamS geom hvalid hmactag h16)
+          (finOwn nike cipher macS kdfS streamS geom hvalid hmactag h16) x (finOwn nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x) = finOwn nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 x :=
+        funext fun pkt => ite_self _
+      rw [hans]
+      exact nextPostN_real nike cipher macS kdfS streamS geom hvalid hmactag h16 names A x.2.p.k
+          (⟨x.2.p.keys, x.2.p.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names
+        x.2.p.k.1) x.2.p.st x.2.p.log x.2.U x.2.km x.2.seed x.2.o x.2.d' x.2.u x.2.v
+        (next4Nxt nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2 (Util.Bytes.ofVector
+            x.1)) (not_not.mp hx)
+  exact (abs_sub_le _ _ _).trans (add_le_add h1 h2)
+
 /-- The hops' keys of world 0 after its steps: the sender's, the honest relay's replaced by
 its blinding seed alone. -/
 theorem fwd0_keys (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)

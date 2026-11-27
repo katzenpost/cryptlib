@@ -730,8 +730,15 @@ for it:
      (`strRunP_eq`, `strGuess`), and world 0 on a draw, before the end of the path, is the
      game against `fwdRelay` on the next layer's header of the adversary's onion
      (`hdrRelay_onion`, `strRun_fwd0_eq`), when the header builds up to the relay's layer and
-     the bytes under its tag have their length. World 1 is not yet in this form, and the end
-     of the path is not treated.
+     the bytes under its tag have their length. The end of the path is not treated.
+     World 1's last game refuses the original's element at the relay. The relay may answer
+     it again (`prgIdeal_nextStreamAdv_sub_le`, from `Relay.gameHand_sub_le`): the game is then
+     the replacement's run against the relay patched with the original's next layer
+     (`finOwnRun`, by `nextPostN_real`, which is `nextPost_real` for any next layer). The cost
+     is the chance that the adversary sends a packet carrying the original's element, and the
+     chance of a draw on which the bytes under the relay's tag do not carry the replacement's
+     element (`finCar`). Both are carried, not bounded. `finOwnRun` is not yet brought to
+     `fwdRelay`.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).

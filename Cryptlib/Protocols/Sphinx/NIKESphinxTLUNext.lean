@@ -351,8 +351,8 @@ def nextAdv (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
 
 set_option maxHeartbeats 4000000 in
 /-- **The second phase of `nextAdv`, answered by the honest relay, is world 1 after its first
-chain**, on a draw, with the original's next layer built from the handed keys. -/
-theorem nextPost_real (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+chain**, on a draw, whatever the original's next layer `nxt`. -/
+theorem nextPostN_real (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
     𝒮)).Adversary)
     (k : RSOR.Key nike × nike.PrivateKey) (ch : ForwardCh nike cipher macS kdfS streamS geom hvalid
         hmactag h16 names k.1) (ast : A.State)
@@ -360,7 +360,7 @@ theorem nextPost_real (names : Role → Name) (A : (Protocols.RSOR.forwardUnlink
     (o : (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth) (d' : Vector UInt8
         nike.privateKeySize) (u v : Vector UInt8 (geom.payloadTagLength +
         geom.forwardPayloadLength))
-    (a : ByteArray) (ks : List HopKeys)
+    (nxt : Onion geom → Onion geom)
     (hcar : (strMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
         macS kdfS streamS geom hvalid hmactag h16 names) (A := A)
         (km, seed, ⟨k, ch.keys, ch.c, ast, log, o, d'⟩) U).extract 2 (2 + nike.publicKeySize)
@@ -372,16 +372,14 @@ theorem nextPost_real (names : Role → Name) (A : (Protocols.RSOR.forwardUnlink
             hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (fwd1 nike cipher
             macS kdfS streamS geom hvalid hmactag h16 names).Oth A)) :
     simulateQ (procImpl nike cipher macS kdfS streamS geom k.2)
-        (nextPost nike cipher macS kdfS streamS geom hvalid hmactag h16 names A ch ast log U km
-            seed o d' u v a ks)
+        (nextPostN nike cipher macS kdfS streamS geom hvalid hmactag h16 names A ch ast log U km
+            seed o d' u v nxt)
       = strRunP nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
           kdfS streamS geom hvalid hmactag h16 names) A (km, seed, ⟨k, ch.keys, ch.c, ast, log, o,
           d'⟩) U u v
         (fun mine => ch.c.patchWith
-          (if (ch.c.pos : ℕ) + 1 < ch.c.req.fwd.hops.length then
-            onionOfKeys nike cipher macS kdfS streamS geom (ch.c.pos + 1) ch.c.req o.1 a ks
-          else mine) o.1 mine) := by
-  unfold nextPost nextPostN
+          (nxt mine) o.1 mine) := by
+  unfold nextPostN
   dsimp only
   rw [show procImpl nike cipher macS kdfS streamS geom k.2
       = relayImpl (procWith nike cipher macS streamS geom (relayKeys nike kdfS k.2)) from rfl,
@@ -433,13 +431,12 @@ theorem nextPost_real (names : Role → Name) (A : (Protocols.RSOR.forwardUnlink
       else procWith nike cipher macS streamS geom (relayKeys nike kdfS k.2) pkt))
     ((simulateQ (viaOracle nike cipher macS kdfS streamS geom hvalid hmactag h16 .relay (fun h =>
         (ch.keys h).2)
-      (ch.c.patchWith (if (ch.c.pos : ℕ) + 1 < ch.c.req.fwd.hops.length then onionOfKeys nike
-          cipher macS kdfS streamS geom (ch.c.pos + 1) ch.c.req o.1 a ks else strOnion nike cipher
+      (ch.c.patchWith (nxt (strOnion nike cipher
           macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
           hvalid hmactag h16 names) (km, seed, (⟨k, ch.keys, ch.c, ast, log, o, d'⟩ : PropDraw nike
           cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S :=
           𝒮)) .relay names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth
-          A)) U u ch.c.pos) o.1 (strOnion nike cipher macS kdfS streamS geom hvalid hmactag h16
+          A)) U u ch.c.pos)) o.1 (strOnion nike cipher macS kdfS streamS geom hvalid hmactag h16
           names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (km, seed, (⟨k,
           ch.keys, ch.c, ast, log, o, d'⟩ : PropDraw nike cipher macS kdfS streamS geom hvalid
           hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (fwd1 nike cipher
@@ -743,6 +740,40 @@ theorem nextPost_real (names : Role → Name) (A : (Protocols.RSOR.forwardUnlink
   exact key _ _ _ _ _
     (Protocols.RSOR.withDec_congr (S := 𝒮) (L := (geom.payloadTagLength +
         geom.forwardPayloadLength)) _ _ _ _ rfl rfl hp hrp rfl) rfl
+
+/-- The same for the next layer built from the handed keys. -/
+theorem nextPost_real (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary)
+    (k : RSOR.Key nike × nike.PrivateKey) (ch : ForwardCh nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names k.1) (ast : A.State)
+    (log : Protocols.RSOR.Log 𝒮) (U : KEMSphinx.Keystream geom) (km seed : Vector UInt8 32)
+    (o : (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth) (d' : Vector UInt8
+        nike.privateKeySize)
+    (u v : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (a : ByteArray) (ks : List HopKeys)
+    (hcar : (strMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names) (A := A)
+        (km, seed, ⟨k, ch.keys, ch.c, ast, log, o, d'⟩) U).extract 2 (2 + nike.publicKeySize)
+      = drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+        (forwardPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+            macS kdfS streamS geom hvalid hmactag h16 names))
+        (⟨k, ch.keys, ch.c, ast, log, o, d'⟩ : PropDraw nike cipher macS kdfS streamS geom hvalid
+            hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (fwd1 nike cipher macS kdfS
+              streamS geom hvalid hmactag h16 names).Oth A)) :
+    simulateQ (procImpl nike cipher macS kdfS streamS geom k.2)
+        (nextPost nike cipher macS kdfS streamS geom hvalid hmactag h16 names A ch ast log U km
+            seed o d' u v a ks)
+      = strRunP nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names) A (km, seed, ⟨k, ch.keys, ch.c, ast, log, o,
+          d'⟩) U u v
+        (fun mine => ch.c.patchWith
+          (if (ch.c.pos : ℕ) + 1 < ch.c.req.fwd.hops.length then
+            onionOfKeys nike cipher macS kdfS streamS geom (ch.c.pos + 1) ch.c.req o.1 a ks
+          else mine) o.1 mine) :=
+  nextPostN_real nike cipher macS kdfS streamS geom hvalid hmactag h16 names A k ch ast log U km
+      seed o d' u v _ hcar
 
 /-- **On the original's own keys, the patch built from the handed keys is the challenger's.**
 The original's next layer from its group element and hop keys is its own next layer, when its
