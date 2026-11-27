@@ -2979,6 +2979,12 @@ perfectly correct. -/
 noncomputable def seedFailure : ENNReal :=
   Pr{let s ← $ᵗ (Vector UInt8 32)}[¬ kem.Reliable (kem.stateFromSeed s)]
 
+omit cipher macS kdfS streamS geom hvalid hmactag h16 [SampleableType kem.Plaintext] in
+/-- A KEM whose every state is reliable has no seed failure: the KEMs made from a NIKE, for
+one. -/
+theorem seedFailure_eq_zero (h : ∀ s, kem.Reliable s) : seedFailure kem = 0 :=
+  prEvent_eq_zero_of_forall_not _ _ fun _ hn => hn (h _)
+
 omit [SampleableType kem.Plaintext] in
 set_option maxHeartbeats 2000000 in
 /-- **A bad draw of a step of the first half is a seed that is not reliable.** The relay's key
