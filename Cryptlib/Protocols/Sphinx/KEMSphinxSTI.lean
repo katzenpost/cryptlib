@@ -205,15 +205,21 @@ def tailDone {hon : Protocols.RSOR.Honest 𝒮} (done : Role → Bool)
     ∨ ∃ ρ, done ρ = true ∧ ∃ k, k + 1 = c.pos.val ∧ c.req.fwd.hops[k]? = some (hon ρ)
 
 open Classical in
-/-- **A world between world 0 and the world in the middle**: the middle world when the hop
-before the shown layer needs no further step, and world 0 otherwise. -/
+/-- **A world between world 0 and the world in the middle**, from its draws: the middle world
+when the hop before the shown layer needs no further step, and world 0 otherwise. -/
+noncomputable def tailHybWorld (done : Role → Bool) {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.TailChallenge hon) (r : RSOR.Randomness geom) (d : RSOR.Draw geom) :
+    Protocols.RSOR.World 𝒮 :=
+  if tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 done c then tailMidWorld kem
+      cipher macS kdfS streamS geom hvalid hmactag h16 c r d
+  else Protocols.RSOR.tailWorld (S := 𝒮) c.req r c.pos c.back
+
+/-- That world with its draws. -/
 noncomputable def tailHyb (done : Role → Bool) {hon : Protocols.RSOR.Honest 𝒮}
     (c : Protocols.RSOR.TailChallenge hon) : ProbComp (Protocols.RSOR.World 𝒮) := do
   let r ← $ᵗ (RSOR.Randomness geom)
   let d ← $ᵗ (RSOR.Draw geom)
-  return if tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 done c then tailMidWorld
-      kem cipher macS kdfS streamS geom hvalid hmactag h16 c r d
-    else Protocols.RSOR.tailWorld (S := 𝒮) c.req r c.pos c.back
+  return tailHybWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 done c r d
 
 /-- With both roles the relay before the shown layer can have handled, the hybrid is the world
 in the middle. -/
@@ -228,7 +234,7 @@ theorem tailHyb_all {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailC
       rcases c.relay k hk.symm with h | h
       · exact Or.inr ⟨.relay, rfl, k, hk.symm, h⟩
       · exact Or.inr ⟨.back, rfl, k, hk.symm, h⟩
-  unfold tailHyb tailMid
+  unfold tailHyb tailHybWorld tailMid
   simp only [hd, ite_true]
 
 /-- The middle world reads the challenger's randomness through its backward part only. -/
@@ -268,7 +274,7 @@ theorem tailWorld_evalDistEq_tailHyb {hon : Protocols.RSOR.Honest 𝒮}
     simp [Protocols.RSOR.tailIndistinguishable]
     rfl
   rw [hw]
-  unfold tailHyb
+  unfold tailHyb tailHybWorld
   by_cases hp : c.pos.val = 0
   · have hd : tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun _ => false) c :=
       Or.inl hp
@@ -303,6 +309,113 @@ theorem tailWorld_evalDistEq_tailHyb {hon : Protocols.RSOR.Honest 𝒮}
     simp only [hd, ite_false]
     exact (EvalDistEq.bind_right _ fun r =>
       OracleComp.EvalDistEq.bind_const ($ᵗ (RSOR.Draw geom)) _).symm
+
+/-- The hop before the shown layer is the honest relay with the role `ρ`. -/
+def tailRho {hon : Protocols.RSOR.Honest 𝒮} (ρ : Role) (c : Protocols.RSOR.TailChallenge hon) :
+    Prop :=
+  ∃ k, k + 1 = c.pos.val ∧ c.req.fwd.hops[k]? = some (hon ρ)
+
+open Classical in
+/-- The challenger's randomness with the seed `s` at the hop before the shown layer, when that
+hop is the honest relay with the role `ρ`. -/
+noncomputable def tailSeedFor {hon : Protocols.RSOR.Honest 𝒮} (ρ : Role)
+    (c : Protocols.RSOR.TailChallenge hon) (r : RSOR.Randomness geom) (s : Vector UInt8 32) :
+    RSOR.Randomness geom :=
+  if tailRho kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c then tailSeed geom c.pos r s
+      else r
+
+/-- Drawing the randomness and a seed, and putting the seed at that hop, is drawing the
+randomness. -/
+theorem evalDistEq_tailSeedFor {δ : Type} {hon : Protocols.RSOR.Honest 𝒮} (ρ : Role)
+    (c : Protocols.RSOR.TailChallenge hon) (K : RSOR.Randomness geom → ProbComp δ) :
+    (do
+      let r ← $ᵗ (RSOR.Randomness geom)
+      let s ← $ᵗ (Vector UInt8 32)
+      K (tailSeedFor kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c r s)) =ᵈ ($ᵗ
+          (RSOR.Randomness geom) >>= K) := by
+  unfold tailSeedFor
+  by_cases h : tailRho kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c
+  · simp only [h, ite_true]
+    exact evalDistEq_tailSeed geom c.pos
+      (le_of_lt (lt_of_lt_of_le c.pos.isLt c.req.fwd.length_le)) K
+  · simp only [h, ite_false]
+    exact EvalDistEq.bind_right _ fun r =>
+      OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 32)) (K r)
+
+open Classical in
+/-- **A hybrid world from the keystream of the hop before the shown layer**, when that hop is
+the honest relay with the role `ρ` and still needs its step: the shown layer is then a layer
+past that hop. Otherwise the hybrid world itself. -/
+noncomputable def tailViewU (done : Role → Bool) (ρ : Role)
+    {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon)
+    (o : RSOR.Randomness geom × RSOR.Draw geom) (U : ByteArray) : Protocols.RSOR.World 𝒮 :=
+  if tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 done c then tailMidWorld kem
+      cipher macS kdfS streamS geom hvalid hmactag h16 c o.1 o.2
+  else if tailRho kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c then
+    { onion :=
+        (match layerPast kem cipher macS kdfS streamS geom
+            (RSOR.path kem c.req.fwd [.recipient c.req.receiver]) o.1.1
+            (RSOR.body kem macS kdfS streamS geom c.req o.1) (c.pos.val - 1) U c.pos.val with
+        | .ok pkt => RSOR.split geom pkt
+        | .error _ => (default : RSOR.Onion geom))
+      patch := (Protocols.RSOR.tailWorld (S := 𝒮) c.req o.1 c.pos c.back).patch }
+  else Protocols.RSOR.tailWorld (S := 𝒮) c.req o.1 c.pos c.back
+
+/-- Putting a seed at the hop before the shown layer leaves the backward part of the
+randomness as it is. -/
+theorem tailSeedFor_snd {hon : Protocols.RSOR.Honest 𝒮} (ρ : Role)
+    (c : Protocols.RSOR.TailChallenge hon) (r : RSOR.Randomness geom) (s : Vector UInt8 32) :
+    (tailSeedFor kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c r s).2 = r.2 := by
+  unfold tailSeedFor tailSeed
+  split_ifs
+  · split <;> rfl
+  · rfl
+
+set_option maxHeartbeats 2000000 in
+/-- **The keyed view with the real keys is the hybrid world.** With the keystream of the keys
+that the seed `s` gives at the hop before the shown layer, `tailViewU` is the hybrid world at
+the randomness with `s` at that hop. -/
+theorem tailViewU_real (done : Role → Bool) (ρ : Role) {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.TailChallenge hon) (o : RSOR.Randomness geom × RSOR.Draw geom)
+    (s : Vector UInt8 32) (ct ss : ByteArray)
+    (henc : kemEncap kem
+      ((RSOR.path kem c.req.fwd [.recipient c.req.receiver])[c.pos.val - 1]!).publicKey s
+      = .ok (ct, ss)) :
+    tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 done ρ c o (ksOf streamS geom
+        (keyTuple (deriveHopKeys kdfS ss)))
+      = tailHybWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 done c (tailSeedFor kem
+          cipher macS kdfS streamS geom hvalid hmactag h16 ρ c o.1 s) o.2 := by
+  unfold tailViewU tailHybWorld
+  by_cases hd : tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 done c
+  · simp only [hd, ite_true]
+    exact tailMidWorld_congr kem cipher macS kdfS streamS geom hvalid hmactag h16 c _ _ _
+        (tailSeedFor_snd kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c o.1 s).symm
+  · simp only [hd, ite_false]
+    by_cases hρ : tailRho kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c
+    · obtain ⟨k, hk, -⟩ := id hρ
+      have hlt : c.pos.val < c.req.fwd.hops.length := c.pos.isLt
+      have hle := c.req.fwd.length_le
+      have hsd : tailSeedFor kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c o.1 s =
+          setSeed geom o.1 k s := by
+        unfold tailSeedFor tailSeed
+        simp only [hρ, ite_true]
+        rw [← hk]
+      rw [hsd]
+      simp only [hρ, ite_true]
+      rw [← hk, Nat.add_sub_cancel] at henc ⊢
+      rw [layerPast_real kem cipher macS kdfS streamS geom _ _ _ k (k + 1) s ct ss
+          (Nat.lt_succ_self k)
+        (le_of_le_of_eq (show k + 1 ≤ c.req.fwd.hops.length by omega)
+          (RSOR.path_size kem c.req.fwd _).symm)
+        (le_of_eq_of_le (RSOR.path_size kem c.req.fwd _) hle) henc]
+      unfold Protocols.RSOR.tailWorld
+      congr 1
+      show _ = RSOR.form kem cipher macS kdfS streamS geom c.req (setSeed geom o.1 k s) c.pos
+      unfold RSOR.form
+      rw [← hk]
+      rfl
+    · unfold tailSeedFor
+      simp only [hρ, ite_false]
 
 end TailGame
 
