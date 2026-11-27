@@ -380,6 +380,83 @@ theorem play_evalDistEq_honAt (A : P.Adversary) (b : Bool) :
     rw [h1]
     exact hsk _ _ _ (funext fun h => by cases h <;> rfl)
 
+/-- The draws of the key game's real world for `propAdvOf`: the honest relays' key pairs, the
+adversary's first phase, the challenger's draws, and the secret of the path the game is about. -/
+structure PropDraw (Oth : Type) (A : P.Adversary) where
+  k : RSOR.Key nike × nike.PrivateKey
+  keys : Role → RSOR.Key nike × nike.PrivateKey
+  c : P.Challenge (honAt nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ names k.1 keys)
+  st : A.State
+  log : Protocols.RSOR.Log 𝒮
+  o : Oth
+  d : Vector UInt8 nike.privateKeySize
+
+/-- The draw of `PropDraw`. -/
+def propDrawOf (Oth : Type) (draw : ProbComp Oth) (A : P.Adversary) :
+    ProbComp (PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A) := do
+  let k ← RSOR.keygen nike
+  let k₁ ← RSOR.keygen nike
+  let k₂ ← RSOR.keygen nike
+  let out ← (simulateQ (Protocols.RSOR.honest
+      (honAt nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ names k.1 (keysOf nike ρ k₁
+          k₂))
+      (fun h => if h = ρ then k.2 else (keysOf nike ρ k₁ k₂ h).2) {})
+    (A.choose (honAt nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ names k.1 (keysOf nike
+        ρ k₁ k₂)))).run {}
+  let o ← draw
+  let d ← $ᵗ Vector UInt8 nike.privateKeySize
+  return ⟨k, keysOf nike ρ k₁ k₂, out.1.1, out.1.2, out.2, o, d⟩
+
+/-- The second phase of the key game's real world on a draw: the adversary of `P` against the
+honest relays, on the world `view` shows from the sender's own group element and hop keys. -/
+def propRealOf (place : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid
+    hmactag h16 P ρ names pk → Array PathHop × ℕ)
+    (Oth : Type)
+    (view : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
+        names pk → Oth → ByteArray → List HopKeys
+      → Protocols.RSOR.World 𝒮)
+    (A : P.Adversary) (D : PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names
+        Oth A) : ProbComp Bool :=
+  let ch : PropCh nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names D.k.1 := ⟨D.keys,
+      D.c⟩
+  let c := (nike.decodePrivateKey D.d).getD default
+  let hops := (place ch).1.modify (place ch).2 fun h =>
+    { h with publicKey := Util.Bytes.ofVector (nike.encodePublicKey D.k.1.1) }
+  let keys := RSOR.hopKeys nike kdfS c hops hops.size
+  if (place ch).2 < hops.size then
+    (simulateQ (Protocols.RSOR.honest (honAt nike cipher macS kdfS streamS geom hvalid hmactag h16
+        ρ names D.k.1 D.keys)
+        (fun h => if h = ρ then D.k.2 else (D.keys h).2)
+        (view ch D.o (groupElem nike c keys.toArray 0) keys).patch)
+      (A.guess D.st (view ch D.o (groupElem nike c keys.toArray 0) keys).onion)).run' D.log
+  else pure false
+
+/-- **The key game's real world, as its draws and then the second phase.** -/
+theorem keyGame_true_evalDistEq
+    (place : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid hmactag h16 P
+        ρ names pk → Array PathHop × ℕ)
+    (Oth : Type) (draw : ProbComp Oth)
+    (view : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
+        names pk → Oth → ByteArray → List HopKeys
+      → Protocols.RSOR.World 𝒮)
+    (A : P.Adversary) :
+    keyGame cipher macS kdfS streamS geom (propAdvOf nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 P ρ names place Oth draw view A) true
+      =ᵈ propDrawOf nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth draw A >>=
+        propRealOf nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth view A
+            := by
+  rw [keyGame_true_propAdvOf]
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+  unfold propDrawOf propRealOf
+  simp only [bind_assoc, pure_bind]
+  refine EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+    EvalDistEq.bind_right _ fun k₂ => EvalDistEq.bind_right _ fun out => ?_
+  refine EvalDistEq.trans ?_ (OracleComp.EvalDistEq.bind_bind_swap _ _ _)
+  refine EvalDistEq.bind_right _ fun d => ?_
+  split
+  · exact EvalDistEq.rfl
+  · exact (OracleComp.EvalDistEq.bind_const _ _).symm
+
 end PropGame
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx

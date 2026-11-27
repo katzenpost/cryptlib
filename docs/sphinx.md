@@ -545,7 +545,15 @@ For TLU→ so far (`NIKESphinxTLU.lean`): the first layer of a request's onion a
 forward path's first group element and its hops' keys (`onionOfKeys`), which on the sender's
 own keys is the sender's onion when that onion builds (`onionOfKeys_real`). A game of a
 property may be played with the honest relay's key pair drawn first (`play_evalDistEq_honAt`).
-Not yet proved: that world 0 of TLU→ is the key game's real world for this view.
+World 0 of TLU→ is the key game's real world for this view, played by `forwardAdv`, except on
+draws for which the adversary's onion cannot be built (`play_false_sub_keyGame_le`, the event
+`forwardBad`). So world 0 may be played with the honest relay's keys replaced, at the cost of
+`keyAdvantage` for `forwardAdv` and the chance of that event. The event is not bounded yet;
+whether a NIKE Sphinx packet builds should depend on the path and the geometry alone.
+
+Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
+MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two
+worlds.
 
 Steps, in order:
 
