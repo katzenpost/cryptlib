@@ -369,7 +369,6 @@ In Lean so far (`KEMSphinxSTI.lean`, `KEMSphinxTLUNext.lean`):
 - The triangle through a world in the middle (`tailPair_advantage_le`), and that
   world for KEM Sphinx (`tailMid`, `tailMidWorld`): the first layer over the rest of the forward
   path with a forward draw of its own, around the adversary's payload.
-- A forward layer from a position on is a layer over the rest of the path (`layer_drop`).
 - For any keyed game that reads the node's keys through their header keystream only, and never
   shows a tag under its MAC key: the node may reject the challenge ciphertext for a MAC forgery
   (`keyedIdeal_sub_reject_le`), then the keystream step (`keyedReject_eq_prg`), together

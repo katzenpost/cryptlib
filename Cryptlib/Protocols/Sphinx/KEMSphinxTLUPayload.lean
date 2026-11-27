@@ -248,21 +248,6 @@ theorem propDraw_log_wf :
     ⟨fun _ _ h => absurd h List.not_mem_nil, fun _ _ _ h => absurd h List.not_mem_nil⟩ out hout
 
 omit [SampleableType kem.Plaintext] in
-/-- After the first phase the honest relays hold no onion twice. -/
-theorem propDraw_log_nodup :
-    ∀ d ∈ support (keyedDraw cipher macS kdfS streamS geom 𝒜), d.cs.2.2.1.held.Nodup := by
-  intro d hd
-  unfold keyedDraw at hd
-  simp only [propAdv_pre, mem_support_bind_iff, support_pure, Set.mem_singleton_iff] at hd
-  obtain ⟨k, -, cs, ⟨kb, -, ks, -, out, hout, rfl⟩, s, -, o, -, rfl⟩ := hd
-  exact (simulateQ_run_preserves_inv_of_query _
-    (fun log : Protocols.RSOR.Log 𝒮 => log.WF ∧ log.held.Nodup)
-    (fun t log hw => fun y hy => ⟨Protocols.RSOR.oracle_wf _ _ _ t log hw.1 y hy,
-      Protocols.RSOR.oracle_held_nodup _ _ _ t log hw.1 hw.2 y hy⟩) _ _
-    ⟨⟨fun _ _ h => absurd h List.not_mem_nil, fun _ _ _ h => absurd h List.not_mem_nil⟩,
-      List.nodup_nil⟩ out hout).2
-
-omit [SampleableType kem.Plaintext] in
 /-- The logs of a world's payload game are well-formed. -/
 theorem propPayloadGame_wf (iv : Vector UInt8 16) :
     ∀ x ∈ support ((propPayloadGame kem cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names

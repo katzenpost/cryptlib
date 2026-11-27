@@ -102,62 +102,10 @@ is a layer over the rest of the path, with the filler there as the rest's paddin
 
 The two worlds are compared through worlds in the middle (`tailPair`). -/
 
-/-- **A bound that holds after every outcome of a prefix which the bound does not read holds
-with the prefix in front.** -/
-theorem abs_prEvent_bind_sub_le_skip {α γ : Type} (mx : ProbComp α) (F G : α → ProbComp Bool)
-    (B : ProbComp γ) (r : γ → Prop)
-    (h : ∀ x, |(Pr{let y ← F x}[y = true]).toReal - (Pr{let y ← G x}[y = true]).toReal|
-      ≤ (Pr{let z ← B}[r z]).toReal) :
-    |(Pr{let y ← mx >>= F}[y = true]).toReal - (Pr{let y ← mx >>= G}[y = true]).toReal|
-      ≤ (Pr{let z ← B}[r z]).toReal := by
-  have h1 := abs_prEvent_bind_sub_le_support mx F G (fun _ => B) r (fun x _ => h x)
-  rwa [(OracleComp.EvalDistEq.bind_const mx B).prEvent_eq r] at h1
-
 section RestOfForward
 
 variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
   (streamS : StreamCipher) (geom : Geometry)
-
-omit cipher macS in
-/-- The fillers from position `j` on are the fillers built on the rest of the path from the
-filler at `j`. -/
-theorem fillerAt_drop (hops : Array PathHop) (seeds : Array (Vector UInt8 32))
-    (filler : ByteArray) (j i : ℕ) :
-    RSOR.fillerAt kem kdfS streamS geom hops seeds filler (j + i)
-      = RSOR.fillerAt kem kdfS streamS geom (hops.extract j hops.size)
-        (seeds.extract j seeds.size) (RSOR.fillerAt kem kdfS streamS geom hops seeds filler j)
-        i := by
-  induction i with
-  | zero => rfl
-  | succ i ih =>
-    show RSOR.fillerAt kem kdfS streamS geom hops seeds filler (j + i + 1) = _
-    simp only [RSOR.fillerAt]
-    rw [ih, extract_tail_tail hops j i, extract_tail_tail seeds j i]
-
-/-- **A layer from a position on is a layer over the rest of the path**, when the seeds from
-there on are the rest's seeds and the filler there is the rest's padding. -/
-theorem layer_drop (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem))
-    (last : List RoutingCommand) (d d' : RSOR.Draw geom) (payload : ByteArray) (j i : ℕ)
-    (hj : j ≤ R.hops.length)
-    (hseeds : (d.1.toArray.extract 0 (RSOR.path kem R last).size).extract j
-        (d.1.toArray.extract 0 (RSOR.path kem R last).size).size
-      = d'.1.toArray.extract 0 (RSOR.path kem (R.drop j) last).size)
-    (hfill : RSOR.fillerAt kem kdfS streamS geom (RSOR.path kem R last)
-        (d.1.toArray.extract 0 (RSOR.path kem R last).size)
-        ((ofVector d.2).extract 0
-          ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)) j
-      = (ofVector d'.2).extract 0
-        ((geom.nrHops - (RSOR.path kem (R.drop j) last).size)
-          * geom.perHopRoutingInfoLength)) :
-    RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload (j + i)
-      = RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem (R.drop j) last) d' payload
-        i := by
-  unfold RSOR.layer
-  dsimp only
-  rw [fillerAt_drop, hfill,
-    extract_tail_tail (d.1.toArray.extract 0 (RSOR.path kem R last).size) j i,
-    extract_tail_tail (RSOR.path kem R last) j i, hseeds,
-    path_extract_drop kem geom R last j hj]
 
 /-- The keystream that makes the layers after a hop, under a joined draw, the layers over the
 rest of the path under the second draw: its tail sets the next layer's filler to the second
