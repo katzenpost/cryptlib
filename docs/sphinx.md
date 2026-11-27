@@ -744,6 +744,11 @@ for it:
      conditions are not proved yet. So both worlds are games against `fwdRelay` before the end
      of the path; what is left is to compare what the two relays forward (the blinding game
      and the relabelling of the keystreams), and the end of the path.
+     For the blinding game, world 0 before the end of the path is written from each hop's
+     keystream, tagging function, encryption and element (`fnRun`, `strRun_fwd0_fn`), so that
+     the hops after the relay can be given apart from those in front. A path's functions
+     spliced with those of its own later hops are the path's (`spliceAt`, `spliceAt_drop`,
+     `spliceAt_blindElem`, `blindElem_drop`). The reduction itself is not written.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).
