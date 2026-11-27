@@ -461,6 +461,48 @@ packet fails to build on a wrong size, a failed encapsulation, or commands that 
 hop, and a route of the scheme has none of these. So "a layer does not build" is not an event
 of its own for a first layer; what is left is seeds that are not reliable.
 
+## NIKE Sphinx: what is proved, and the plan for the RSOR properties
+
+Proved before this work, from the original Sphinx paper (Danezis, Goldberg): correctness of
+wrapping and unwrapping (`NIKESphinxTheorems.lean`), integrity (§4.2, `Integrity.lean`),
+wrap-resistance (§4.3, `WrapResistance.lean`) and indistinguishability (§4.4,
+`Indistinguishability.lean`), each with the limits its file states.
+
+From the RSOR paper (Scherer, Weis, Strufe), RSOR-Correctness is proved: NIKE Sphinx is a value
+of `Protocols.RSOR.Scheme` (`NIKESphinxRSOR.scheme`). TLU→, SLU← and STI↔ are not proved yet.
+
+The KEM Sphinx proofs do not carry over. There each hop has its own seed, and a proof replaces
+one hop's keys in a game around that hop's ciphertext. NIKE Sphinx has one secret per path,
+blinded hop by hop: the group element a relay receives is the sender's element raised to the
+blinding factors of the hops in front, and each blinding factor is derived from that hop's
+shared secret. So the layers after an honest relay depend on the sender's secret and on the
+honest relay's own blinding factor.
+
+The paper proves Sphinx secure in two steps (its §4.3 and §4.4):
+
+1. The "Sphinx RO-KEM" satisfies a game it calls Sphinx-KEM-IND-CCA, under Gap Diffie–Hellman
+   with random oracles. In that game the adversary names the other relays' keys and the honest
+   relay's position. The challenger, which holds the sender's secret, hands out the first group
+   element and every hop's keys and blinding factor. At the honest relay's hop the keys and the
+   blinding factor are the real ones or uniform ones, and the later hops are derived from
+   whichever was used. The adversary has the honest relay's decapsulation oracle.
+2. TLU→, SLU← and STI↔ follow from that game with a MAC, a PRG and a PRP.
+
+We have no random oracles: hop keys come from a KDF. So step 1 cannot be proved here as the
+paper proves it. The plan is to state the game of step 1 for our NIKE and KDF and take its
+advantage as the term the theorems carry, as KEM Sphinx carries the KEM and KDF terms. Gap
+Diffie–Hellman is then the assumption behind that term, by the paper's Theorem 3.
+
+Steps, in order:
+
+- the game: a hop's derived keys, blinding factor included, replaced by uniform ones, with the
+  later hops derived from the replacement (`HopKeys` already holds the blinding factor);
+- a packet's layers as a function of the first group element and the hops' keys, so a world
+  can be built from what the game hands out;
+- TLU→: the world as that game with the real keys, then the MAC, payload cipher and keystream
+  steps, then the comparison of the original's path with the path cut at the honest relay;
+- SLU← and STI↔ on the same lines.
+
 ## How the bounds are built
 
 The structural lemmas are stated for packets built from any keys (`newKEMPacketFrom`), not only
