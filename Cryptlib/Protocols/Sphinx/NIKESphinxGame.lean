@@ -70,6 +70,67 @@ theorem unwrap_eq_procWith (sk : nike.PrivateKey) (pkt : ByteArray) :
   rw [e]
   cases unwrapNIKEWith nike cipher macS streamS geom (relayKeys nike kdfS sk) pkt <;> rfl
 
+open Cryptlib.Primitives.NIKE.NIKE (telescopeElem telescopeSecret telescope_agree) in
+/-- The group elements are the sender's public key under the factors of the keys in front. -/
+theorem groupElem_eq (c : nike.PrivateKey) (ks : Array HopKeys) (i : ℕ) :
+    groupElem nike c ks i = ofVector (nike.encodePublicKey
+      (telescopeElem nike c (fun n => RSOR.factor nike ks[n]!) i).1) := by
+  induction i with
+  | zero => rfl
+  | succ i ih =>
+    have hdec : nike.decodePrivateKey (Common.toVecN nike.privateKeySize ks[i]!.blindingFactor)
+        = some (RSOR.factor nike ks[i]!) := by
+      obtain ⟨x, hx⟩ := nike.decodePrivateKey_total
+        (Common.toVecN nike.privateKeySize ks[i]!.blindingFactor)
+      unfold RSOR.factor
+      rw [hx]
+      rfl
+    rw [groupElem, ih, nikeBlind_bridge nike _ _ (telescopeElem nike c _ i).2 _ hdec]
+    rfl
+
+open Cryptlib.Primitives.NIKE.NIKE (telescopeElem telescopeSecret telescope_agree) in
+/-- **The relay derives the sender's keys.** For the element that reaches its place on the path,
+a relay derives the keys the sender derived for that place. -/
+theorem relayKeys_groupElem (c sk : nike.PrivateKey) (hops : Array PathHop)
+    (ks : Array HopKeys) (j : ℕ)
+    (hpk : hops[j]!.publicKey = ofVector (nike.encodePublicKey (nike.derivePublicKey sk)))
+    (hks : RSOR.hopKeys nike kdfS c hops j = (List.range j).map (ks[·]!)) :
+    relayKeys nike kdfS sk (groupElem nike c ks j) = .ok (RSOR.hopKey nike kdfS c hops j) := by
+  unfold relayKeys RSOR.hopKey
+  rw [groupElem_eq, nikeDH_bridge nike sk _ (telescopeElem nike c _ j).2, hks, List.map_map, hpk]
+  have e := RSOR.foldl_dh nike c sk (fun n => RSOR.factor nike ks[n]!) j
+  rw [telescope_agree]
+  exact congrArg (fun x => Except.ok (deriveHopKeys kdfS x)) e.symm
+
+theorem hopKeys_eq_map (c : nike.PrivateKey) (hops : Array PathHop) (n : ℕ) :
+    RSOR.hopKeys nike kdfS c hops n = (List.range n).map (RSOR.hopKey nike kdfS c hops) := by
+  induction n with
+  | zero => rfl
+  | succ n ih => rw [RSOR.hopKeys_succ, ih, List.range_succ, List.map_append]; rfl
+
+/-- **With the sender's keys, the relay handed the keys of its place is the relay.** -/
+theorem keysExcept_hopKeys (c sk : nike.PrivateKey) (hops : Array PathHop) (n j : ℕ)
+    (hj : j < n)
+    (hpk : hops[j]!.publicKey = ofVector (nike.encodePublicKey (nike.derivePublicKey sk))) :
+    keysExcept nike kdfS sk (groupElem nike c (RSOR.hopKeys nike kdfS c hops n).toArray j)
+        (RSOR.hopKeys nike kdfS c hops n).toArray[j]!
+      = relayKeys nike kdfS sk := by
+  have hget : ∀ i < n, (RSOR.hopKeys nike kdfS c hops n).toArray[i]!
+      = RSOR.hopKey nike kdfS c hops i := fun i hi => by
+    rw [hopKeys_eq_map]
+    simp [hi]
+  funext ge
+  unfold keysExcept
+  split
+  · next h =>
+    subst h
+    rw [relayKeys_groupElem nike kdfS c sk hops _ j hpk (by
+      rw [hopKeys_eq_map]
+      exact List.map_congr_left fun i hi =>
+        (hget i (lt_trans (List.mem_range.1 hi) hj)).symm), hget j hj]
+    rfl
+  · rfl
+
 /-- The relay's oracle, answering the element `a` with the keys `t`. -/
 def procImplK (sk : nike.PrivateKey) (a : ByteArray) (t : HopKeys) : QueryImpl procSpec ProbComp :=
   QueryImpl.add unifSpec.passthrough fun pkt =>
@@ -79,6 +140,18 @@ def procImplK (sk : nike.PrivateKey) (a : ByteArray) (t : HopKeys) : QueryImpl p
 def procImpl (sk : nike.PrivateKey) : QueryImpl procSpec ProbComp :=
   QueryImpl.add unifSpec.passthrough fun pkt =>
     pure (procWith nike cipher macS streamS geom (relayKeys nike kdfS sk) pkt)
+
+/-- **In the game's real world the relay is the honest relay**: handed the sender's keys for its
+place, it answers as it does with its own key. -/
+theorem procImplK_hopKeys (c sk : nike.PrivateKey) (hops : Array PathHop) (n j : ℕ)
+    (hj : j < n)
+    (hpk : hops[j]!.publicKey = ofVector (nike.encodePublicKey (nike.derivePublicKey sk))) :
+    procImplK nike cipher macS kdfS streamS geom sk
+        (groupElem nike c (RSOR.hopKeys nike kdfS c hops n).toArray j)
+        (RSOR.hopKeys nike kdfS c hops n).toArray[j]!
+      = procImpl nike cipher macS kdfS streamS geom sk := by
+  unfold procImplK procImpl
+  rw [keysExcept_hopKeys nike kdfS c sk hops n j hj hpk]
 
 /-- Hop keys from uniform draws: four keys, and the seed of the blinding factor. -/
 def keysOfDraw (u : KeyTuple × Vector UInt8 32) : HopKeys where
@@ -99,7 +172,8 @@ variable {nike}
 
 /-- **The key game.** The honest relay is put at the place the adversary chose. With `b` the
 hops' keys are the sender's; without, the relay's keys are uniform and the hops after it are
-derived from them. The relay answers the element it receives with the keys of its place. -/
+derived from them. The relay answers the element it receives with the keys of its place. A
+place off the path loses. -/
 def keyGame (A : KeyAdversary nike) (b : Bool) : ProbComp Bool := do
   let u ← $ᵗ (KeyTuple × Vector UInt8 32)
   let k ← RSOR.keygen nike
@@ -110,9 +184,11 @@ def keyGame (A : KeyAdversary nike) (b : Bool) : ProbComp Bool := do
     { h with publicKey := ofVector (nike.encodePublicKey k.1.1) }
   let keys := hopKeysWith nike kdfS c hops cs.1.2
     (if b then RSOR.hopKey nike kdfS c hops cs.1.2 else keysOfDraw u) hops.size
-  simulateQ (procImplK nike cipher macS kdfS streamS geom k.2
-      (groupElem nike c keys.toArray cs.1.2) keys.toArray[cs.1.2]!)
-    (A.post cs.2 (groupElem nike c keys.toArray 0) keys)
+  if cs.1.2 < hops.size then
+    simulateQ (procImplK nike cipher macS kdfS streamS geom k.2
+        (groupElem nike c keys.toArray cs.1.2) keys.toArray[cs.1.2]!)
+      (A.post cs.2 (groupElem nike c keys.toArray 0) keys)
+  else pure false
 
 /-- The adversary's advantage in the key game. -/
 noncomputable def keyAdvantage (A : KeyAdversary nike) : ℝ :=

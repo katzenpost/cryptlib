@@ -520,6 +520,12 @@ element (`unwrapNIKEWith`, `procWith`); the relay is that form on the keys it de
 handed the replaced keys for the arriving element accepts the layer, and does not use them for
 another element.
 
+The game's real world is the honest relay: for the element that reaches its place, a relay
+derives the keys the sender derived for that place (`groupElem_eq`, `relayKeys_groupElem`), so
+handed the sender's keys it answers as it does with its own key (`keysExcept_hopKeys`,
+`procImplK_hopKeys`). Every blinding factor decodes, by a law of the NIKE type. An adversary
+that names a place off the path loses in both worlds.
+
 Steps, in order:
 
 - the game: a hop's derived keys, blinding factor included, replaced by uniform ones, with the
