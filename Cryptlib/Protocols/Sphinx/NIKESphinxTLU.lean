@@ -244,6 +244,33 @@ theorem play_false_sub_keyGame_le (names : Role → Name) (A : (Protocols.RSOR.f
   rw [onionOfKeys_real nike cipher macS kdfS streamS geom D.c.req D.o D.d pkt hpkt]
   rfl
 
+/-- **World 0 of TLU→ with the honest relay's keys replaced.** Playing world 0 with the relay's
+keys for the adversary's onion uniform, the hops after it derived from them, and the relay
+answering that onion's element with them, changes the adversary's guess by at most the chance
+that the onion cannot be built and the advantage of `forwardAdv` in the key game. -/
+theorem play_false_sub_ideal_le (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) :
+    |(Pr{let x ← Protocols.RSOR.Property.play names A false}[x = true]).toReal
+      - (Pr{let x ← (($ᵗ (KEMSphinx.KeyTuple × Vector UInt8 32)) >>= fun u =>
+          forwardDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= propIdealOf
+              nike cipher macS kdfS streamS geom hvalid hmactag h16
+              (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher
+              macS kdfS streamS geom hvalid hmactag h16 names) _
+            (forwardView nike cipher macS kdfS streamS geom hvalid hmactag h16 names) A u)}[x =
+                true]).toReal|
+    ≤ (Pr{let D ← (forwardDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A)}[forwardBad nike cipher macS kdfS streamS geom hvalid hmactag h16 D]).toReal
+      + keyAdvantage cipher macS kdfS streamS geom (forwardAdv nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names A) := by
+  have h1 := play_false_sub_keyGame_le nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  rw [← (keyGame_false_evalDistEq nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) _ _
+    (forwardView nike cipher macS kdfS streamS geom hvalid hmactag h16 names) A).prEvent_eq (fun x
+        => x = true)]
+  unfold keyAdvantage
+  exact (abs_sub_le _ _ _).trans (add_le_add h1 le_rfl)
+
 end Forward
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx

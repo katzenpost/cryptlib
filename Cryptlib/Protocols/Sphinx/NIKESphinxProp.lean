@@ -12,7 +12,7 @@ open OracleComp OracleSpec ENNReal
 open Cryptlib.Protocols.Sphinx.Geometry (Geometry)
 open Cryptlib.Protocols.Sphinx.Types
 open Cryptlib.Protocols.Sphinx.Constants
-open Cryptlib.Protocols.Sphinx.KEMSphinx (ProcResult procSpec)
+open Cryptlib.Protocols.Sphinx.KEMSphinx (ProcResult procSpec relayImpl simulateQ_relayImpl_liftM)
 open Cryptlib.Protocols.Sphinx.KEMSphinx.RSOR (Name Msg Onion join stepOf replyOf)
 open Cryptlib.Primitives.WideBlockCipher (WideBlockCipher)
 open Cryptlib.Primitives.MAC (MAC)
@@ -128,6 +128,49 @@ theorem viaOracle_honest
           hs, hr, hsk h hr]
         rfl
     · simp [viaOracle, Protocols.RSOR.honest, Protocols.RSOR.oracle, Protocols.RSOR.answer, hs]
+
+/-- **The relay behind an oracle, for any answers.** Answering `viaOracle`'s oracle with the
+answers `ans` gives the honest relays of the game with `ρ` processing a packet by `ans`.
+The relay's log is then in front of `ans`: a header it has seen is refused before `ans` is
+asked. -/
+theorem viaOracle_relayImpl (ans : ByteArray → ProcResult) (sk : Role → nike.PrivateKey)
+    (patch : Protocols.RSOR.Patch (sphinx nike cipher macS kdfS streamS geom hvalid hmactag h16))
+    {α : Type}
+    (oa : OracleComp
+      (Protocols.RSOR.oracleSpec (sphinx nike cipher macS kdfS streamS geom hvalid hmactag h16)) α)
+    (log : Protocols.RSOR.Log (sphinx nike cipher macS kdfS streamS geom hvalid hmactag h16)) :
+    simulateQ (relayImpl ans)
+        ((simulateQ (viaOracle nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk patch)
+          oa).run log)
+      = (simulateQ (Protocols.RSOR.oracle (m := ProbComp)
+          (fun h o => pure (if h = ρ then stepOf geom (ans (join o))
+            else RSOR.proc nike cipher macS kdfS streamS geom (sk h) o))
+          (fun h msg o => pure (if h = ρ then
+              replyOf cipher geom msg (ans (join o))
+            else RSOR.reply nike cipher macS kdfS streamS geom (sk h) msg o))
+          patch) oa).run log := by
+  refine simulateQ_StateT_compose _ _ _ (fun q log => ?_) oa log
+  rcases q with (t | ⟨h, o⟩) | ⟨h, msg, o⟩
+  · simp only [viaOracle, Protocols.RSOR.oracle]
+    simpa using simulateQ_relayImpl_liftM ans (liftM (OracleSpec.query t))
+  · by_cases hs : (h, o.1) ∈ log.seen
+    · simp [viaOracle, Protocols.RSOR.oracle, Protocols.RSOR.process, hs]
+    · by_cases hr : h = ρ
+      · subst hr
+        simp [viaOracle, Protocols.RSOR.oracle, Protocols.RSOR.process, hs,
+          simulateQ_relayImpl_liftM]
+        rfl
+      · simp [viaOracle, Protocols.RSOR.oracle, Protocols.RSOR.process, hs, hr,
+          simulateQ_relayImpl_liftM]
+        rfl
+  · by_cases hs : (h, o) ∈ log.held
+    · by_cases hr : h = ρ
+      · subst hr
+        simp [viaOracle, Protocols.RSOR.oracle, Protocols.RSOR.answer, hs]
+        rfl
+      · simp [viaOracle, Protocols.RSOR.oracle, Protocols.RSOR.answer, hs, hr]
+        rfl
+    · simp [viaOracle, Protocols.RSOR.oracle, Protocols.RSOR.answer, hs]
 
 end Games
 
@@ -455,6 +498,109 @@ theorem keyGame_true_evalDistEq
   refine EvalDistEq.bind_right _ fun d => ?_
   split
   · exact EvalDistEq.rfl
+  · exact (OracleComp.EvalDistEq.bind_const _ _).symm
+
+/-- The second phase of `propAdvOf`, answered by a relay that is handed the keys `t` for the
+element `e`: the challenger's draw, then the second phase of the adversary of `P` against the
+honest relays, `ρ` answering with the handed keys. -/
+theorem propAdv_postK (place : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom
+    hvalid hmactag h16 P ρ names pk → Array PathHop × ℕ)
+    (Oth : Type) (draw : ProbComp Oth)
+    (view : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
+        names pk → Oth → ByteArray → List HopKeys
+      → Protocols.RSOR.World 𝒮)
+    (A : P.Adversary) (k : RSOR.Key nike × nike.PrivateKey)
+    (ch : PropCh nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names k.1) (st :
+        A.State) (log : Protocols.RSOR.Log 𝒮)
+    (e : ByteArray) (t : HopKeys) (a : ByteArray) (ks : List HopKeys) :
+    simulateQ (procImplK nike cipher macS kdfS streamS geom k.2 e t)
+        ((propAdvOf nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth draw
+            view A).post (ch, st, log) a ks)
+      = (do
+        let o ← draw
+        (simulateQ (Protocols.RSOR.oracle (m := ProbComp)
+            (fun h o => pure (if h = ρ then
+                stepOf geom (procWith nike cipher macS streamS geom (keysExcept nike kdfS k.2 e t)
+                    (join o))
+              else RSOR.proc nike cipher macS kdfS streamS geom (ch.keys h).2 o))
+            (fun h msg o => pure (if h = ρ then
+                replyOf cipher geom msg (procWith nike cipher macS streamS geom (keysExcept nike
+                    kdfS k.2 e t) (join o))
+              else RSOR.reply nike cipher macS kdfS streamS geom (ch.keys h).2 msg o))
+            (view ch o a ks).patch)
+          (A.guess st (view ch o a ks).onion)).run' log) := by
+  have hi : procImplK nike cipher macS kdfS streamS geom k.2 e t
+      = relayImpl (procWith nike cipher macS streamS geom (keysExcept nike kdfS k.2 e t)) := rfl
+  rw [hi]
+  unfold propAdvOf
+  simp only [simulateQ_bind, simulateQ_relayImpl_liftM]
+  refine bind_congr fun o => ?_
+  have hv := viaOracle_relayImpl nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ (procWith
+      nike cipher macS streamS geom (keysExcept nike kdfS k.2 e t))
+    (fun h => (ch.keys h).2) (view ch o a ks).patch (A.guess st (view ch o a ks).onion) log
+  simp only [StateT.run', simulateQ_map]
+  exact congrArg (fun x => (·.1) <$> x) hv
+
+/-- The second phase of the key game's other world on a draw: the adversary of `P` against the
+honest relays, on the world `view` shows from the hop keys with the relay's replaced by the
+uniform `u`, the relay `ρ` answering the element of its place with the replacement. -/
+def propIdealOf (place : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid
+    hmactag h16 P ρ names pk → Array PathHop × ℕ)
+    (Oth : Type)
+    (view : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
+        names pk → Oth → ByteArray → List HopKeys
+      → Protocols.RSOR.World 𝒮)
+    (A : P.Adversary) (u : KEMSphinx.KeyTuple × Vector UInt8 32)
+    (D : PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A) : ProbComp
+        Bool :=
+  let ch : PropCh nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names D.k.1 := ⟨D.keys,
+      D.c⟩
+  let c := (nike.decodePrivateKey D.d).getD default
+  let hops := (place ch).1.modify (place ch).2 fun h =>
+    { h with publicKey := Util.Bytes.ofVector (nike.encodePublicKey D.k.1.1) }
+  let keys := hopKeysWith nike kdfS c hops (place ch).2 (keysOfDraw u) hops.size
+  if (place ch).2 < hops.size then
+    (simulateQ (Protocols.RSOR.oracle (m := ProbComp)
+        (fun h o => pure (if h = ρ then
+            stepOf geom (procWith nike cipher macS streamS geom (keysExcept nike kdfS D.k.2
+              (groupElem nike c keys.toArray (place ch).2) keys.toArray[(place ch).2]!) (join o))
+          else RSOR.proc nike cipher macS kdfS streamS geom (D.keys h).2 o))
+        (fun h msg o => pure (if h = ρ then
+            replyOf cipher geom msg (procWith nike cipher macS streamS geom (keysExcept nike kdfS
+                D.k.2
+              (groupElem nike c keys.toArray (place ch).2) keys.toArray[(place ch).2]!) (join o))
+          else RSOR.reply nike cipher macS kdfS streamS geom (D.keys h).2 msg o))
+        (view ch D.o (groupElem nike c keys.toArray 0) keys).patch)
+      (A.guess D.st (view ch D.o (groupElem nike c keys.toArray 0) keys).onion)).run' D.log
+  else pure false
+
+/-- **The key game's other world, as its draws and then the second phase.** -/
+theorem keyGame_false_evalDistEq
+    (place : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid hmactag h16 P
+        ρ names pk → Array PathHop × ℕ)
+    (Oth : Type) (draw : ProbComp Oth)
+    (view : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
+        names pk → Oth → ByteArray → List HopKeys
+      → Protocols.RSOR.World 𝒮)
+    (A : P.Adversary) :
+    keyGame cipher macS kdfS streamS geom (propAdvOf nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 P ρ names place Oth draw view A) false
+      =ᵈ ($ᵗ (KEMSphinx.KeyTuple × Vector UInt8 32)) >>= fun u =>
+        propDrawOf nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth draw A >>=
+            propIdealOf nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth
+            view A u := by
+  unfold keyGame
+  simp only [propAdv_pre, bind_assoc, pure_bind]
+  refine EvalDistEq.bind_right _ fun u => ?_
+  unfold propDrawOf propIdealOf
+  simp only [bind_assoc, pure_bind]
+  refine EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+    EvalDistEq.bind_right _ fun k₂ => EvalDistEq.bind_right _ fun out => ?_
+  refine EvalDistEq.trans ?_ (OracleComp.EvalDistEq.bind_bind_swap _ _ _)
+  refine EvalDistEq.bind_right _ fun d => ?_
+  simp only [Bool.false_eq_true, ite_false]
+  split
+  · rw [propAdv_postK]
   · exact (OracleComp.EvalDistEq.bind_const _ _).symm
 
 end PropGame

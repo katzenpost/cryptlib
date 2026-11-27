@@ -547,8 +547,11 @@ own keys is the sender's onion when that onion builds (`onionOfKeys_real`). A ga
 property may be played with the honest relay's key pair drawn first (`play_evalDistEq_honAt`).
 World 0 of TLU→ is the key game's real world for this view, played by `forwardAdv`, except on
 draws for which the adversary's onion cannot be built (`play_false_sub_keyGame_le`, the event
-`forwardBad`). So world 0 may be played with the honest relay's keys replaced, at the cost of
-`keyAdvantage` for `forwardAdv` and the chance of that event. The event is not bounded yet;
+`forwardBad`). The key game's other world is written out as its draws and the adversary's
+second phase against a relay that answers the element of its place with the replacement
+(`propIdealOf`, `keyGame_false_evalDistEq`, `viaOracle_relayImpl`). So world 0 played with the
+honest relay's keys replaced differs from world 0 by at most `keyAdvantage` for `forwardAdv`
+and the chance of that event (`play_false_sub_ideal_le`). The event is not bounded yet;
 whether a NIKE Sphinx packet builds should depend on the path and the geometry alone.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
