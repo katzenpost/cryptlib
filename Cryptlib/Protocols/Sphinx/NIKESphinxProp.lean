@@ -1024,6 +1024,39 @@ theorem oracle_onlyAns (ρ : Role) (sk : Role → nike.PrivateKey) (a : ByteArra
           ((ite_eq_right fun hc => ho hc.2).trans (ite_eq_left hr)).symm
     · exact (ite_eq_right hr).trans ((ite_eq_right fun hc => hr hc.1).trans (ite_eq_right hr)).symm
 
+/-- **The second phase against a relay that answers one header**, behind its oracle, is the
+second phase against the one-decryption oracle. -/
+theorem relayImpl_onlyAns_run (ρ : Role) (sk : Role → nike.PrivateKey) (a : ByteArray)
+    (t : HopKeys) (Mb : ByteArray) (tag : Vector UInt8 macS.tagSize)
+    (Hv : Vector UInt8 geom.headerLength)
+    (hH : Util.Bytes.ofVector Hv = Mb ++ Util.Bytes.ofVector tag)
+    (hcar : (Util.Bytes.ofVector Hv).extract 2 (2 + nike.publicKeySize) = a)
+    (patch : Protocols.RSOR.Patch 𝒮) {α : Type}
+    (oa : OracleComp (Protocols.RSOR.oracleSpec 𝒮) α) (log : Protocols.RSOR.Log 𝒮) :
+    simulateQ (relayImpl (onlyAns nike cipher macS kdfS streamS geom (sk ρ) a t Mb tag))
+        ((simulateQ (viaOracle nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk patch)
+            oa).run' log)
+      = (simulateQ (Protocols.RSOR.withDec (S := 𝒮) ρ Hv (fun o => o.2)
+          (fun o y => stepOf geom (procD nike (Primitives.MAC.MAC.const tag) streamS geom (fun _ =>
+              .ok t) (fun _ _ => y) (join o)))
+          (fun msg o y => replyOf cipher geom msg (procD nike (Primitives.MAC.MAC.const tag)
+              streamS geom (fun _ => .ok t) (fun _ _ => y) (join o)))
+          (fun h o => if h = ρ then stepOf geom (noneAns nike cipher macS kdfS streamS geom (sk ρ)
+              a (join o))
+            else RSOR.proc nike cipher macS kdfS streamS geom (sk h) o)
+          (fun h msg o => if h = ρ then replyOf cipher geom msg (noneAns nike cipher macS kdfS
+              streamS geom (sk ρ) a (join o))
+            else RSOR.reply nike cipher macS kdfS streamS geom (sk h) msg o)
+          (fun y => Util.Bytes.toVecN _ (cipher.decrypt t.payloadEncryption.toArray
+            (Util.Bytes.ofVector t.headerEncryptionIV) (Util.Bytes.ofVector y)))
+          patch) oa).run' log := by
+  rw [← oracle_onlyAns nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk a t Mb tag Hv hH
+      hcar patch]
+  simp only [StateT.run', simulateQ_map]
+  exact congrArg (fun x => (·.1) <$> x)
+    (viaOracle_relayImpl nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ (onlyAns nike
+        cipher macS kdfS streamS geom (sk ρ) a t Mb tag) sk patch oa log)
+
 end OneHeaderOracle
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx

@@ -594,9 +594,11 @@ onion's payload with its payload key, and under any other refuses the element (`
 The honest relays' oracle, with one relay answering one header, is the one-decryption oracle of
 the payload game (`oracle_onlyAns`). The onion uses the relay's payload key for one encryption,
 of `onionBlock` (`onionOfTag_enc`), and reads that key nowhere else (`onion_payloadKey`); a
-relay handed its payload's decryption does not read it either (`procD_payloadKey`). Still to
-do for the payload step of world 0: the equality of world 0 after its MAC step with a payload
-game.
+relay handed its payload's decryption does not read it either (`procD_payloadKey`). The second
+phase against a relay that answers one header is the second phase against the one-decryption
+oracle (`relayImpl_onlyAns_run`), and the hops' keys with and without the relay's payload key
+agree off the relay (`payKeys`). Still to do for the payload step of world 0: the payload game
+itself and its equality with world 0 after the MAC step.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two

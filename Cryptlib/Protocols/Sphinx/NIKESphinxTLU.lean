@@ -526,6 +526,60 @@ theorem forward_ideal_sub_only_le (names : Role → Name) (A : (Protocols.RSOR.f
       exact hpos)
     (by rw [hsz]; exact hpos)
 
+/-! ## World 0 after its MAC step, cut at the honest relay's payload key -/
+
+/-- The draws of world 0 besides the honest relay's payload key: its IV, MAC key, header key
+and blinding seed, and the game's draws. -/
+abbrev PayX (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :=
+  Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32 × Vector UInt8 32 × PropDraw nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+      (RSOR.Randomness nike geom) A
+
+/-- The draws of the MAC step, from those and a payload key. -/
+def payRest (names : Role → Name) {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary} (x :
+    PayX nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+    (kp : Vector UInt8 48) : Rest × PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness nike geom) A :=
+  (((kp, x.1, x.2.2.1), x.2.2.2.1), x.2.2.2.2)
+
+/-- The honest relay's place is on the path. -/
+theorem forward_pos_lt (names : Role → Name) {A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary} (D : PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+    (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness nike geom) A) :
+    drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable
+        (S := 𝒮)) .relay names (forwardPlace nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) D
+      < (drawHops nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names) D).size := by
+  show (D.c.pos : ℕ) < (Array.modify
+    (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]) D.c.pos _).size
+  rw [Array.size_modify]
+  exact lt_of_lt_of_eq D.c.pos.isLt (RSOR.path_size nike D.c.req.fwd _).symm
+
+/-- The hops' keys with and without the honest relay's payload key: they agree off the relay,
+and at the relay they are the relay's draws. -/
+theorem payKeys (names : Role → Name) {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (x : PayX nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+    (kp : Vector UInt8 48) :
+    (∀ i, i ≠ (x.2.2.2.2.c.pos : ℕ) →
+      (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names x kp)).toArray[i]!
+        = (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 names x default)).toArray[i]!) ∧
+      (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names x kp)).toArray[(x.2.2.2.2.c.pos :
+          ℕ)]!
+        = restKeys (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x kp).1
+            default := by
+  have hlt := forward_pos_lt nike cipher macS kdfS streamS geom hvalid hmactag h16 names x.2.2.2.2
+  refine ⟨fun i hi => toArray_getElem!_congr _ _ i ?_, ?_⟩
+  · exact (hopKeysWith_congr nike kdfS _ _ _ (restKeys (payRest nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names x kp).1 default)
+      (restKeys (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x default).1
+          default) rfl _).2 i hi
+  · exact toArray_getElem!_of_getElem? _ _ _ (hopKeysWith_getElem nike kdfS _ _ _ _ _ hlt)
+
 end Forward
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
