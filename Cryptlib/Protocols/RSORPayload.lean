@@ -26,11 +26,12 @@ theorem withDec_congr {S : Scheme} {L : ℕ} (ρ : Role) (H : S.Header)
     {rep rep' : S.Msg → S.Onion → Vector UInt8 L → Option (S.Name × S.Onion)}
     {proc proc' : Role → S.Onion → Option S.Step}
     {reply reply' : Role → S.Msg → S.Onion → Option (S.Name × S.Onion)}
-    (dec : Vector UInt8 L → Vector UInt8 L) (patch : Patch S)
-    (h1 : step = step') (h2 : rep = rep') (h3 : proc = proc') (h4 : reply = reply') :
+    (dec : Vector UInt8 L → Vector UInt8 L) {patch patch' : Patch S}
+    (h1 : step = step') (h2 : rep = rep') (h3 : proc = proc') (h4 : reply = reply')
+    (h5 : patch = patch') :
     withDec ρ H key step rep proc reply dec patch
-      = withDec ρ H key step' rep' proc' reply' dec patch := by
-  subst h1 h2 h3 h4
+      = withDec ρ H key step' rep' proc' reply' dec patch' := by
+  subst h1 h2 h3 h4 h5
   rfl
 
 /-- A game in which the honest relay `role` decrypts under one header only, cut where its
