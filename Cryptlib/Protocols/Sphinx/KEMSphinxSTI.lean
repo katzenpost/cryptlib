@@ -368,6 +368,30 @@ theorem evalDistEq_fwdShift {δ : Type} (hvalid : geom.ValidForKEM kem)
             geom.perHopRoutingInfoLength)) (fun U₀ => K U₀ D))
   rw [key P U]
 
+omit cipher macS in
+/-- The shifted keystream is as long as a keystream. -/
+theorem fwdShift_size (hvalid : geom.ValidForKEM kem)
+    (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem)) (last : List RoutingCommand)
+    (D dS : RSOR.Draw geom) (j : ℕ) (hj : j + 1 < R.hops.length) (U : ByteArray)
+    (hU : U.size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) :
+    (fwdShift kem kdfS streamS geom (RSOR.path kem R last) D dS j U).size = (geom.routingInfoLength
+        + geom.perHopRoutingInfoLength) := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hle := R.length_le
+  have hjp : (j + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
+    exact Nat.mul_le_mul_right _ (by omega)
+  have hat : ((geom.nrHops - R.hops.length) * geom.perHopRoutingInfoLength) + (j + 1) *
+      geom.perHopRoutingInfoLength ≤ geom.routingInfoLength := by
+    rw [← Nat.add_mul, hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
+    exact Nat.mul_le_mul_right _ (by omega)
+  unfold fwdShift
+  simp only [RSOR.path_size]
+  rw [ByteArray.size_append, size_xorBytes, size_xorBytes, ByteArray.size_extract,
+    ByteArray.size_extract, hU, Util.Bytes.size_ofVector]
+  rw [Nat.succ_mul] at hjp hat ⊢
+  omega
+
 end RestOfForward
 
 section TailGame
@@ -763,6 +787,163 @@ theorem tail_sub_keyedReal_le (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} �
   rw [propAdv_post kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.tailPair w₀
       w₁) ρ names _ _ _ A d.k d.keys _ _ hdec d.st d.log _, ← hview]
   rfl
+
+omit [SampleableType kem.Plaintext] in
+/-- With the role `ρ` handled too, the hop needs no further step when it needed none before or
+is the honest relay with the role `ρ`. -/
+theorem tailDone_or (dn : Role → Bool) (ρ : Role) {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.TailChallenge hon) :
+    tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => dn x || x == ρ) c
+      ↔ tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 dn c ∨ tailRho kem cipher
+          macS kdfS streamS geom hvalid hmactag h16 ρ c := by
+  unfold tailDone tailRho
+  constructor
+  · rintro (h0 | ⟨ρ', hd, hk⟩)
+    · exact Or.inl (Or.inl h0)
+    · rcases Bool.or_eq_true_iff.mp hd with h | h
+      · exact Or.inl (Or.inr ⟨ρ', h, hk⟩)
+      · exact Or.inr ((beq_iff_eq.mp h) ▸ hk)
+  · rintro ((h0 | ⟨ρ', hd, hk⟩) | hk)
+    · exact Or.inl h0
+    · exact Or.inr ⟨ρ', Bool.or_eq_true_iff.mpr (Or.inl hd), hk⟩
+    · exact Or.inr ⟨ρ, Bool.or_eq_true_iff.mpr (Or.inr (beq_self_eq_true ρ)), hk⟩
+
+omit [SampleableType kem.Plaintext] in
+/-- Where the hop before the shown layer is not the relay `ρ` still waiting for its step, the
+keyed view is the next hybrid world, whatever the keystream. -/
+theorem tailViewU_other (dn : Role → Bool) (ρ : Role) {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.TailChallenge hon) (o : RSOR.Randomness geom × RSOR.Draw geom)
+    (U : ByteArray)
+    (h : tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 dn c ∨ ¬ tailRho kem cipher
+        macS kdfS streamS geom hvalid hmactag h16 ρ c) :
+    tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c o U
+      = tailHybWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => dn x || x == ρ)
+          c o.1 o.2 := by
+  unfold tailViewU tailHybWorld
+  by_cases hd : tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 dn c
+  · have hd' := (tailDone_or kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c).mpr
+      (Or.inl hd)
+    simp only [hd, hd', ite_true]
+  · have hρ : ¬ tailRho kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c := h.resolve_left
+      hd
+    have hd' : ¬ tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => dn x || x
+        == ρ) c := fun h' =>
+      ((tailDone_or kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c).mp h').elim hd hρ
+    simp only [hd, hd', hρ, ite_false]
+
+omit [SampleableType kem.Plaintext] in
+/-- Where the relay `ρ` still waits for its step, the keyed view does not read the forward
+draw of the middle world. -/
+theorem tailViewU_snd (dn : Role → Bool) (ρ : Role) {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.TailChallenge hon) (r : RSOR.Randomness geom) (d d' : RSOR.Draw geom)
+    (U : ByteArray) (hd : ¬ tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 dn c) (hρ
+        : tailRho kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c) :
+    tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c (r, d) U = tailViewU kem
+        cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c (r, d') U := by
+  unfold tailViewU
+  simp only [hd, hρ, ite_true, ite_false]
+
+omit [SampleableType kem.Plaintext] in
+set_option maxHeartbeats 2000000 in
+/-- **The keyed view under the relabelled draws is the middle world.** -/
+theorem tailViewU_shift (dn : Role → Bool) (ρ : Role) {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.TailChallenge hon) (k : ℕ) (hk : k + 1 = c.pos.val)
+    (d dS d' : RSOR.Draw geom) (b : RSOR.Draw geom × Vector UInt8 64 × Vector UInt8 16)
+    (U : ByteArray) (hU : U.size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (hd : ¬ tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 dn c) (hρ : tailRho kem
+        cipher macS kdfS streamS geom hvalid hmactag h16 ρ c) :
+    tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c ((joinDraw geom d dS k
+        ((geom.nrHops - c.req.fwd.hops.length) * geom.perHopRoutingInfoLength), b), d')
+        (fwdShift kem kdfS streamS geom (RSOR.path kem c.req.fwd [.recipient c.req.receiver])
+          (joinDraw geom d dS k ((geom.nrHops - c.req.fwd.hops.length) *
+              geom.perHopRoutingInfoLength)) dS k U)
+      = tailMidWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 c (d, b) dS := by
+  have hlt : c.pos.val < c.req.fwd.hops.length := c.pos.isLt
+  have h := fwdShift_spec kem cipher macS kdfS streamS geom hvalid c.req.fwd [.recipient
+      c.req.receiver] d dS
+    (RSOR.body kem macS kdfS streamS geom c.req (joinDraw geom d dS k ((geom.nrHops -
+        c.req.fwd.hops.length) * geom.perHopRoutingInfoLength), b)) k
+    ((geom.nrHops - c.req.fwd.hops.length) * geom.perHopRoutingInfoLength) U
+    (congrArg (fun n => (geom.nrHops - n) * geom.perHopRoutingInfoLength)
+      (RSOR.path_size kem c.req.fwd [.recipient c.req.receiver]).symm)
+    (lt_of_eq_of_lt hk hlt) hU 0 (le_of_lt (lt_of_eq_of_lt hk hlt))
+  rw [Nat.add_zero] at h
+  unfold tailViewU tailMidWorld
+  simp only [hd, hρ, ite_true, ite_false]
+  rw [← hk, Nat.add_sub_cancel, h]
+  rfl
+
+omit [SampleableType kem.Plaintext] in
+set_option maxHeartbeats 4000000 in
+/-- **From a uniform keystream, a hybrid world is the next one.** The keyed view of the hybrid
+with the roles `dn` handled, read with a uniform keystream, is the hybrid world with the role
+`ρ` handled too. -/
+theorem evalDistEq_tailViewU {δ : Type} (dn : Role → Bool) (ρ : Role)
+    {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon)
+    (K : Protocols.RSOR.World 𝒮 → ProbComp δ) :
+    (do
+      let o ← hybDraw geom
+      let U ← $ᵗ (Vector UInt8 (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+      K (tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c o (ofVector U)))
+      =ᵈ (do
+        let o ← hybDraw geom
+        K (tailHybWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => dn x || x ==
+            ρ) c o.1 o.2)) := by
+  by_cases h : tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 dn c ∨ ¬ tailRho kem
+      cipher macS kdfS streamS geom hvalid hmactag h16 ρ c
+  · refine EvalDistEq.bind_right _ fun o => ?_
+    simp only [tailViewU_other kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c o _ h]
+    exact OracleComp.EvalDistEq.bind_const _ _
+  · obtain ⟨hd, hρ⟩ := not_or.mp h
+    have hρ : tailRho kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c :=
+        Classical.not_not.mp hρ
+    obtain ⟨k, hk, -⟩ := id hρ
+    have hlt : c.pos.val < c.req.fwd.hops.length := c.pos.isLt
+    have hd' := (tailDone_or kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c).mpr
+        (Or.inr hρ)
+    have hid : Function.Bijective (Function.uncurry fun (a : RSOR.Draw geom)
+        (b : RSOR.Draw geom × Vector UInt8 64 × Vector UInt8 16) =>
+        ((a, b) : RSOR.Randomness geom)) := Function.bijective_id
+    unfold hybDraw tailHybWorld
+    simp only [bind_assoc, pure_bind, hd', ite_true]
+    -- the right side: split the randomness, the backward part first
+    refine EvalDistEq.trans ?_ (evalDistEq_pair_of_bijective hid fun r =>
+      $ᵗ (RSOR.Draw geom) >>= fun dS => K (tailMidWorld kem cipher macS kdfS streamS geom hvalid
+          hmactag h16 c r dS))
+    refine EvalDistEq.trans ?_ (OracleComp.EvalDistEq.bind_bind_swap _ _ _)
+    -- the left side: the same, and the forward draw is not read
+    refine EvalDistEq.trans (evalDistEq_pair_of_bijective hid fun r =>
+      $ᵗ (RSOR.Draw geom) >>= fun d' => $ᵗ (Vector UInt8 (geom.routingInfoLength +
+          geom.perHopRoutingInfoLength)) >>= fun U =>
+        K (tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c (r, d') (ofVector
+            U))).symm ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+    refine EvalDistEq.bind_right _ fun b => ?_
+    refine EvalDistEq.trans (EvalDistEq.bind_right _ fun a =>
+      (show ($ᵗ (RSOR.Draw geom) >>= fun d' => $ᵗ (Vector UInt8 (geom.routingInfoLength +
+          geom.perHopRoutingInfoLength)) >>= fun U =>
+          K (tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c ((a, b), d')
+              (ofVector U)))
+        =ᵈ ($ᵗ (Vector UInt8 (geom.routingInfoLength + geom.perHopRoutingInfoLength)) >>= fun U =>
+          K (tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c ((a, b), a)
+              (ofVector U))) from by
+        simp only [tailViewU_snd kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c (a, b)
+            _ a _ hd hρ]
+        exact OracleComp.EvalDistEq.bind_const _ _)) ?_
+    refine EvalDistEq.trans (evalDistEq_fwdShift kem kdfS streamS geom hvalid c.req.fwd
+      [.recipient c.req.receiver] k (lt_of_eq_of_lt hk hlt) (fun U a =>
+        K (tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c ((a, b), a)
+            (ofVector U)))).symm ?_
+    refine EvalDistEq.bind_right _ fun d => EvalDistEq.bind_right _ fun dS => ?_
+    refine EvalDistEq.trans (EvalDistEq.bind_right _ fun U => ?_)
+      (OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 (geom.routingInfoLength +
+          geom.perHopRoutingInfoLength))) _)
+    have hc : ∀ m m' : ProbComp δ, m = m' → m =ᵈ m' := fun _ _ h => h ▸ EvalDistEq.rfl
+    refine hc _ _ (congrArg K ?_)
+    rw [Util.Bytes.ofVector_toVecN _ (fwdShift_size kem kdfS streamS geom hvalid c.req.fwd _ _ _
+        k (lt_of_eq_of_lt hk hlt) _ (Util.Bytes.size_ofVector U))]
+    exact tailViewU_shift kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c k hk d dS _ b
+        _ (Util.Bytes.size_ofVector U) hd hρ
 
 end TailGame
 
