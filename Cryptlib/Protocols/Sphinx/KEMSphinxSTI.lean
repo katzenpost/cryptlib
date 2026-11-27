@@ -231,6 +231,79 @@ theorem tailHyb_all {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailC
   unfold tailHyb tailMid
   simp only [hd, ite_true]
 
+/-- The middle world reads the challenger's randomness through its backward part only. -/
+theorem tailMidWorld_congr {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.TailChallenge hon) (r r' : RSOR.Randomness geom) (d : RSOR.Draw geom)
+    (h : r.2 = r'.2) :
+    tailMidWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 c r d = tailMidWorld kem
+        cipher macS kdfS streamS geom hvalid hmactag h16 c r' d := by
+  obtain ⟨a, b⟩ := r
+  obtain ⟨a', b'⟩ := r'
+  obtain rfl : b = b' := h
+  rfl
+
+/-- When the shown layer is the first, world 0 is the middle world with the challenger's own
+forward draw. -/
+theorem tailWorld_zero {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon)
+    (r : RSOR.Randomness geom) (hp : c.pos.val = 0) :
+    Protocols.RSOR.tailWorld (S := 𝒮) c.req r c.pos c.back
+      = tailMidWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 c r r.1 := by
+  unfold Protocols.RSOR.tailWorld tailMidWorld
+  congr 1
+  show RSOR.form kem cipher macS kdfS streamS geom c.req r c.pos = _
+  unfold RSOR.form
+  rw [hp]
+  rfl
+
+set_option maxHeartbeats 2000000 in
+/-- **World 0 is the hybrid with no role handled.** When the shown layer is the first there is
+no relay before it, and world 0 is the middle world after renaming the forward draw. -/
+theorem tailWorld_evalDistEq_tailHyb {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.TailChallenge hon) :
+    (Protocols.RSOR.tailIndistinguishable (S := 𝒮)).world c false
+      =ᵈ tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun _ => false) c := by
+  have hw : (Protocols.RSOR.tailIndistinguishable (S := 𝒮)).world c false
+      = ($ᵗ (RSOR.Randomness geom) >>= fun r =>
+        pure (Protocols.RSOR.tailWorld (S := 𝒮) c.req r c.pos c.back)) := by
+    simp [Protocols.RSOR.tailIndistinguishable]
+    rfl
+  rw [hw]
+  unfold tailHyb
+  by_cases hp : c.pos.val = 0
+  · have hd : tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun _ => false) c :=
+      Or.inl hp
+    simp only [hd, ite_true]
+    have e : ∀ (r : RSOR.Randomness geom) (d : RSOR.Draw geom),
+        tailMidWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 c r d = tailMidWorld kem
+            cipher macS kdfS streamS geom hvalid hmactag h16 c (default, r.2) d :=
+      fun r d => tailMidWorld_congr kem cipher macS kdfS streamS geom hvalid hmactag h16 c r _ d rfl
+    simp only [tailWorld_zero kem cipher macS kdfS streamS geom hvalid hmactag h16 c _ hp]
+    refine EvalDistEq.trans (EvalDistEq.bind_right _ fun r => by rw [e r r.1]) ?_
+    refine EvalDistEq.trans ?_ (EvalDistEq.bind_right _ fun r =>
+      EvalDistEq.bind_right _ fun d => by rw [e r d]).symm
+    refine EvalDistEq.trans (evalDistEq_pair_of_bijective
+      (g := fun (x : RSOR.Draw geom) (y : RSOR.Draw geom × Vector UInt8 64 × Vector UInt8 16) =>
+        (x, y)) Function.bijective_id
+      (fun r : RSOR.Randomness geom =>
+        (pure (tailMidWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 c (default, r.2)
+            r.1) :
+          ProbComp (Protocols.RSOR.World 𝒮)))).symm ?_
+    refine EvalDistEq.trans ?_ (evalDistEq_snd (α := RSOR.Draw geom)
+      (fun b : RSOR.Draw geom × Vector UInt8 64 × Vector UInt8 16 =>
+        $ᵗ (RSOR.Draw geom) >>= fun d =>
+          (pure (tailMidWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 c (default, b)
+              d) :
+            ProbComp (Protocols.RSOR.World 𝒮)))).symm
+    exact OracleComp.EvalDistEq.bind_bind_swap _ _ _
+  · have hd : ¬ tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun _ => false) c :=
+      fun h => by
+      rcases h with h | ⟨ρ, h, -⟩
+      · exact hp h
+      · cases h
+    simp only [hd, ite_false]
+    exact (EvalDistEq.bind_right _ fun r =>
+      OracleComp.EvalDistEq.bind_const ($ᵗ (RSOR.Draw geom)) _).symm
+
 end TailGame
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
