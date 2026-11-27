@@ -929,6 +929,70 @@ theorem procD_forward {L : ℕ} (t : HopKeys) (D : HopKeys → Vector UInt8 L �
   rfl
 
 set_option maxHeartbeats 2000000 in
+/-- **What a relay does as the last hop.** A relay with the keys `t` that finds its packet's
+tag right, and among its commands no next hop and no reply block, hands over what follows the
+zero tag of the decrypted payload, when that tag is zero. -/
+theorem procD_last {L : ℕ} (t : HopKeys) (D : HopKeys → Vector UInt8 L → Vector UInt8 L)
+    (pkt : ByteArray) (cmds : List RoutingCommand)
+    (h1 : ¬ pkt.size < 2 + nike.publicKeySize + geom.routingInfoLength + macLength)
+    (hver : (pkt.extract 0 2).data = v0AD.data)
+    (hmac : (ofVector (macS.mac (ofVector t.headerMAC)
+        (pkt.extract 0 (2 + nike.publicKeySize + geom.routingInfoLength)))).data
+      = (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength)
+        (2 + nike.publicKeySize + geom.routingInfoLength + macLength)).data)
+    (hparse : parseAll ((xorBytes (pkt.extract (2 + nike.publicKeySize)
+          (2 + nike.publicKeySize + geom.routingInfoLength)
+        ++ ⟨Array.replicate geom.perHopRoutingInfoLength 0⟩)
+        (streamS.keystream (ofVector t.headerEncryption) (ofVector t.headerEncryptionIV)
+          (pkt.extract (2 + nike.publicKeySize)
+            (2 + nike.publicKeySize + geom.routingInfoLength)
+          ++ (⟨Array.replicate geom.perHopRoutingInfoLength 0⟩ : ByteArray)).size)).extract 0
+        geom.perHopRoutingInfoLength) = .ok cmds)
+    (hnext : cmds.findSome? RSOR.nextHop = none)
+    (hsr : (cmds.any fun c => match c with
+      | RoutingCommand.surbReply _ => true
+      | _ => false) = false)
+    (hsz : ¬ (if (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength + macLength)
+        pkt.size).size > 0 then blockDec D t (pkt.extract (2 + nike.publicKeySize +
+        geom.routingInfoLength + macLength) pkt.size) else (pkt.extract (2 + nike.publicKeySize +
+        geom.routingInfoLength + macLength) pkt.size)).size < geom.payloadTagLength) :
+    procD nike macS streamS geom (fun _ => .ok t) D pkt
+      = if ((if (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength + macLength)
+          pkt.size).size > 0 then blockDec D t (pkt.extract (2 + nike.publicKeySize +
+          geom.routingInfoLength + macLength) pkt.size) else (pkt.extract (2 + nike.publicKeySize +
+          geom.routingInfoLength + macLength) pkt.size)).extract 0 geom.payloadTagLength).data.all
+          (· == 0) = true then
+          some (some ((if (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength +
+              macLength) pkt.size).size > 0 then blockDec D t (pkt.extract (2 + nike.publicKeySize
+              + geom.routingInfoLength + macLength) pkt.size) else (pkt.extract (2 +
+              nike.publicKeySize + geom.routingInfoLength + macLength) pkt.size)).extract
+              geom.payloadTagLength (if (pkt.extract (2 + nike.publicKeySize +
+              geom.routingInfoLength + macLength) pkt.size).size > 0 then blockDec D t (pkt.extract
+              (2 + nike.publicKeySize + geom.routingInfoLength + macLength) pkt.size) else
+              (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength + macLength)
+              pkt.size)).size),
+            Primitives.Hash.Sha512.sha512_256 (pkt.extract 2 (2 + nike.publicKeySize)), cmds, none)
+        else none := by
+  unfold procD unwrapNIKEDec
+  rw [dite_eq_right h1]
+  simp only [hver, ne_eq, not_true_eq_false, ↓reduceIte, bind, Except.bind, pure, Except.pure,
+    hmac, hparse]
+  generalize hfs : List.findSome? _ cmds = o
+  obtain rfl : o = none := hfs.symm.trans hnext
+  dsimp only
+  generalize hany : List.any cmds _ = sr
+  obtain rfl : sr = false := hany.symm.trans hsr
+  by_cases hz : ((if (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength + macLength)
+      pkt.size).size > 0 then blockDec D t (pkt.extract (2 + nike.publicKeySize +
+      geom.routingInfoLength + macLength) pkt.size) else (pkt.extract (2 + nike.publicKeySize +
+      geom.routingInfoLength + macLength) pkt.size)).extract 0 geom.payloadTagLength).data.all (·
+      == 0) = true
+  · simp only [hsz, hz, ↓reduceIte, Bool.not_true, Bool.false_eq_true]
+    rfl
+  · simp only [hsz, hz, ↓reduceIte, Bool.not_false, Bool.false_eq_true]
+    rfl
+
+set_option maxHeartbeats 2000000 in
 /-- **What a relay forwards, for a header and a payload**: the header peeled, and the payload
 decrypted. -/
 theorem procD_forward_append {L : ℕ} (t : HopKeys)

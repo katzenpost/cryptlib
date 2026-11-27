@@ -691,8 +691,9 @@ for it:
    (`procD_layerHdr`), from the bytes under a layer's tag (`hdrMsg_struct`, `peel_bytes`,
    `peel_cmdBuf`). In the games' form, with the tag and keystream held and the payload's
    decryption handed over: the relay's answer, its step and that it does not reply
-   (`procD_join_layerHdr`, `stepOf_layerHdr`, `replyOf_layerHdr`). Not proved: world 0's game
-   written with it.
+   (`procD_join_layerHdr`, `stepOf_layerHdr`, `replyOf_layerHdr`). What a relay does as the
+   last hop, for a recipient and no reply block (`procD_last`): it hands over what follows
+   the zero tag, when that tag is zero. Not proved: world 0's game written with these.
 3. The header of the layer after a hop reads the hops up to it through the padding after
    that hop only. Proved (`layerHdr_congr_tail`, `nikeHdrTrace_congr_tail`,
    `padAt_congr_from`). Still to prove with it:
