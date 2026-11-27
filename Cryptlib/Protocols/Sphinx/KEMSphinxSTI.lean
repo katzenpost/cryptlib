@@ -1222,6 +1222,81 @@ theorem tailFirstHalf_le (names : Role → RSOR.Name)
   unfold tailHalfCost
   exact h1.trans (by rw [add_comm]; exact add_le_add s1 s2)
 
+/-! ## The second half: the honest relay on the backward path -/
+
+omit [SampleableType kem.Plaintext] in
+/-- The request of the middle world: the adversary's, over the rest of the forward path. -/
+def midReq {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon) :
+    (q : RSOR.Request kem geom) × Fin q.back.hops.length :=
+  ⟨{ c.req with fwd := c.req.fwd.drop c.pos, fwd_ne := c.req.fwd.drop_ne c.pos.isLt }, c.back⟩
+
+omit [SampleableType kem.Plaintext] in
+/-- The request of world 1: over the rest of the forward path, and the backward path up to
+its honest relay. -/
+def cutReq {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon) :
+    (q : RSOR.Request kem geom) × Fin q.back.hops.length :=
+  ⟨{ c.req with fwd := c.req.fwd.drop c.pos, back := c.req.back.take (c.back + 1),
+                fwd_ne := c.req.fwd.drop_ne c.pos.isLt },
+    ⟨c.back, lt_of_lt_of_eq (lt_min (Nat.lt_succ_self _) c.back.isLt)
+      List.length_take.symm⟩⟩
+
+omit [SampleableType kem.Plaintext] in
+/-- The first layer of a request's onion, with the honest backward relay answering nothing to
+the reply's layer at its position. -/
+def backWorldOf (Q : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → (q : RSOR.Request kem geom) × Fin q.back.hops.length)
+    {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon)
+    (r : RSOR.Randomness geom) : Protocols.RSOR.World 𝒮 :=
+  Protocols.RSOR.tailWorld (S := 𝒮) (Q c).1 r (Q c).1.first (Q c).2
+
+omit [SampleableType kem.Plaintext] in
+/-- That world with its draw. -/
+def backWorld (Q : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → (q : RSOR.Request kem geom) × Fin q.back.hops.length)
+    {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon) :
+    ProbComp (Protocols.RSOR.World 𝒮) := do
+  let r ← $ᵗ (RSOR.Randomness geom)
+  return backWorldOf kem cipher macS kdfS streamS geom hvalid hmactag h16 Q c r
+
+omit [SampleableType kem.Plaintext] in
+/-- World 1 of STI↔ is that world for the cut request. -/
+theorem tailWorld_true {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon) :
+    (Protocols.RSOR.tailIndistinguishable (S := 𝒮)).world c true
+      = backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+          streamS geom hvalid hmactag h16) c := by
+  unfold Protocols.RSOR.tailIndistinguishable backWorld backWorldOf
+  simp only [ite_true]
+  rfl
+
+omit [SampleableType kem.Plaintext] in
+set_option maxHeartbeats 2000000 in
+/-- The world in the middle is that world for the request over the rest of the forward path,
+after renaming the forward draw. -/
+theorem tailMid_evalDistEq {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.TailChallenge hon) :
+    tailMid kem cipher macS kdfS streamS geom hvalid hmactag h16 c =ᵈ backWorld kem cipher macS
+        kdfS streamS geom hvalid hmactag h16 (midReq kem cipher macS kdfS streamS geom hvalid
+        hmactag h16) c := by
+  have hid : Function.Bijective (Function.uncurry fun (a : RSOR.Draw geom)
+      (b : RSOR.Draw geom × Vector UInt8 64 × Vector UInt8 16) =>
+      ((a, b) : RSOR.Randomness geom)) := Function.bijective_id
+  have hpt : ∀ (a d : RSOR.Draw geom) (b : RSOR.Draw geom × Vector UInt8 64 × Vector UInt8 16),
+      tailMidWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 c (a, b) d = backWorldOf
+          kem cipher macS kdfS streamS geom hvalid hmactag h16 (midReq kem cipher macS kdfS streamS
+          geom hvalid hmactag h16) c (d, b) :=
+    fun _ _ _ => rfl
+  unfold tailMid backWorld
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective hid fun r =>
+    $ᵗ (RSOR.Draw geom) >>= fun d =>
+      (pure (tailMidWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 c r d) : ProbComp
+          _)).symm ?_
+  simp only [hpt]
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact evalDistEq_pair_of_bijective hid fun r =>
+    (pure (backWorldOf kem cipher macS kdfS streamS geom hvalid hmactag h16 (midReq kem cipher macS
+        kdfS streamS geom hvalid hmactag h16) c r) : ProbComp _)
+
 end TailGame
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
