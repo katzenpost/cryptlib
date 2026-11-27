@@ -192,6 +192,50 @@ def runPacketFn (nike : NIKE) (geom : Geometry) (nFwd : Nat) : IO Bool := do
     IO.eprintln "  runPacketFn: the path is not a route"
     pure false
 
+/-- A packet with the keys of hop `j` replaced, the hops after it derived from the replacement.
+The relays in front of `j` must still forward it, each to the next, and the relay at `j` must
+reject what arrives: its own keys are not the replacement. -/
+def runReplacedKeys (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) (nFwd j : Nat) : IO Bool := do
+  let S := RSOR.scheme nike wbCipher macS kdfS streamS geom hvalid rfl h16
+  let fwd ← (List.range nFwd).mapM fun _ => newRelay nike
+  let fh := fwd.map (·.1)
+  if h : fh.length ≤ geom.nrHops ∧ (fh.map (·.name)).Nodup then
+    let hops := RSOR.path nike (⟨fh, h.1, h.2⟩ : Cryptlib.Protocols.RSOR.Route geom.nrHops Name
+      (RSOR.Key nike)) [.recipient (← randomVector 32)]
+    let d ← randomDraw nike geom
+    let payload := Cryptlib.Util.Bytes.ofVector (← randomVector geom.forwardPayloadLength)
+    let t := deriveHopKeys kdfS (Cryptlib.Util.Bytes.ofVector (← randomVector 32))
+    let keys := (hopKeysWith nike kdfS (RSOR.clientKey nike geom d) hops j t hops.size).toArray
+    let some pkt := nikePktFn geom
+        (Cryptlib.Protocols.Sphinx.KEMSphinx.keysKs geom streamS keys)
+        (Cryptlib.Protocols.Sphinx.KEMSphinx.keysTag macS keys)
+        (Cryptlib.Protocols.Sphinx.KEMSphinx.keysEnc wbCipher keys)
+        (groupElem nike (RSOR.clientKey nike geom d) keys) (RSOR.filler nike geom hops d) hops
+        payload
+      | IO.eprintln "  runReplacedKeys: the packet does not build" *> pure false
+    let mut ok := true
+    let mut o : Onion geom := Cryptlib.Protocols.Sphinx.KEMSphinx.RSOR.split geom pkt
+    for (i, (hop, sk)) in (List.range nFwd).zip fwd do
+      let step : Option (Step geom) := S.proc sk hop.name o
+      if i < j then
+        match step with
+        | some (.forward next o') =>
+          if some next ≠ (fh[i + 1]?).map (·.name) then
+            IO.eprintln s!"  runReplacedKeys: hop {i} forwards to the wrong relay"
+            ok := false
+          o := o'
+        | _ =>
+          IO.eprintln s!"  runReplacedKeys: hop {i}, in front of the replaced one, does not forward"
+          ok := false
+      else if i = j ∧ step.isSome then
+        IO.eprintln s!"  runReplacedKeys: hop {i} accepts a layer made with other keys"
+        ok := false
+    pure ok
+  else
+    IO.eprintln "  runReplacedKeys: the path is not a route"
+    pure false
+
 def runSuite (schemeName : String) (nike : NIKE) : IO Bool := do
   IO.println s!"-- {schemeName} --"
   let geom := ofNIKEWith schemeName nike 103 true 5
@@ -211,6 +255,11 @@ def runSuite (schemeName : String) (nike : NIKE) : IO Bool := do
     IO.println (s!"a packet from the hops' group elements and keys ({n} hops): "
       ++ (if fnOk then "ok" else "FAIL"))
     ok := ok && fnOk
+  for (n, j) in [(1, 0), (3, 1), (5, 2), (5, 4)] do
+    let rkOk ← runReplacedKeys nike geom hvalid h16 n j
+    IO.println (s!"a packet with hop {j}'s keys replaced ({n} hops): "
+      ++ (if rkOk then "ok" else "FAIL"))
+    ok := ok && rkOk
   pure ok
 
 def main : IO UInt32 := do

@@ -30,6 +30,35 @@ def groupElem (nike : NIKE) (c : nike.PrivateKey) (keys : Array HopKeys) : ℕ �
   | 0 => ofVector (nike.encodePublicKey (nike.derivePublicKey c))
   | i + 1 => nikeBlind nike (groupElem nike c keys i) (keys[i]!).blindingFactor
 
+open Cryptlib.Primitives.KDF (KDF) in
+/-- **The hops' keys with hop `j`'s replaced by `t`**: the keys of the first `n` hops as the
+sender derives them, except that hop `j` has the keys `t`, and so the hops after it are blinded
+by `t`'s factor. -/
+def hopKeysWith (nike : NIKE) (kdfS : KDF) (c : nike.PrivateKey) (hops : Array PathHop) (j : ℕ)
+    (t : HopKeys) : ℕ → List HopKeys
+  | 0 => []
+  | n + 1 =>
+    let ks := hopKeysWith nike kdfS c hops j t n
+    ks ++ [if n = j then t else deriveHopKeys kdfS
+      ((ks.map (RSOR.factor nike)).foldl (fun ss f => RSOR.dh nike f ss)
+        (RSOR.dh nike c hops[n]!.publicKey))]
+
+open Cryptlib.Primitives.KDF (KDF) in
+/-- With hop `j`'s own keys, they are the sender's keys. -/
+theorem hopKeysWith_hopKey (nike : NIKE) (kdfS : KDF) (c : nike.PrivateKey)
+    (hops : Array PathHop) (j n : ℕ) :
+    hopKeysWith nike kdfS c hops j (RSOR.hopKey nike kdfS c hops j) n
+      = RSOR.hopKeys nike kdfS c hops n := by
+  induction n with
+  | zero => rfl
+  | succ n ih =>
+    rw [hopKeysWith, ih, RSOR.hopKeys_succ]
+    by_cases h : n = j
+    · subst h
+      simp only [ite_true]
+    · simp only [h, ite_false]
+      rfl
+
 section HeaderFn
 
 variable (geom : Geometry)
@@ -79,5 +108,164 @@ def nikePktFn (ks : ℕ → ByteArray) (tag enc : ℕ → ByteArray → ByteArra
   else none
 
 end HeaderFn
+
+section Built
+
+open Cryptlib.Protocols.Sphinx.KEMSphinx (keysKs keysTag)
+open Cryptlib.Primitives.MAC (MAC)
+open Cryptlib.Primitives.KDF (KDF)
+open Cryptlib.Primitives.StreamCipher (StreamCipher)
+open Cryptlib.Primitives.NIKE.NIKE (telescopeElem telescopeSecret)
+
+variable (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
+
+set_option maxHeartbeats 2000000 in
+/-- **The header `createHeader` builds is `nikeHdrTrace`'s**, on the group elements and keys of
+its blinding chain. -/
+theorem createHeader_hdrTrace (clientPrivateKey filler : ByteArray) (path : Array PathHop)
+    (hdr : ByteArray) (sprpKeys : Array SPRPKey)
+    (h : createHeader nike macS kdfS streamS geom clientPrivateKey filler path
+      = .ok (hdr, sprpKeys))
+    (targetSk : ℕ → nike.PrivateKey)
+    (htarget : ∀ i (_hi : i < path.size), (path[i]!).publicKey
+      = ofVector (nike.encodePublicKey (nike.derivePublicKey (targetSk i)))) :
+    ∃ (clientSk : nike.PrivateKey) (f : ℕ → nike.PrivateKey) (groupElements : Array ByteArray)
+      (keys : Array HopKeys) (s : ByteArray × ByteArray),
+      groupElements.size = path.size ∧ keys.size = path.size ∧
+      nikeSelfPublicKeyBytes nike clientPrivateKey
+        = ofVector (nike.encodePublicKey (nike.derivePublicKey clientSk)) ∧
+      (∀ i (_hi : i < path.size),
+        groupElements[i]! = ofVector (nike.encodePublicKey (telescopeElem nike clientSk f i).1) ∧
+        keys[i]! = deriveHopKeys kdfS
+          (ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk i) f i).1)) ∧
+        nike.decodePrivateKey (toVecN nike.privateKeySize (keys[i]!).blindingFactor)
+          = some (f i)) ∧
+      nikeHdrTrace geom (keysKs geom streamS keys) (keysTag macS keys) (fun i => groupElements[i]!)
+          filler path path.size
+        = some s ∧
+      hdr = v0AD ++ groupElements[0]! ++ s.1 ++ s.2 ∧
+      sprpKeys = Array.ofFn (fun i : Fin path.size =>
+        { key := keys[i.val]!.payloadEncryption, iv := keys[i.val]!.headerEncryptionIV }) := by
+  obtain ⟨-, -, -, clientSk, f, groupElements, keys, riKeyStream, riPadding, s, hgs, hks, -, -,
+    hself, hchain, hcont, hs0, hstep, hhdr, hsprp⟩ :=
+    createHeader_unfold nike macS kdfS streamS geom clientPrivateKey filler path hdr sprpKeys h
+      targetSk htarget
+  have hpad : ∀ i, i < path.size → riPadding[i]! = padAt geom (keysKs geom streamS keys) i := by
+    intro i
+    induction i with
+    | zero =>
+      intro hi
+      have := (hcont 0 hi).2
+      simp only [gt_iff_lt, lt_self_iff_false, ↓reduceIte] at this
+      rw [this]
+      rfl
+    | succ i ih =>
+      intro hi
+      have := (hcont (i + 1) hi).2
+      simp only [gt_iff_lt, Nat.zero_lt_succ, ↓reduceIte, Nat.add_sub_cancel] at this
+      rw [this, ih (by omega)]
+      rfl
+  have htr : ∀ j, j ≤ path.size →
+      nikeHdrTrace geom (keysKs geom streamS keys) (keysTag macS keys) (fun i => groupElements[i]!)
+          filler path j
+        = some (s j) := by
+    intro j
+    induction j with
+    | zero => intro _; rw [hs0]; rfl
+    | succ j ih =>
+      intro hj
+      obtain ⟨frag, hfrag, h1, h2⟩ := hstep j (by omega)
+      rw [nikeHdrTrace, ih (by omega)]
+      dsimp only
+      have hF : nikeFragment geom path (s j).2 (path.size - 1 - j)
+          = .ok (zeroPadTo geom.perHopRoutingInfoLength
+            (if (path.size - 1 - j) == path.size - 1 then frag
+              else frag ++ (RoutingCommand.nextNodeHop (path[path.size - 1 - j + 1]!).id
+                (toVec32 (s j).2)).toBytes)) := by
+        unfold nikeFragment
+        rw [hfrag]
+        rfl
+      rw [hF]
+      dsimp only
+      rw [(hcont (path.size - 1 - j) (by omega)).1] at h1
+      have h1' : (s (j + 1)).1 = xorBytes (zeroPadTo geom.perHopRoutingInfoLength
+            (if (path.size - 1 - j) == path.size - 1 then frag
+              else frag ++ (RoutingCommand.nextNodeHop (path[path.size - 1 - j + 1]!).id
+                (toVec32 (s j).2)).toBytes) ++ (s j).1)
+          ((keysKs geom streamS keys (path.size - 1 - j)).extract 0
+            (geom.routingInfoLength + geom.perHopRoutingInfoLength
+              - (path.size - 1 - j + 1) * geom.perHopRoutingInfoLength)) := h1
+      rw [← h1']
+      congr 1
+      refine Prod.ext rfl ?_
+      rw [h2]
+      by_cases hp : path.size - 1 - j > 0
+      · simp only [hp, ↓reduceIte]
+        rw [hpad _ (by omega)]
+        rfl
+      · simp only [hp, ↓reduceIte]
+        rfl
+  exact ⟨clientSk, f, groupElements, keys, s path.size, hgs, hks, hself, hchain, htr _ le_rfl,
+    hhdr, hsprp⟩
+
+open Cryptlib.Protocols.Sphinx.KEMSphinx (keysEnc) in
+open Cryptlib.Primitives.WideBlockCipher (WideBlockCipher) in
+set_option maxHeartbeats 2000000 in
+/-- **A packet `newNIKEPacket` builds is `nikePktFn`'s**, on the group elements and keys of its
+blinding chain: it uses a hop's keys through the hop's header keystream, its MAC and one
+encryption of the payload, and through the blinding of the elements after it. -/
+theorem newNIKEPacket_pktFn (cipher : WideBlockCipher) (clientPrivateKey filler : ByteArray)
+    (path : Array PathHop) (payload pkt : ByteArray)
+    (h : newNIKEPacket nike cipher macS kdfS streamS geom clientPrivateKey filler path payload
+      = .ok pkt)
+    (targetSk : ℕ → nike.PrivateKey)
+    (htarget : ∀ i (_hi : i < path.size), (path[i]!).publicKey
+      = ofVector (nike.encodePublicKey (nike.derivePublicKey (targetSk i)))) :
+    ∃ (clientSk : nike.PrivateKey) (f : ℕ → nike.PrivateKey) (groupElements : Array ByteArray)
+      (keys : Array HopKeys),
+      groupElements.size = path.size ∧ keys.size = path.size ∧
+      nikeSelfPublicKeyBytes nike clientPrivateKey
+        = ofVector (nike.encodePublicKey (nike.derivePublicKey clientSk)) ∧
+      (∀ i (_hi : i < path.size),
+        groupElements[i]! = ofVector (nike.encodePublicKey (telescopeElem nike clientSk f i).1) ∧
+        keys[i]! = deriveHopKeys kdfS
+          (ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk i) f i).1)) ∧
+        nike.decodePrivateKey (toVecN nike.privateKeySize (keys[i]!).blindingFactor)
+          = some (f i)) ∧
+      nikePktFn geom (keysKs geom streamS keys) (keysTag macS keys) (keysEnc cipher keys) (fun i =>
+          groupElements[i]!) filler
+        path payload = some pkt := by
+  have hp : payload.size = geom.forwardPayloadLength :=
+    (newNIKEPacket_unfold nike cipher macS kdfS streamS geom _ _ _ _ _ h).1
+  unfold newNIKEPacket at h
+  dsimp only at h
+  simp only [hp, ne_eq, not_true_eq_false, ↓reduceIte, Std.Legacy.Range.forIn_eq_forIn_range',
+    Std.Legacy.Range.size, Nat.sub_zero, Nat.add_sub_cancel, Nat.div_one,
+    List.forIn_pure_yield_eq_foldl, pure_bind] at h
+  cases hc : createHeader nike macS kdfS streamS geom clientPrivateKey filler path with
+  | error e =>
+    rw [hc] at h
+    cases h
+  | ok x =>
+    obtain ⟨hdr, sprp⟩ := x
+    rw [hc] at h
+    obtain ⟨clientSk, f, ge, keys, s, hgs, hks, hself, hchain, htr, rfl, rfl⟩ :=
+      createHeader_hdrTrace nike macS kdfS streamS geom clientPrivateKey filler path hdr sprp hc
+        targetSk htarget
+    refine ⟨clientSk, f, ge, keys, hgs, hks, hself, hchain, ?_⟩
+    unfold nikePktFn
+    simp only [hp, ↓reduceIte, htr, Option.map_some]
+    injection h with h
+    subst h
+    congr 2
+    rw [Array.size_ofFn]
+    refine List.foldl_ext _ _ _ fun b iRev hi => ?_
+    have hlt : iRev < path.size := by simpa using hi
+    have hi' : path.size - 1 - iRev < path.size := by omega
+    simp only [keysEnc]
+    rw [getElem!_pos (Array.ofFn _) _ (by simpa using hi')]
+    simp only [Array.getElem_ofFn]
+
+end Built
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx

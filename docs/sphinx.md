@@ -494,9 +494,14 @@ advantage as the term the theorems carry, as KEM Sphinx carries the KEM and KDF 
 Diffie–Hellman is then the assumption behind that term, by the paper's Theorem 3.
 
 In Lean so far (`NIKESphinxHeaderFn.lean`): a packet as a function of each hop's group element,
-header keystream, tagging function and payload encryption (`nikePktFn`, `groupElem`). The
-self-test compares it with `newNIKEPacket` on the sender's own keys (`runPacketFn`); that the
-two agree is not proved yet.
+header keystream, tagging function and payload encryption (`nikePktFn`, `groupElem`). A packet
+`newNIKEPacket` builds is that function's, on the group elements and keys of its blinding chain
+(`createHeader_hdrTrace`, `newNIKEPacket_pktFn`); the self-test compares the two on random
+inputs (`runPacketFn`).
+`hopKeysWith` is the hops' keys with one hop's replaced and the later hops derived from the
+replacement; with the hop's own keys it is the sender's keys (`hopKeysWith_hopKey`). The
+self-test builds a packet from replaced keys and checks that the relays in front still forward
+it and the relay at the replaced hop rejects it (`runReplacedKeys`).
 
 Steps, in order:
 
