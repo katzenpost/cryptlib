@@ -536,6 +536,46 @@ theorem nextPost_real (names : Role → Name) (A : (Protocols.RSOR.forwardUnlink
     (Protocols.RSOR.withDec_congr (S := 𝒮) (L := (geom.payloadTagLength +
         geom.forwardPayloadLength)) _ _ _ _ rfl rfl hp hrp rfl) rfl
 
+/-- **On the original's own keys, the patch built from the handed keys is the challenger's.**
+The original's next layer from its group element and hop keys is its own next layer, when its
+onion builds; the reply the patch hands out does not read the forward path's secret. -/
+theorem patchWith_real (names : Role → Name) {pk : RSOR.Key nike} (ch : ForwardCh nike cipher macS
+    kdfS streamS geom hvalid hmactag h16 names pk)
+    (r : RSOR.Randomness nike geom) (d : Vector UInt8 nike.privateKeySize) (pkt : ByteArray)
+    (mine : Onion geom)
+    (h : RSOR.layer nike cipher macS kdfS streamS geom
+      (RSOR.path nike ch.c.req.fwd [.recipient ch.c.req.receiver]) (setKey r d).1
+      (RSOR.body nike macS kdfS streamS geom ch.c.req (setKey r d)) 0 = .ok pkt) :
+    ch.c.patchWith
+        (if (ch.c.pos : ℕ) + 1 < ch.c.req.fwd.hops.length then
+          onionOfKeys nike cipher macS kdfS streamS geom (ch.c.pos + 1) ch.c.req r
+            (groupElem nike ((nike.decodePrivateKey d).getD default)
+              (RSOR.hopKeys nike kdfS ((nike.decodePrivateKey d).getD default)
+                (RSOR.path nike ch.c.req.fwd [.recipient ch.c.req.receiver])
+                (RSOR.path nike ch.c.req.fwd [.recipient ch.c.req.receiver]).size).toArray 0)
+            (RSOR.hopKeys nike kdfS ((nike.decodePrivateKey d).getD default)
+              (RSOR.path nike ch.c.req.fwd [.recipient ch.c.req.receiver])
+              (RSOR.path nike ch.c.req.fwd [.recipient ch.c.req.receiver]).size)
+        else mine) r mine
+      = ch.c.patch (setKey r d) mine := by
+  have hn : (if (ch.c.pos : ℕ) + 1 < ch.c.req.fwd.hops.length then
+        onionOfKeys nike cipher macS kdfS streamS geom (ch.c.pos + 1) ch.c.req r
+          (groupElem nike ((nike.decodePrivateKey d).getD default)
+            (RSOR.hopKeys nike kdfS ((nike.decodePrivateKey d).getD default)
+              (RSOR.path nike ch.c.req.fwd [.recipient ch.c.req.receiver])
+              (RSOR.path nike ch.c.req.fwd [.recipient ch.c.req.receiver]).size).toArray 0)
+          (RSOR.hopKeys nike kdfS ((nike.decodePrivateKey d).getD default)
+            (RSOR.path nike ch.c.req.fwd [.recipient ch.c.req.receiver])
+            (RSOR.path nike ch.c.req.fwd [.recipient ch.c.req.receiver]).size)
+      else mine) = ch.c.next (setKey r d) mine := by
+    unfold Protocols.RSOR.ForwardChallenge.next
+    by_cases hlt : (ch.c.pos : ℕ) + 1 < ch.c.req.fwd.hops.length
+    · simp only [hlt, ↓reduceIte, ↓reduceDIte]
+      exact onionOfKeys_real nike cipher macS kdfS streamS geom ch.c.req r d pkt
+        ⟨ch.c.pos + 1, hlt⟩ h
+    · simp only [hlt, ↓reduceIte, ↓reduceDIte]
+  exact (congrArg (fun nx => ch.c.patchWith nx r mine) hn).trans rfl
+
 end ForwardNext
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
