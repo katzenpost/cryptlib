@@ -600,8 +600,12 @@ oracle (`relayImpl_onlyAns_run`), and the hops' keys with and without the relay'
 agree off the relay (`payKeys`). World 0 after its MAC step has a payload game, `forwardPay`,
 and draw by draw it is that game with the cipher (`forwardPay_run`), on draws where the bytes
 under the relay's tag have a header's length and carry the relay's element, and the block the
-relay encrypts has a payload's length (`payGood`). Still to do for the payload step of world
-0: reorder the draws so the payload key and IV come first, and apply `PayloadGame.exp_eq`.
+relay encrypts has a payload's length (`payGood`). With the draws reordered so the payload key
+and IV come first, this gives the payload step for world 0 (`forward_only_sub_ideal_le`): world
+0 after its MAC step differs from its payload game with an ideal cipher by the one-query
+advantage of `forwardPay`'s adversary against the payload cipher, and the chance of a draw
+that is not good. The statement still assumes the honest relays' logs after the first phase
+are well-formed (`hwf`); the KEM proof has that as a lemma and it is not yet carried over.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two

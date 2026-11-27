@@ -947,6 +947,208 @@ theorem forwardPay_run (names : Role → Name) (A : (Protocols.RSOR.forwardUnlin
       Util.Bytes.ofVector_toVecN _ (by rw [cipher.encrypt_size, hblk])]
     rfl
 
+/-- World 0 after its MAC step, on a draw and a payload key. -/
+def payOnlyRun (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) (x
+    : PayX nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+    (kp : Vector UInt8 48) : ProbComp Bool :=
+  simulateQ (relayImpl (Relay.ansOf
+      (fun x pkt => decide (pkt.extract 2 (2 + nike.publicKeySize)
+        = drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+            (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+            kdfS streamS geom hvalid hmactag h16 names) x.2))
+      (fun x => procWith nike cipher macS streamS geom (relayKeys nike kdfS x.2.k.2))
+      (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x kp)
+      (Relay.onlyT macS (2 + nike.publicKeySize + geom.routingInfoLength) (macMsg nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay
+          names (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names))
+        (fun x tag => procWith nike cipher (Primitives.MAC.MAC.const tag) streamS geom
+          (fun _ => .ok (restKeys x.1 default)))
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x kp)
+        (macS.mac (Util.Bytes.ofVector x.2.1) (macMsg nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardMsg nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 names x kp))))))
+    (drawRun nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names x kp)
+      (drawView nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names) (forwardView nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 names)
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x kp) x.2.1))
+
+/-- The payload game of world 0 with the cipher, on a draw and a payload key. -/
+def payCipherRun (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (x : PayX nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+    (kp : Vector UInt8 48) : ProbComp Bool :=
+  (simulateQ (Protocols.RSOR.withDec (S := 𝒮) (forwardPay nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names A).role
+      ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).header x)
+          (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).key
+      ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).step x)
+          ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).rep x)
+      ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).proc x)
+          ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).reply x)
+      (fun y => Util.Bytes.toVecN _ (cipher.decrypt kp.toArray (Util.Bytes.ofVector x.1)
+        (Util.Bytes.ofVector y)))
+      ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).patch x
+          (Util.Bytes.toVecN _ (cipher.encrypt kp.toArray
+        (Util.Bytes.ofVector x.1) (Util.Bytes.ofVector ((forwardPay nike cipher macS kdfS streamS
+            geom hvalid hmactag h16 names A).plain x))))))
+      ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).rest x
+          (Util.Bytes.toVecN _ (cipher.encrypt kp.toArray
+        (Util.Bytes.ofVector x.1)
+        (Util.Bytes.ofVector ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+            names A).plain x)))))).run'
+    ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).log x)
+
+/-- The draws of world 0 after its MAC step, the honest relay's payload key first. -/
+def payDraw (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    ProbComp (Vector UInt8 48 × PayX nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+        := do
+  let kp ← $ᵗ (Vector UInt8 48)
+  let iv ← $ᵗ (Vector UInt8 16)
+  let km ← $ᵗ (Vector UInt8 32)
+  let he ← $ᵗ (Vector UInt8 32)
+  let seed ← $ᵗ (Vector UInt8 32)
+  let D ← forwardDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  return (kp, iv, km, he, seed, D)
+
+/-- The payload game of world 0 with the cipher, as its draws and then its run. -/
+theorem payExp_true_evalDistEq (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) :
+    (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).exp cipher true
+      =ᵈ payDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun z =>
+          payCipherRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A z.2 z.1 := by
+  unfold Protocols.RSOR.PayloadGame.exp payDraw payCipherRun
+  simp only [bind_assoc, pure_bind, ↓reduceIte]
+  refine EvalDistEq.bind_right _ fun kp => EvalDistEq.bind_right _ fun iv => ?_
+  show ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).draw iv >>= fun
+      x => _) =ᵈ _
+  unfold forwardPay
+  simp only [bind_assoc, pure_bind]
+  refine EvalDistEq.bind_right _ fun km => EvalDistEq.bind_right _ fun he =>
+    EvalDistEq.bind_right _ fun seed => EvalDistEq.bind_right _ fun D => ?_
+  exact (OracleComp.EvalDistEq.bind_const _ _).trans (OracleComp.EvalDistEq.bind_const _ _)
+
+/-- World 0 after its MAC step, as the same draws and then its run. -/
+theorem macOnly_evalDistEq_payDraw (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S
+    := 𝒮)).Adversary) :
+    macOnly nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable
+        (S := 𝒮)) .relay names (forwardPlace nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) _
+        ($ᵗ RSOR.Randomness nike geom) (forwardView nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 names) A (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16
+            names)
+      =ᵈ payDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun z =>
+          payOnlyRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A z.2 z.1 := by
+  have hb : ∀ {α β : Type},
+      Function.Bijective (Function.uncurry fun (a : α) (b : β) => (a, b)) :=
+    fun {_ _} => Function.bijective_id
+  let F : Vector UInt8 32 → Rest → PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness nike geom) A
+      → ProbComp Bool := fun km r D =>
+    payOnlyRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A (r.1.2.1, km, r.1.2.2,
+        r.2, D) r.1.1
+  have h0 : macOnly nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) _
+        ($ᵗ RSOR.Randomness nike geom) (forwardView nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 names) A (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16
+            names)
+      = ($ᵗ (Vector UInt8 32)) >>= fun km => ($ᵗ Rest) >>= fun r =>
+        forwardDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun D => F km
+            r D := by
+    unfold macOnly Relay.gameOnly macDraw
+    simp only [bind_assoc, pure_bind]
+    rfl
+  rw [h0]
+  unfold payDraw
+  simp only [bind_assoc, pure_bind]
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective
+    (g := fun (rk : KEMSphinx.RestKeys) (seed : Vector UInt8 32) => (rk, seed)) hb _).symm ?_
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective
+    (g := fun (kp : Vector UInt8 48) (t : Vector UInt8 16 × Vector UInt8 32) => (kp, t)) hb
+    _).symm ?_
+  refine EvalDistEq.bind_right _ fun kp => ?_
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective
+    (g := fun (iv : Vector UInt8 16) (he : Vector UInt8 32) => (iv, he)) hb _).symm ?_
+  refine EvalDistEq.bind_right _ fun iv => ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun he =>
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact OracleComp.EvalDistEq.bind_bind_swap _ _ _
+
+/-- The two runs agree on a good draw. -/
+theorem payRun_eq (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (x : PayX nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) (kp : Vector UInt8 48)
+        (hg : payGood nike cipher macS kdfS streamS geom hvalid hmactag h16 names x) :
+    payOnlyRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A x kp = payCipherRun
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 names A x kp := by
+  unfold payOnlyRun payCipherRun
+  exact forwardPay_run nike cipher macS kdfS streamS geom hvalid hmactag h16 names A x kp hg
+
+/-- **The payload step for world 0 of TLU→, first half.** World 0 after its MAC step is its
+payload game with the cipher, off the draws that are not good. -/
+theorem forward_only_sub_pay_le (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) :
+    |(Pr{let b ← (macOnly nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) _
+          ($ᵗ RSOR.Randomness nike geom) (forwardView nike cipher macS kdfS streamS geom hvalid
+              hmactag h16 names) A
+          (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names))}[b =
+              true]).toReal
+      - (Pr{let b ← ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).exp
+          cipher true)}[b = true]).toReal|
+    ≤ (Pr{let z ← (payDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[¬
+        payGood nike cipher macS kdfS streamS geom hvalid hmactag h16 names z.2]).toReal := by
+  rw [(macOnly_evalDistEq_payDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      A).prEvent_eq (fun b => b = true),
+    (payExp_true_evalDistEq nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A).prEvent_eq (fun b => b = true)]
+  exact prEvent_bind_toReal_sub_le_of_bad (payDraw nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names A)
+    (fun z => payOnlyRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A z.2 z.1)
+        (fun z => payCipherRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A z.2
+        z.1)
+    (fun z => ¬ payGood nike cipher macS kdfS streamS geom hvalid hmactag h16 names z.2)
+    (fun z hz => payRun_eq nike cipher macS kdfS streamS geom hvalid hmactag h16 names A z.2 z.1
+        (Classical.not_not.mp hz)) (fun b => b = true)
+
+/-- **The payload step for world 0 of TLU→.** World 0 after its MAC step differs from its
+payload game with an ideal cipher by the one-query advantage of `forwardPay`'s adversary
+against the payload cipher, and the chance of a draw that is not good. -/
+theorem forward_only_sub_ideal_le (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S
+    := 𝒮)).Adversary)
+    (hwf : ∀ iv, ∀ x ∈ support ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names A).draw iv),
+      ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).log x).WF) :
+    |(Pr{let b ← (macOnly nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) _
+          ($ᵗ RSOR.Randomness nike geom) (forwardView nike cipher macS kdfS streamS geom hvalid
+              hmactag h16 names) A
+          (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names))}[b =
+              true]).toReal
+      - (Pr{let b ← ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).exp
+          cipher false)}[b = true]).toReal|
+    ≤ (Pr{let z ← (payDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[¬
+        payGood nike cipher macS kdfS streamS geom hvalid hmactag h16 names z.2]).toReal
+      + |(Pr{let b ← (Primitives.WideBlockCipher.oneQueryExp cipher _
+            (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).adv true)}[b
+                = true]).toReal
+          - (Pr{let b ← (Primitives.WideBlockCipher.oneQueryExp cipher _
+            (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).adv
+                false)}[b = true]).toReal| := by
+  have h1 := forward_only_sub_pay_le nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  rw [← Protocols.RSOR.PayloadGame.exp_eq cipher (forwardPay nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names A) hwf true,
+    ← Protocols.RSOR.PayloadGame.exp_eq cipher (forwardPay nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names A) hwf false]
+  exact (abs_sub_le _ _ _).trans (add_le_add h1 le_rfl)
+
 end Forward
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
