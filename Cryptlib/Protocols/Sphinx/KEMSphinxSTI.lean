@@ -134,22 +134,47 @@ variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (strea
 
 local notation "𝒮" => sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16
 
-/-- **The world in the middle of STI↔**: the first layer of an onion over the rest of the
-forward path, with a forward draw of its own, around the payload of the adversary's onion. The
-payload still carries the SURB over the whole backward path, and the honest backward relay
-answers nothing to the reply's layer, as in world 0. -/
+/-- The first layer of an onion over the rest of the forward path, with the forward draw `d`,
+around the payload of the adversary's onion. The honest backward relay answers nothing to the
+reply's layer, as in world 0. -/
+def tailMidWorld {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon)
+    (r : RSOR.Randomness geom) (d : RSOR.Draw geom) : Protocols.RSOR.World 𝒮 where
+  onion :=
+    (match RSOR.layer kem cipher macS kdfS streamS geom
+        (RSOR.path kem (c.req.fwd.drop c.pos) [.recipient c.req.receiver]) d
+        (RSOR.body kem macS kdfS streamS geom c.req r) 0 with
+    | .ok pkt => RSOR.split geom pkt
+    | .error _ => (default : RSOR.Onion geom))
+  patch := (Protocols.RSOR.tailWorld (S := 𝒮) c.req r c.pos c.back).patch
+
+/-- **The world in the middle of STI↔**: `tailMidWorld` with its draws. The payload still
+carries the SURB over the whole backward path. -/
 def tailMid {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon) :
     ProbComp (Protocols.RSOR.World 𝒮) := do
   let r ← $ᵗ (RSOR.Randomness geom)
   let d ← $ᵗ (RSOR.Draw geom)
-  return {
-    onion :=
-      (match RSOR.layer kem cipher macS kdfS streamS geom
-          (RSOR.path kem (c.req.fwd.drop c.pos) [.recipient c.req.receiver]) d
-          (RSOR.body kem macS kdfS streamS geom c.req r) 0 with
-      | .ok pkt => RSOR.split geom pkt
-      | .error _ => (default : RSOR.Onion geom))
-    patch := (Protocols.RSOR.tailWorld (S := 𝒮) c.req r c.pos c.back).patch }
+  return tailMidWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 c r d
+
+/-- The challenger's randomness with the seed `s` at the forward hop before position `pos`. -/
+def tailSeed (pos : ℕ) (r : RSOR.Randomness geom) (s : Vector UInt8 32) : RSOR.Randomness geom :=
+  match pos with
+  | 0 => r
+  | k + 1 => setSeed geom r k s
+
+omit kem cipher macS kdfS streamS hvalid hmactag h16 in
+/-- Drawing the challenger's randomness and a seed, and putting the seed at the hop before the
+shown layer, is drawing the randomness. -/
+theorem evalDistEq_tailSeed {δ : Type} (pos : ℕ) (hpos : pos ≤ geom.nrHops)
+    (K : RSOR.Randomness geom → ProbComp δ) :
+    (do
+      let r ← $ᵗ (RSOR.Randomness geom)
+      let s ← $ᵗ (Vector UInt8 32)
+      K (tailSeed geom pos r s)) =ᵈ ($ᵗ (RSOR.Randomness geom) >>= K) := by
+  cases pos with
+  | zero =>
+    exact EvalDistEq.bind_right _ fun r =>
+      OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 32)) (K r)
+  | succ k => exact evalDistEq_setSeed geom k (by omega) K
 
 end TailGame
 
