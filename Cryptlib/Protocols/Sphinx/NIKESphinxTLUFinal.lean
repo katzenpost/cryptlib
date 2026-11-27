@@ -236,6 +236,111 @@ theorem onionOfStream_eq_layerFn (i : ℕ) (q : RSOR.Request nike geom)
 
 end NextFn
 
+/-! ## The relay's step under a layer's header -/
+
+section Step
+
+variable (nike : NIKE) (geom : Geometry)
+
+set_option maxHeartbeats 2000000 in
+/-- **What a relay answers for a layer before the last, in the games' form.** A relay that
+holds the layer's tag and keystream, and is handed the payload's decryption `y`, forwards the
+next layer's header with `y`. -/
+theorem procD_join_layerHdr {n : ℕ} (T : Vector UInt8 n) (U : ByteArray) (t : HopKeys)
+    (y : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray)
+    (filler : ByteArray) (path : Array PathHop) (i : ℕ) (o : Onion geom)
+    (hi : i + 1 < path.size) (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength) (hrouting :
+        geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hn : path.size ≤ geom.nrHops)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength) (hks : ∀ k,
+        (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (htag : ∀ m x, (tag m x).size = macLength) (hge : (ge i).size = nike.publicKeySize)
+    (hcmd : path[i]!.commands = []) (hT : (nikeHdrTrace geom ks tag ge filler path (path.size -
+        i)).isSome)
+    (hksi : ks i = U) (htagi : tag i (hdrMsg geom ks tag ge filler path i) = Util.Bytes.ofVector T)
+    (hblind : nikeBlind nike (ge i) t.blindingFactor = ge (i + 1))
+    (ho : Util.Bytes.ofVector o.1 = layerHdr geom ks tag ge filler path i)
+    (hL : 0 < geom.payloadTagLength + geom.forwardPayloadLength) :
+    procD nike (Primitives.MAC.MAC.const T) (constStream U) geom (fun _ => .ok t)
+        (fun _ _ => y) (join o)
+      = some (none, Primitives.Hash.Sha512.sha512_256 (ge i),
+        [RoutingCommand.nextNodeHop path[i + 1]!.id
+          (toVec32 (tag (i + 1) (hdrMsg geom ks tag ge filler path (i + 1))))],
+        some (layerHdr geom ks tag ge filler path (i + 1) ++ Util.Bytes.ofVector y)) := by
+  have hz : (⟨Array.replicate (geom.routingInfoLength + geom.perHopRoutingInfoLength) (0 : UInt8)⟩
+      : ByteArray).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength) :=
+      Array.size_replicate
+  have hksi' : (constStream U).keystream (Util.Bytes.ofVector t.headerEncryption)
+      (Util.Bytes.ofVector t.headerEncryptionIV) (geom.routingInfoLength +
+          geom.perHopRoutingInfoLength) = ks i := by
+    have h := Util.Bytes.extract_append_left (ks i) (⟨Array.replicate (geom.routingInfoLength +
+        geom.perHopRoutingInfoLength) 0⟩ : ByteArray)
+    rw [hks i] at h
+    rw [← hksi]
+    exact h
+  unfold join
+  rw [ho, procD_layerHdr nike (Primitives.MAC.MAC.const T) (constStream U) geom t (fun _ _ => y)
+    ks tag ge filler path i (Util.Bytes.ofVector o.2) hi hnnh hle hrouting hn hfill hks htag hge
+    hcmd hT hksi' htagi.symm hblind (Util.Bytes.size_ofVector _) hL]
+
+/-- So its step is to forward that layer to the next hop. -/
+theorem stepOf_layerHdr {n : ℕ} (T : Vector UInt8 n) (U : ByteArray) (t : HopKeys)
+    (y : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray)
+    (filler : ByteArray) (path : Array PathHop) (i : ℕ) (o : Onion geom)
+    (hi : i + 1 < path.size) (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength) (hrouting :
+        geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hn : path.size ≤ geom.nrHops)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength) (hks : ∀ k,
+        (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (htag : ∀ m x, (tag m x).size = macLength) (hge : (ge i).size = nike.publicKeySize)
+    (hcmd : path[i]!.commands = []) (hT : (nikeHdrTrace geom ks tag ge filler path (path.size -
+        i)).isSome)
+    (hksi : ks i = U) (htagi : tag i (hdrMsg geom ks tag ge filler path i) = Util.Bytes.ofVector T)
+    (hblind : nikeBlind nike (ge i) t.blindingFactor = ge (i + 1))
+    (ho : Util.Bytes.ofVector o.1 = layerHdr geom ks tag ge filler path i)
+    (hL : 0 < geom.payloadTagLength + geom.forwardPayloadLength) :
+    stepOf geom (procD nike (Primitives.MAC.MAC.const T) (constStream U) geom (fun _ => .ok t)
+        (fun _ _ => y) (join o))
+      = some (.forward path[i + 1]!.id
+        (split geom (layerHdr geom ks tag ge filler path (i + 1) ++ Util.Bytes.ofVector y))) := by
+  rw [procD_join_layerHdr nike geom T U t y ks tag ge filler path i o hi hnnh hle hrouting hn hfill
+      hks htag hge hcmd hT hksi htagi
+    hblind ho hL]
+  rfl
+
+/-- And it does not reply. -/
+theorem replyOf_layerHdr (cipher : WideBlockCipher) (m : Msg geom) {n : ℕ} (T : Vector UInt8 n) (U
+    : ByteArray) (t : HopKeys)
+    (y : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray)
+    (filler : ByteArray) (path : Array PathHop) (i : ℕ) (o : Onion geom)
+    (hi : i + 1 < path.size) (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength) (hrouting :
+        geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hn : path.size ≤ geom.nrHops)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength) (hks : ∀ k,
+        (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (htag : ∀ m x, (tag m x).size = macLength) (hge : (ge i).size = nike.publicKeySize)
+    (hcmd : path[i]!.commands = []) (hT : (nikeHdrTrace geom ks tag ge filler path (path.size -
+        i)).isSome)
+    (hksi : ks i = U) (htagi : tag i (hdrMsg geom ks tag ge filler path i) = Util.Bytes.ofVector T)
+    (hblind : nikeBlind nike (ge i) t.blindingFactor = ge (i + 1))
+    (ho : Util.Bytes.ofVector o.1 = layerHdr geom ks tag ge filler path i)
+    (hL : 0 < geom.payloadTagLength + geom.forwardPayloadLength) :
+    replyOf cipher geom m (procD nike (Primitives.MAC.MAC.const T) (constStream U) geom (fun _ =>
+        .ok t)
+        (fun _ _ => y) (join o)) = none := by
+  rw [procD_join_layerHdr nike geom T U t y ks tag ge filler path i o hi hnnh hle hrouting hn hfill
+      hks htag hge hcmd hT hksi htagi
+    hblind ho hL]
+  rfl
+
+end Step
+
 /-! ## The blinding game
 
 The hops after the honest relay get their keys from the sender's secret and the relay's
