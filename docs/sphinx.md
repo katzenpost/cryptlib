@@ -626,8 +626,8 @@ the adversary `forwardStreamAdv`, which plays world 0 from the keystream it is g
   header: the cipher's one-query advantage, the keystream generator's advantage, and the chance
   of a draw that is not good (`forward_only_sub_stream_le`).
 
-These are not yet added up into one statement, and the events are not bounded: they should all
-be zero when the request's onion builds and its body has a payload's length.
+Added up, this is `forward_world0_le`. The events are not bounded: they should all be zero
+when the request's onion builds and its body has a payload's length.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two

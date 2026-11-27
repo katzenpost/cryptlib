@@ -1643,6 +1643,92 @@ theorem forward_only_sub_stream_le (names : Role → Name) (A : (Protocols.RSOR.
       A).prEvent_eq (fun b => b = true)] at h1
   exact (abs_sub_le _ _ _).trans (add_le_add h1 le_rfl)
 
+/-- **World 0 of TLU→ for NIKE Sphinx, down to its draws.** World 0 differs from the game played
+from a uniform header keystream at the honest relay, an ideal payload cipher there and the relay
+answering the adversary's onion under one header, by at most: the advantage of `forwardAdv` in
+the key game; a forgery against the MAC; the one-query advantage against the payload cipher;
+the keystream generator's advantage; and the chances of three events on draws: the onion cannot
+be built, the bytes under the relay's tag do not have a header's length, and a draw is not good
+for the payload step. -/
+theorem forward_world0_le (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) :
+    |(Pr{let x ← Protocols.RSOR.Property.play names A false}[x = true]).toReal
+      - (Pr{let b ← (PRGScheme.prgIdealExperiment
+          (forwardStreamAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[b =
+              true]).toReal|
+    ≤ (Pr{let D ← (forwardDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A)}[forwardBad nike cipher macS kdfS streamS geom hvalid hmactag h16 D]).toReal
+      + keyAdvantage cipher macS kdfS streamS geom (forwardAdv nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names A)
+      + ((Pr{let b ← (Primitives.MAC.forgeExp macS
+            (macForge nike cipher macS kdfS streamS geom hvalid hmactag h16
+                (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher
+                macS kdfS streamS geom hvalid hmactag h16 names) _
+              ($ᵗ RSOR.Randomness nike geom) A (forwardMsg nike cipher macS kdfS streamS geom
+                  hvalid hmactag h16 names)
+              (forwardViewT nike cipher macS kdfS streamS geom hvalid hmactag h16 names)))}[b =
+                  true]).toReal
+        + (Pr{let x ← (macDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+            (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names _ ($ᵗ RSOR.Randomness nike
+            geom)
+            A)}[¬ (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names x).size =
+                (2 + nike.publicKeySize + geom.routingInfoLength)]).toReal)
+      + ((Pr{let z ← (payDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[¬
+          payGood nike cipher macS kdfS streamS geom hvalid hmactag h16 names z.2]).toReal
+        + |(Pr{let b ← (Primitives.WideBlockCipher.oneQueryExp cipher _
+              (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).adv
+                  true)}[b = true]).toReal
+            - (Pr{let b ← (Primitives.WideBlockCipher.oneQueryExp cipher _
+              (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).adv
+                  false)}[b = true]).toReal|
+        + |(Pr{let b ← (PRGScheme.prgRealExperiment (KEMSphinx.keystreamPRG streamS geom)
+              (forwardStreamAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[b
+                  = true]).toReal
+            - (Pr{let b ← (PRGScheme.prgIdealExperiment
+              (forwardStreamAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[b
+                  = true]).toReal|) := by
+  have h1 := play_false_sub_keyGame_le nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  have h2 : |(Pr{let x ← (keyGame cipher macS kdfS streamS geom
+          (forwardAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) true)}[x =
+              true]).toReal
+      - (Pr{let x ← (keyGame cipher macS kdfS streamS geom
+          (forwardAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) false)}[x =
+              true]).toReal|
+      = keyAdvantage cipher macS kdfS streamS geom (forwardAdv nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names A) := rfl
+  have h3 := forward_ideal_sub_only_le nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  have h4 := forward_only_sub_stream_le nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      A
+  have t1 := abs_sub_le
+    (Pr{let x ← Protocols.RSOR.Property.play names A false}[x = true]).toReal
+    (Pr{let x ← (keyGame cipher macS kdfS streamS geom
+      (forwardAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) true)}[x =
+          true]).toReal
+    (Pr{let b ← (PRGScheme.prgIdealExperiment (forwardStreamAdv nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names A))}[b = true]).toReal
+  have t2 := abs_sub_le
+    (Pr{let x ← (keyGame cipher macS kdfS streamS geom
+      (forwardAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) true)}[x =
+          true]).toReal
+    (Pr{let x ← (keyGame cipher macS kdfS streamS geom
+      (forwardAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) false)}[x =
+          true]).toReal
+    (Pr{let b ← (PRGScheme.prgIdealExperiment (forwardStreamAdv nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names A))}[b = true]).toReal
+  have t3 := abs_sub_le
+    (Pr{let x ← (keyGame cipher macS kdfS streamS geom
+      (forwardAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) false)}[x =
+          true]).toReal
+    (Pr{let b ← (macOnly nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) _
+      ($ᵗ RSOR.Randomness nike geom) (forwardView nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 names) A
+      (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names))}[b = true]).toReal
+    (Pr{let b ← (PRGScheme.prgIdealExperiment (forwardStreamAdv nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names A))}[b = true]).toReal
+  linarith
+
 end Forward
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
