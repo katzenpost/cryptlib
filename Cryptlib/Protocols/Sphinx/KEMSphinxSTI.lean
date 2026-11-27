@@ -146,6 +146,8 @@ end RestOfForward
 
 section TailGame
 
+open Cryptlib.Protocols.RSOR (Role)
+
 variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
   (geom : Geometry)
   (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
@@ -194,6 +196,40 @@ theorem evalDistEq_tailSeed {δ : Type} (pos : ℕ) (hpos : pos ≤ geom.nrHops)
     exact EvalDistEq.bind_right _ fun r =>
       OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 32)) (K r)
   | succ k => exact evalDistEq_setSeed geom k (by omega) K
+
+/-- The hop before the shown layer needs no further step: there is none, or it is the honest
+relay with a role in `done`. -/
+def tailDone {hon : Protocols.RSOR.Honest 𝒮} (done : Role → Bool)
+    (c : Protocols.RSOR.TailChallenge hon) : Prop :=
+  c.pos.val = 0
+    ∨ ∃ ρ, done ρ = true ∧ ∃ k, k + 1 = c.pos.val ∧ c.req.fwd.hops[k]? = some (hon ρ)
+
+open Classical in
+/-- **A world between world 0 and the world in the middle**: the middle world when the hop
+before the shown layer needs no further step, and world 0 otherwise. -/
+noncomputable def tailHyb (done : Role → Bool) {hon : Protocols.RSOR.Honest 𝒮}
+    (c : Protocols.RSOR.TailChallenge hon) : ProbComp (Protocols.RSOR.World 𝒮) := do
+  let r ← $ᵗ (RSOR.Randomness geom)
+  let d ← $ᵗ (RSOR.Draw geom)
+  return if tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 done c then tailMidWorld
+      kem cipher macS kdfS streamS geom hvalid hmactag h16 c r d
+    else Protocols.RSOR.tailWorld (S := 𝒮) c.req r c.pos c.back
+
+/-- With both roles the relay before the shown layer can have handled, the hybrid is the world
+in the middle. -/
+theorem tailHyb_all {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon) :
+    tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun ρ => ρ == .relay || ρ ==
+        .back) c = tailMid kem cipher macS kdfS streamS geom hvalid hmactag h16 c := by
+  have hd : tailDone kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun ρ => ρ == .relay ||
+      ρ == .back) c := by
+    by_cases hp : c.pos.val = 0
+    · exact Or.inl hp
+    · obtain ⟨k, hk⟩ := Nat.exists_eq_succ_of_ne_zero hp
+      rcases c.relay k hk.symm with h | h
+      · exact Or.inr ⟨.relay, rfl, k, hk.symm, h⟩
+      · exact Or.inr ⟨.back, rfl, k, hk.symm, h⟩
+  unfold tailHyb tailMid
+  simp only [hd, ite_true]
 
 end TailGame
 
