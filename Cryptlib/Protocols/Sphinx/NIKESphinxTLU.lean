@@ -13,8 +13,8 @@ open Cryptlib.Protocols.Sphinx.Types
 open Cryptlib.Protocols.Sphinx.Commands
 open Cryptlib.Protocols.Sphinx.Constants
 open Cryptlib.Protocols.Sphinx.KEMSphinx (keysKs keysTag keysEnc evalDistEq_pair_of_bijective
-  prEvent_bind_toReal_sub_le_of_bad)
-open Cryptlib.Protocols.Sphinx.KEMSphinx.RSOR (Name Msg Onion split)
+  prEvent_bind_toReal_sub_le_of_bad relayImpl)
+open Cryptlib.Protocols.Sphinx.KEMSphinx.RSOR (Name Msg Onion split join stepOf replyOf)
 open Cryptlib.Primitives.WideBlockCipher (WideBlockCipher)
 open Cryptlib.Primitives.MAC (MAC)
 open Cryptlib.Primitives.KDF (KDF)
@@ -579,6 +579,373 @@ theorem payKeys (names : Role → Name) {A : (Protocols.RSOR.forwardUnlinkable (
       (restKeys (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x default).1
           default) rfl _).2 i hi
   · exact toArray_getElem!_of_getElem? _ _ _ (hopKeysWith_getElem nike kdfS _ _ _ _ _ hlt)
+
+/-- The honest relay's tag on the adversary's onion. -/
+def payTag (names : Role → Name) {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary} (x :
+    PayX nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) :
+    Vector UInt8 macS.tagSize :=
+  macS.mac (Util.Bytes.ofVector x.2.1)
+    (macMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable
+        (S := 𝒮)) .relay names (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x default))
+
+/-- The header of the adversary's onion at the honest relay. -/
+def payHeader (names : Role → Name) {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary} (x
+    : PayX nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) :
+    Vector UInt8 geom.headerLength :=
+  Util.Bytes.toVecN _ (macMsg nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardMsg nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names x default)
+    ++ Util.Bytes.ofVector (payTag nike cipher macS kdfS streamS geom hvalid hmactag h16 names x))
+
+/-- **World 0 after its MAC step, as a game cut at the honest relay's payload key.** -/
+def forwardPay (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    Protocols.RSOR.PayloadGame 𝒮 (geom.payloadTagLength + geom.forwardPayloadLength) where
+  role := .relay
+  X := PayX nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  draw iv := do
+    let km ← $ᵗ (Vector UInt8 32)
+    let he ← $ᵗ (Vector UInt8 32)
+    let seed ← $ᵗ (Vector UInt8 32)
+    let D ← forwardDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
+    return (iv, km, he, seed, D)
+  header := payHeader nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+  key o := o.2
+  step x o y := stepOf geom (procD nike (Primitives.MAC.MAC.const (payTag nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names x)) streamS geom
+    (fun _ => .ok (restKeys (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x
+        default).1 default)) (fun _ _ => y) (join o))
+  rep x msg o y := replyOf cipher geom msg (procD nike
+    (Primitives.MAC.MAC.const (payTag nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        x)) streamS geom
+    (fun _ => .ok (restKeys (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x
+        default).1 default)) (fun _ _ => y) (join o))
+  proc x h o := if h = .relay then
+      stepOf geom (noneAns nike cipher macS kdfS streamS geom x.2.2.2.2.k.2
+        (drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+            (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+            kdfS streamS geom hvalid hmactag h16 names) x.2.2.2.2) (join o))
+    else RSOR.proc nike cipher macS kdfS streamS geom (x.2.2.2.2.keys h).2 o
+  reply x h msg o := if h = .relay then
+      replyOf cipher geom msg (noneAns nike cipher macS kdfS streamS geom x.2.2.2.2.k.2
+        (drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+            (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+            kdfS streamS geom hvalid hmactag h16 names) x.2.2.2.2) (join o))
+    else RSOR.reply nike cipher macS kdfS streamS geom (x.2.2.2.2.keys h).2 msg o
+  plain x := Util.Bytes.toVecN _ (onionBlock nike cipher macS kdfS streamS geom
+    x.2.2.2.2.c.req x.2.2.2.2.o (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x default))
+    x.2.2.2.2.c.pos)
+  log x := x.2.2.2.2.log
+  patch _ _ := {}
+  rest x e :=
+    if drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) x.2.2.2.2
+        < (drawHops nike cipher macS kdfS streamS geom hvalid hmactag h16
+            (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+            kdfS streamS geom hvalid hmactag h16 names) x.2.2.2.2).size then
+      A.guess x.2.2.2.2.st (onionOfEnc nike cipher macS kdfS streamS geom x.2.2.2.2.c.req
+        x.2.2.2.2.o
+        (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
+            (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names x.2.2.2.2)
+          (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike
+              cipher macS kdfS streamS geom hvalid hmactag h16 names x default)).toArray 0)
+        (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 names x default)) x.2.2.2.2.c.pos
+        (Util.Bytes.ofVector (payTag nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+            x)) (Util.Bytes.ofVector e))
+    else pure false
+
+/-- The draws of world 0 on which its payload game is exact: the bytes under the honest
+relay's tag have a header's length and carry the element that reaches the relay, and the block
+the relay encrypts has a payload's length. -/
+def payGood (names : Role → Name) {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary} (x :
+    PayX nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) : Prop :=
+  (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names x default)).size = (2 + nike.publicKeySize +
+      geom.routingInfoLength) ∧
+    (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names x default)).extract 2 (2 +
+        nike.publicKeySize)
+      = drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names) x.2.2.2.2 ∧
+    (onionBlock nike cipher macS kdfS streamS geom x.2.2.2.2.c.req x.2.2.2.2.o
+      (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names x default)) x.2.2.2.2.c.pos).size
+          = (geom.payloadTagLength + geom.forwardPayloadLength)
+
+set_option maxHeartbeats 2000000 in
+/-- **World 0 after its MAC step is its payload game with the cipher, draw by draw.** -/
+theorem forwardPay_run (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) (x : PayX nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+    (kp : Vector UInt8 48) (hg : payGood nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names x) :
+    simulateQ (relayImpl (Relay.ansOf
+        (fun x pkt => decide (pkt.extract 2 (2 + nike.publicKeySize)
+          = drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+              (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher
+              macS kdfS streamS geom hvalid hmactag h16 names) x.2))
+        (fun x => procWith nike cipher macS streamS geom (relayKeys nike kdfS x.2.k.2))
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x kp)
+        (Relay.onlyT macS (2 + nike.publicKeySize + geom.routingInfoLength) (macMsg nike cipher
+            macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮))
+            .relay names (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names))
+          (fun x tag => procWith nike cipher (Primitives.MAC.MAC.const tag) streamS geom
+            (fun _ => .ok (restKeys x.1 default)))
+          (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x kp)
+          (macS.mac (Util.Bytes.ofVector x.2.1)
+            (macMsg nike cipher macS kdfS streamS geom hvalid hmactag h16
+                (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardMsg nike cipher
+                macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS
+                streamS geom hvalid hmactag h16 names x kp))))))
+      (drawRun nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names x kp)
+        (drawView nike cipher macS kdfS streamS geom hvalid hmactag h16
+            (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+            kdfS streamS geom hvalid hmactag h16 names) (forwardView nike cipher macS kdfS streamS
+            geom hvalid hmactag h16 names)
+          (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names x kp) x.2.1))
+    = (simulateQ (Protocols.RSOR.withDec (S := 𝒮) (forwardPay nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names A).role
+        ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).header x)
+            (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).key
+        ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).step x)
+            ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).rep x)
+        ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).proc x)
+            ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).reply x)
+        (fun y => Util.Bytes.toVecN _ (cipher.decrypt kp.toArray (Util.Bytes.ofVector x.1)
+          (Util.Bytes.ofVector y)))
+        ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).patch x
+            (Util.Bytes.toVecN _ (cipher.encrypt kp.toArray
+          (Util.Bytes.ofVector x.1) (Util.Bytes.ofVector ((forwardPay nike cipher macS kdfS streamS
+              geom hvalid hmactag h16 names A).plain x))))))
+        ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).rest x
+            (Util.Bytes.toVecN _ (cipher.encrypt kp.toArray
+          (Util.Bytes.ofVector x.1)
+          (Util.Bytes.ofVector ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+              names A).plain x)))))).run'
+      ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).log x) := by
+  obtain ⟨iv, km, he, seed, D⟩ := x
+  obtain ⟨hM, hcar, hblk⟩ := hg
+  have hlt := forward_pos_lt nike cipher macS kdfS streamS geom hvalid hmactag h16 names D
+  have hjp : (D.c.pos : ℕ) < (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]).size :=
+    lt_of_lt_of_eq D.c.pos.isLt (RSOR.path_size nike D.c.req.fwd _).symm
+  obtain ⟨hne, hj⟩ := payKeys nike cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km,
+      he, seed, D) kp
+  obtain ⟨-, hj0⟩ := payKeys nike cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km,
+      he, seed, D) default
+  have hK : (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D)
+      kp)).toArray[(D.c.pos : ℕ)]!
+      = { (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D)
+          default)).toArray[(D.c.pos : ℕ)]! with
+        payloadEncryption :=
+          ((forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike
+              cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D)
+              kp)).toArray[(D.c.pos : ℕ)]!).payloadEncryption } := by
+    rw [hj, hj0]
+    rfl
+  have hpk := fun (a tag e : ByteArray) => onion_payloadKey nike cipher macS kdfS streamS geom
+    D.c.req D.o a _ _ (D.c.pos : ℕ) tag e hjp hne hK
+  have hmsg : forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D) kp) = forwardMsg
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (iv, km, he, seed, D) default) := (hpk _ .empty
+      .empty).2.1
+  have hmacEq : macMsg nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardMsg nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (iv, km, he, seed, D) kp) = macMsg nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardMsg nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (iv, km, he, seed, D) default) := by
+    unfold macMsg
+    rw [hmsg]
+  have hMeq : macMsg nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardMsg nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (iv, km, he, seed, D) default) = forwardMsg nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (iv, km, he, seed, D) default) := Util.Bytes.ofVector_toVecN _ hM
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have hH : Util.Bytes.ofVector (payHeader nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (iv, km, he, seed, D))
+      = macMsg nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardMsg nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names (iv, km, he, seed, D) default) ++ Util.Bytes.ofVector (payTag
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D)) :=
+    Util.Bytes.ofVector_toVecN _ (by
+      rw [ByteArray.size_append, hMeq, hM, Util.Bytes.size_ofVector, hmactag, hhdr]
+      rfl)
+  have hcar' : (Util.Bytes.ofVector (payHeader nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names (iv, km, he, seed, D))).extract 2
+      (2 + nike.publicKeySize) = drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names) D := by
+    rw [hH, hMeq, ← hcar]
+    exact KEMSphinx.extract_of_prefix_eq (n := (forwardMsg nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names (iv, km, he, seed, D) default)).size)
+      (by rw [Util.Bytes.extract_append_left]; exact ByteArray.extract_zero_size.symm) 2
+      (2 + nike.publicKeySize) (by rw [hM]; omega)
+  have hans : Relay.ansOf
+        (fun x pkt => decide (pkt.extract 2 (2 + nike.publicKeySize)
+          = drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+              (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher
+              macS kdfS streamS geom hvalid hmactag h16 names) x.2))
+        (fun x => procWith nike cipher macS streamS geom (relayKeys nike kdfS x.2.k.2)) (payRest
+            nike cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D) kp)
+        (Relay.onlyT macS (2 + nike.publicKeySize + geom.routingInfoLength) (macMsg nike cipher
+            macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮))
+            .relay names (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names))
+          (fun x tag => procWith nike cipher (Primitives.MAC.MAC.const tag) streamS geom
+            (fun _ => .ok (restKeys x.1 default))) (payRest nike cipher macS kdfS streamS geom
+                hvalid hmactag h16 names (iv, km, he, seed, D) kp)
+          (macS.mac (Util.Bytes.ofVector km) (macMsg nike cipher macS kdfS streamS geom hvalid
+              hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardMsg nike
+              cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS
+              kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D) kp))))
+      = onlyAns nike cipher macS kdfS streamS geom D.k.2 (drawElem nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+          (forwardPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 names) D) (restKeys
+          (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed,
+          D) kp).1 default) (macMsg nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardMsg nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names (iv, km, he, seed, D) default)) (payTag nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (iv, km, he, seed, D)) := by
+    funext pkt
+    unfold Relay.ansOf Relay.onlyT onlyAns payTag
+    rw [hmacEq]
+    by_cases he : pkt.extract 2 (2 + nike.publicKeySize) = drawElem nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+        (forwardPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 names) D
+    · exact (ite_eq_left (decide_eq_true he)).trans (ite_eq_left he).symm
+    · exact (ite_eq_right fun h => he (of_decide_eq_true h)).trans (ite_eq_right he).symm
+  have hrun : ∀ w, drawRun nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (iv, km, he, seed, D) kp) w
+      = (simulateQ (viaOracle nike cipher macS kdfS streamS geom hvalid hmactag h16 .relay (fun h
+          => (D.keys h).2) w.patch)
+        (A.guess D.st w.onion)).run' D.log := fun w => ite_eq_left hlt
+  rw [show simulateQ (relayImpl _) _ = simulateQ (relayImpl (onlyAns nike cipher macS kdfS streamS
+      geom D.k.2 (drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) D) (restKeys (payRest nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names (iv, km, he, seed, D) kp).1 default) (macMsg nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+      (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D) default)) (payTag nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D)))) _ from
+    congrArg (fun f => simulateQ (relayImpl f) _) hans]
+  rw [hrun, viaOracle_congr nike cipher macS kdfS streamS geom hvalid hmactag h16 .relay (fun h =>
+      (D.keys h).2) (fun h => if h = .relay then D.k.2 else (D.keys h).2)
+    (fun h hr => (ite_eq_right hr).symm)]
+  refine (relayImpl_onlyAns_run nike cipher macS kdfS streamS geom hvalid hmactag h16 .relay (fun h
+      => if h = .relay then D.k.2 else (D.keys h).2) _ _ _ _ (payHeader nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (iv, km, he, seed, D)) hH hcar'
+    _ _ _).trans ?_
+  have hs : (fun (o : Onion geom) (y : Vector UInt8 (geom.payloadTagLength +
+      geom.forwardPayloadLength)) => stepOf geom (procD nike
+        (Primitives.MAC.MAC.const (payTag nike cipher macS kdfS streamS geom hvalid hmactag h16
+            names (iv, km, he, seed, D))) streamS geom
+        (fun _ => .ok (restKeys (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+            names (iv, km, he, seed, D) kp).1 default)) (fun _ _ => y) (join o)))
+      = (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).step (iv, km,
+          he, seed, D) := funext fun o => funext fun y =>
+    congrArg (stepOf geom) (procD_payloadKey nike _ streamS geom
+      (restKeys (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he,
+          seed, D) default).1 default) kp (fun _ => y) (join o)).symm
+  have hr : (fun (msg : Msg geom) (o : Onion geom) (y : Vector UInt8 (geom.payloadTagLength +
+      geom.forwardPayloadLength)) =>
+        replyOf cipher geom msg (procD nike
+          (Primitives.MAC.MAC.const (payTag nike cipher macS kdfS streamS geom hvalid hmactag h16
+              names (iv, km, he, seed, D))) streamS geom
+          (fun _ => .ok (restKeys (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+              names (iv, km, he, seed, D) kp).1 default)) (fun _ _ => y) (join o)))
+      = (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).rep (iv, km, he,
+          seed, D) := funext fun msg => funext fun o => funext fun y =>
+    congrArg (replyOf cipher geom msg) (procD_payloadKey nike _ streamS geom
+      (restKeys (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he,
+          seed, D) default).1 default) kp (fun _ => y) (join o)).symm
+  have hp : (fun (h : Role) (o : Onion geom) => if h = Role.relay then
+        stepOf geom (noneAns nike cipher macS kdfS streamS geom ((fun h => if h = .relay then D.k.2
+            else (D.keys h).2) Role.relay) (drawElem nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 names) D) (join o))
+      else RSOR.proc nike cipher macS kdfS streamS geom ((fun h => if h = .relay then D.k.2 else
+          (D.keys h).2) h) o)
+      = (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).proc (iv, km,
+          he, seed, D) := funext fun h => funext fun o => by
+    by_cases hh : h = Role.relay
+    · subst hh
+      rfl
+    · exact (ite_eq_right hh).trans ((congrArg (fun k =>
+        RSOR.proc nike cipher macS kdfS streamS geom k o) (ite_eq_right hh)).trans
+        (ite_eq_right hh).symm)
+  have hrp : (fun (h : Role) (msg : Msg geom) (o : Onion geom) => if h = Role.relay then
+        replyOf cipher geom msg (noneAns nike cipher macS kdfS streamS geom ((fun h => if h =
+            .relay then D.k.2 else (D.keys h).2) Role.relay)
+          (drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+              (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher
+              macS kdfS streamS geom hvalid hmactag h16 names) D) (join o))
+      else RSOR.reply nike cipher macS kdfS streamS geom ((fun h => if h = .relay then D.k.2 else
+          (D.keys h).2) h) msg o)
+      = (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).reply (iv, km,
+          he, seed, D) := funext fun h => funext fun msg => funext fun o => by
+    by_cases hh : h = Role.relay
+    · subst hh
+      rfl
+    · exact (ite_eq_right hh).trans ((congrArg (fun k =>
+        RSOR.reply nike cipher macS kdfS streamS geom k msg o) (ite_eq_right hh)).trans
+        (ite_eq_right hh).symm)
+  have key : ∀ (impl impl' : QueryImpl (Protocols.RSOR.oracleSpec 𝒮)
+      (StateT (Protocols.RSOR.Log 𝒮) ProbComp))
+      (oa oa' : OracleComp (Protocols.RSOR.oracleSpec 𝒮) Bool) (log : Protocols.RSOR.Log 𝒮),
+      impl = impl' → oa = oa' →
+        (simulateQ impl oa).run' log = (simulateQ impl' oa').run' log := by
+    rintro _ _ _ _ _ rfl rfl
+    rfl
+  refine key _ _ _ _ _
+    (Protocols.RSOR.withDec_congr (S := 𝒮) (L := (geom.payloadTagLength +
+        geom.forwardPayloadLength)) _ _ _ _ _ hs hr hp hrp) ?_
+  refine Eq.trans ?_ (ite_eq_left hlt).symm
+  refine congrArg (A.guess D.st) ?_
+  refine (onionOfKeys_tag nike cipher macS kdfS streamS geom D.c.req D.o _ _ _ _ (payRest nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D) kp).1 km _ hlt
+    hjp).trans ?_
+  refine (onionOfTag_enc nike cipher macS kdfS streamS geom D.c.req D.o _ _ _ _ hjp).trans ?_
+  refine ((hpk _ _ _).1).trans ?_
+  refine congrArg₂ (fun t e => onionOfEnc nike cipher macS kdfS streamS geom D.c.req D.o _
+    (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D) default)) (D.c.pos :
+        ℕ) t e) ?_ ?_
+  · unfold payTag
+    rw [hMeq]
+    exact congrArg (fun m => Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector km) m))
+      (hpk _ .empty .empty).2.1
+  · refine Eq.trans (congrArg (fun t : HopKeys => cipher.encrypt t.payloadEncryption.toArray
+      (Util.Bytes.ofVector t.headerEncryptionIV)
+      (onionBlock nike cipher macS kdfS streamS geom D.c.req D.o (forwardKeys0 nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names (payRest nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names (iv, km, he, seed, D) kp)) (D.c.pos : ℕ))) hj) ?_
+    rw [(hpk .empty .empty .empty).2.2]
+    show _ = Util.Bytes.ofVector (Util.Bytes.toVecN _ (cipher.encrypt kp.toArray
+      (Util.Bytes.ofVector iv) (Util.Bytes.ofVector (Util.Bytes.toVecN _
+        (onionBlock nike cipher macS kdfS streamS geom D.c.req D.o (forwardKeys0 nike cipher macS
+            kdfS streamS geom hvalid hmactag h16 names (payRest nike cipher macS kdfS streamS geom
+            hvalid hmactag h16 names (iv, km, he, seed, D) default)) (D.c.pos : ℕ))))))
+    rw [Util.Bytes.ofVector_toVecN _ hblk,
+      Util.Bytes.ofVector_toVecN _ (by rw [cipher.encrypt_size, hblk])]
+    rfl
 
 end Forward
 

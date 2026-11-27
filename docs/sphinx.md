@@ -597,8 +597,11 @@ of `onionBlock` (`onionOfTag_enc`), and reads that key nowhere else (`onion_payl
 relay handed its payload's decryption does not read it either (`procD_payloadKey`). The second
 phase against a relay that answers one header is the second phase against the one-decryption
 oracle (`relayImpl_onlyAns_run`), and the hops' keys with and without the relay's payload key
-agree off the relay (`payKeys`). Still to do for the payload step of world 0: the payload game
-itself and its equality with world 0 after the MAC step.
+agree off the relay (`payKeys`). World 0 after its MAC step has a payload game, `forwardPay`,
+and draw by draw it is that game with the cipher (`forwardPay_run`), on draws where the bytes
+under the relay's tag have a header's length and carry the relay's element, and the block the
+relay encrypts has a payload's length (`payGood`). Still to do for the payload step of world
+0: reorder the draws so the payload key and IV come first, and apply `PayloadGame.exp_eq`.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two

@@ -19,6 +19,20 @@ open OracleComp OracleSpec
 open Cryptlib.Primitives.WideBlockCipher (WideBlockCipher)
 open Cryptlib.Util.Bytes (ofVector)
 
+/-- The one-decryption oracle is determined by what the relays do. -/
+theorem withDec_congr {S : Scheme} {L : ℕ} (ρ : Role) (H : S.Header)
+    (key : S.Onion → Vector UInt8 L)
+    {step step' : S.Onion → Vector UInt8 L → Option S.Step}
+    {rep rep' : S.Msg → S.Onion → Vector UInt8 L → Option (S.Name × S.Onion)}
+    {proc proc' : Role → S.Onion → Option S.Step}
+    {reply reply' : Role → S.Msg → S.Onion → Option (S.Name × S.Onion)}
+    (dec : Vector UInt8 L → Vector UInt8 L) (patch : Patch S)
+    (h1 : step = step') (h2 : rep = rep') (h3 : proc = proc') (h4 : reply = reply') :
+    withDec ρ H key step rep proc reply dec patch
+      = withDec ρ H key step' rep' proc' reply' dec patch := by
+  subst h1 h2 h3 h4
+  rfl
+
 /-- A game in which the honest relay `role` decrypts under one header only, cut where its
 payload key is used: everything drawn besides that key, given the IV; the block the sender
 encrypts under it; what the relay does with a decrypted block; and how the game goes on from

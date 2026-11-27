@@ -86,6 +86,23 @@ def viaOracle (sk : Role → nike.PrivateKey)
       else pure (RSOR.reply nike cipher macS kdfS streamS geom (sk h) msg o))
     patch
 
+/-- `viaOracle` does not use the key it is given for `ρ`. -/
+theorem viaOracle_congr (sk sk' : Role → nike.PrivateKey)
+    (hsk : ∀ h, h ≠ ρ → sk h = sk' h)
+    (patch : Protocols.RSOR.Patch (sphinx nike cipher macS kdfS streamS geom hvalid hmactag h16)) :
+    viaOracle nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk patch
+      = viaOracle nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk' patch := by
+  unfold viaOracle
+  congr 1
+  · funext h o
+    by_cases hr : h = ρ
+    · simp [hr]
+    · simp [hr, hsk h hr]
+  · funext h msg o
+    by_cases hr : h = ρ
+    · simp [hr]
+    · simp [hr, hsk h hr]
+
 /-- Answering that oracle with the relay's secret key gives the honest relays of the game. The
 keys `viaOracle` is given need only agree with the game's for the other two relays. -/
 theorem viaOracle_honest
