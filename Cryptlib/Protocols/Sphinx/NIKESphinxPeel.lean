@@ -682,6 +682,100 @@ theorem layerHdr_congr_tail (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → Byt
     (path.size - 1 - (j + 1)) (by omega), hpad, hpad, hp]
   simp only [(h (j + 1) (by omega)).1, (h (j + 1) (by omega)).2.1, (h (j + 1) (by omega)).2.2]
 
+omit nike in
+/-- A hop's fragment reads the path for whether the hop is last, its commands, and the next
+hop's name. -/
+theorem nikeFragment_congr_path (path path' : Array PathHop) (mac : ByteArray) (i : ℕ)
+    (hi : i + 1 < path.size) (hi' : i + 1 < path'.size)
+    (hc : path[i]!.commands = path'[i]!.commands) (hid : path[i + 1]!.id = path'[i + 1]!.id) :
+    nikeFragment geom path mac i = nikeFragment geom path' mac i := by
+  have hb : (i == path.size - 1) = false := beq_eq_false_iff_ne.mpr (by omega)
+  have hb' : (i == path'.size - 1) = false := beq_eq_false_iff_ne.mpr (by omega)
+  unfold nikeFragment
+  rw [hb, hb', hc, hid]
+
+omit nike in
+/-- **Two headers that agree at hop `j` agree at the hops in front**, when those hops have the
+same keystreams, tags, elements, commands and next names. The paths may differ after `j`. -/
+theorem nikeHdrTrace_front (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ge ge' : ℕ → ByteArray) (filler filler' : ByteArray) (path path' : Array PathHop) (j : ℕ)
+    (hj : j < path.size) (hj' : j < path'.size)
+    (h : ∀ i < j, ks i = ks' i ∧ tag i = tag' i ∧ ge i = ge' i
+      ∧ path[i]!.commands = path'[i]!.commands ∧ path[i + 1]!.id = path'[i + 1]!.id)
+    (hs : nikeHdrTrace geom ks tag ge filler path (path.size - j)
+      = nikeHdrTrace geom ks' tag' ge' filler' path' (path'.size - j)) (k : ℕ) (hk : k ≤ j) :
+    nikeHdrTrace geom ks tag ge filler path (path.size - j + k)
+      = nikeHdrTrace geom ks' tag' ge' filler' path' (path'.size - j + k) := by
+  induction k with
+  | zero => exact hs
+  | succ k ih =>
+    have e : path.size - 1 - (path.size - j + k) = j - 1 - k := by omega
+    have e' : path'.size - 1 - (path'.size - j + k) = j - 1 - k := by omega
+    obtain ⟨h1, h2, h3, h4, h5⟩ := h (j - 1 - k) (by omega)
+    rw [show path.size - j + (k + 1) = (path.size - j + k) + 1 from rfl,
+      show path'.size - j + (k + 1) = (path'.size - j + k) + 1 from rfl, nikeHdrTrace,
+      nikeHdrTrace, ih (by omega), e, e']
+    simp only [h1, h2, h3, nikeFragment_congr_path geom path path' _ (j - 1 - k) (by omega)
+      (by omega) h4 h5, KEMSphinx.padAt_congr geom ks ks' (j - 1 - k - 1) fun m hm =>
+        (h m (by omega)).1]
+
+omit nike in
+/-- The payload after the hops down to `j` encrypted it, when hop `j` returns `e`. -/
+theorem encTrace_const (enc : ℕ → ByteArray → ByteArray) (n : ℕ) (init e : ByteArray) (j : ℕ)
+    (hj : j < n) (he : ∀ b, enc j b = e) : encTrace enc n init (n - j) = e := by
+  rw [show n - j = (n - 1 - j) + 1 by omega, encTrace_succ,
+    show n - 1 - (n - 1 - j) = j by omega]
+  exact he _
+
+omit nike in
+/-- **Two payloads that agree at hop `j` agree at the hops in front**, when those hops encrypt
+alike. -/
+theorem encTrace_front (enc enc' : ℕ → ByteArray → ByteArray) (n n' : ℕ)
+    (init init' : ByteArray) (j : ℕ) (hj : j < n) (hj' : j < n')
+    (h : ∀ i < j, enc i = enc' i)
+    (hs : encTrace enc n init (n - j) = encTrace enc' n' init' (n' - j)) (k : ℕ) (hk : k ≤ j) :
+    encTrace enc n init (n - j + k) = encTrace enc' n' init' (n' - j + k) := by
+  induction k with
+  | zero => exact hs
+  | succ k ih =>
+    rw [show n - j + (k + 1) = (n - j + k) + 1 from rfl,
+      show n' - j + (k + 1) = (n' - j + k) + 1 from rfl, encTrace_succ, encTrace_succ,
+      ih (by omega), show n - 1 - (n - j + k) = j - 1 - k by omega,
+      show n' - 1 - (n' - j + k) = j - 1 - k by omega, h (j - 1 - k) (by omega)]
+
+omit nike in
+/-- **Two packets that agree at hop `j` are the same packet**, when the hops in front have the
+same keystreams, tags, encryptions, elements, commands and next names, and hop `j` puts the
+same block `e` in the payload. The paths may differ after `j`. -/
+theorem nikePktFn_front (ks ks' : ℕ → ByteArray) (tag tag' enc enc' : ℕ → ByteArray → ByteArray)
+    (ge ge' : ℕ → ByteArray) (filler filler' : ByteArray) (path path' : Array PathHop)
+    (payload payload' : ByteArray) (j : ℕ) (hj : j < path.size) (hj' : j < path'.size)
+    (h : ∀ i < j, ks i = ks' i ∧ tag i = tag' i ∧ ge i = ge' i ∧ enc i = enc' i
+      ∧ path[i]!.commands = path'[i]!.commands ∧ path[i + 1]!.id = path'[i + 1]!.id)
+    (hge0 : ge 0 = ge' 0)
+    (hs : nikeHdrTrace geom ks tag ge filler path (path.size - j)
+      = nikeHdrTrace geom ks' tag' ge' filler' path' (path'.size - j))
+    (e : ByteArray) (he : ∀ b, enc j b = e) (he' : ∀ b, enc' j b = e)
+    (hp : payload.size = geom.forwardPayloadLength)
+    (hp' : payload'.size = geom.forwardPayloadLength) :
+    nikePktFn geom ks tag enc ge filler path payload
+      = nikePktFn geom ks' tag' enc' ge' filler' path' payload' := by
+  have hT := nikeHdrTrace_front geom ks ks' tag tag' ge ge' filler filler' path path' j hj hj'
+    (fun i hi => ⟨(h i hi).1, (h i hi).2.1, (h i hi).2.2.1, (h i hi).2.2.2.2.1,
+      (h i hi).2.2.2.2.2⟩) hs j le_rfl
+  have hE := encTrace_front enc enc' path.size path'.size ((⟨Array.replicate geom.payloadTagLength
+      0⟩ : ByteArray) ++ payload) ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++
+      payload') j hj hj'
+    (fun i hi => (h i hi).2.2.2.1)
+    ((encTrace_const enc path.size _ e j hj he).trans
+      (encTrace_const enc' path'.size _ e j hj' he').symm) j le_rfl
+  rw [show path.size - j + j = path.size by omega,
+    show path'.size - j + j = path'.size by omega] at hT hE
+  unfold nikePktFn
+  rw [ite_eq_left hp, ite_eq_left hp', hT, hge0]
+  exact congrArg (fun P => (nikeHdrTrace geom ks' tag' ge' filler' path' path'.size).map
+    fun s => v0AD ++ ge' 0 ++ s.1 ++ s.2 ++ P) hE
+
 end Layer
 
 /-! ## What a relay forwards -/

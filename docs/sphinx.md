@@ -698,10 +698,28 @@ for it:
    xoring a fixed mask into the keystream's head. Not proved. The byte lemmas for this exist
    in `KEMSphinxPad.lean` and `KEMSphinxTLUFinal.lean` and do not depend on the KEM; they are
    to be shared, not copied.
-4. The later hops' keys and elements come from the sender's secret and the replaced blinding
-   factor, in both worlds, but world 1 uses an independent secret for the original. That the
-   two are distributed alike is a property of the NIKE (blinding by a uniform factor), to be
-   stated as a game whose advantage the bound carries. Not stated yet.
+4. The comparison of the two games, as a chain. Not proved; the order planned:
+   - World 0, head of the keystream shifted. The bytes under the relay's tag are the element,
+     then the relay's fragment and the next layer's routing information masked by the head
+     of the uniform keystream, then the padding in front (`hdrMsg_struct`). Xoring a fixed
+     mask into the head turns them into the bytes of the replacement, whose path ends at the
+     relay. After this the onion shown does not depend on the hops after the relay.
+     Proved for it: two packets that agree at the relay's hop and on the hops in front are
+     the same packet, though their paths differ after the relay (`nikePktFn_front`,
+     `nikeHdrTrace_front`, `encTrace_front`).
+   - The relay's answer is then the header of the next layer, which reads the hops in front
+     through their padding only (`procD_layerHdr`, `layerHdr_congr_tail`), and that padding
+     is the tail of the uniform keystream with a fixed mask (`padAt_step`).
+   - The hops after the relay: their keys and the element that reaches them come from the
+     sender's secret and the replaced blinding factor. World 1 draws an independent secret
+     for the original. That the two are distributed alike is a property of the NIKE
+     (blinding by a uniform factor), to be stated as a game on the NIKE whose advantage the
+     bound carries. Not stated yet.
+   - World 1 after its hidden-layer steps is the same game under a relabelling of its draws.
+   Both cases are needed: the relay before the end of the original's path, and the relay as
+   its exit, where it delivers and replies. A changed payload under the challenge header is
+   answered with a random payload in world 1 and with the ideal cipher's other block in world
+   0; these have to be matched as well.
 
 SLU← and STI↔ are not started for NIKE Sphinx.
 
