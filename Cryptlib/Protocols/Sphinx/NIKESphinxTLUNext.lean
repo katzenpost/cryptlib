@@ -576,6 +576,139 @@ theorem patchWith_real (names : Role → Name) {pk : RSOR.Key nike} (ch : Forwar
     · simp only [hlt, ↓reduceIte, ↓reduceDIte]
   exact (congrArg (fun nx => ch.c.patchWith nx r mine) hn).trans rfl
 
+/-- The draws of world 1 after its first chain, with the original's forward secret drawn apart:
+the honest relays' keys and the adversary's first phase, that secret, the relay's header
+keystream, MAC key and blinding seed for the replacement, the challenger's draws, the
+replacement's forward secret, and the ideal cipher's two blocks. -/
+structure NextDraw (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) where
+  k : RSOR.Key nike × nike.PrivateKey
+  keys : Role → RSOR.Key nike × nike.PrivateKey
+  c : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Challenge (honAt nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 .relay names k.1 keys)
+  st : A.State
+  log : Protocols.RSOR.Log 𝒮
+  d0 : Vector UInt8 nike.privateKeySize
+  U : KEMSphinx.Keystream geom
+  km : Vector UInt8 32
+  seed : Vector UInt8 32
+  o : (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth
+  d' : Vector UInt8 nike.privateKeySize
+  u : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+  v : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+
+/-- The draw of `NextDraw`. -/
+def nextDraw (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    ProbComp (NextDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) := do
+  let k ← RSOR.keygen nike
+  let k₁ ← RSOR.keygen nike
+  let k₂ ← RSOR.keygen nike
+  let out ← (simulateQ (Protocols.RSOR.honest (honAt nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 .relay names k.1 (keysOf nike .relay k₁ k₂))
+      (fun h => if h = .relay then k.2 else (keysOf nike .relay k₁ k₂ h).2) {})
+    (A.choose (honAt nike cipher macS kdfS streamS geom hvalid hmactag h16 .relay names k.1 (keysOf
+        nike .relay k₁ k₂)))).run {}
+  let d0 ← $ᵗ (Vector UInt8 nike.privateKeySize)
+  let U ← $ᵗ (KEMSphinx.Keystream geom)
+  let km ← $ᵗ (Vector UInt8 32)
+  let seed ← $ᵗ (Vector UInt8 32)
+  let o ← shortDraw nike geom
+  let d' ← $ᵗ (Vector UInt8 nike.privateKeySize)
+  let u ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+  let v ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+  return ⟨k, keysOf nike .relay k₁ k₂, out.1.1, out.1.2, out.2, d0, U, km, seed, o, d', u, v⟩
+
+/-- The key game's real world for `nextAdv` on a draw: its second phase, answered by the honest
+relay, on the original's own group element and hop keys. -/
+def nextRunK (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) (z :
+    NextDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) :
+    ProbComp Bool :=
+  simulateQ (procImpl nike cipher macS kdfS streamS geom z.k.2)
+    (nextPost nike cipher macS kdfS streamS geom hvalid hmactag h16 names A (⟨z.keys, z.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names z.k.1) z.st z.log z.U
+        z.km z.seed z.o
+      z.d' z.u z.v
+      (groupElem nike ((nike.decodePrivateKey z.d0).getD default)
+        (RSOR.hopKeys nike kdfS ((nike.decodePrivateKey z.d0).getD default)
+          (RSOR.path nike z.c.req.fwd [.recipient z.c.req.receiver])
+          (RSOR.path nike z.c.req.fwd [.recipient z.c.req.receiver]).size).toArray 0)
+      (RSOR.hopKeys nike kdfS ((nike.decodePrivateKey z.d0).getD default)
+        (RSOR.path nike z.c.req.fwd [.recipient z.c.req.receiver])
+        (RSOR.path nike z.c.req.fwd [.recipient z.c.req.receiver]).size))
+
+/-- The first phase of `nextAdv`, answered by the honest relay: the first phase of the
+adversary of TLU→ against the game's honest relays. -/
+theorem nextAdv_pre (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary)
+    (k : RSOR.Key nike × nike.PrivateKey) :
+    simulateQ (procImpl nike cipher macS kdfS streamS geom k.2) ((nextAdv nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names A).pre k.1)
+      = (do
+        let k₁ ← RSOR.keygen nike
+        let k₂ ← RSOR.keygen nike
+        let out ← (simulateQ (Protocols.RSOR.honest
+            (honAt nike cipher macS kdfS streamS geom hvalid hmactag h16 .relay names k.1 (keysOf
+                nike .relay k₁ k₂))
+            (fun h => if h = .relay then k.2 else (keysOf nike .relay k₁ k₂ h).2) {})
+          (A.choose (honAt nike cipher macS kdfS streamS geom hvalid hmactag h16 .relay names k.1
+              (keysOf nike .relay k₁ k₂)))).run {}
+        return (forwardPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 names)
+            (⟨keysOf nike .relay k₁ k₂, out.1.1⟩ : ForwardCh nike cipher macS kdfS streamS geom
+                hvalid hmactag h16 names k.1),
+          ((⟨keysOf nike .relay k₁ k₂, out.1.1⟩ : ForwardCh nike cipher macS kdfS streamS geom
+              hvalid hmactag h16 names k.1), out.1.2, out.2))) :=
+  propAdv_pre nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names)) (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth
+    (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).draw
+    (forwardView nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names)) A k
+
+set_option maxHeartbeats 4000000 in
+/-- **The key game's real world for `nextAdv`, as its draws and then the second phase.** -/
+theorem keyGame_true_nextAdv (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) :
+    keyGame cipher macS kdfS streamS geom (nextAdv nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names A) true
+      =ᵈ nextDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= nextRunK nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names A := by
+  have of_eq : ∀ {a b : ProbComp Bool}, a = b → a =ᵈ b := fun h => h ▸ EvalDistEq.rfl
+  unfold keyGame
+  simp only [ite_true, hopKeysWith_hopKey]
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+  refine of_eq ?_
+  unfold nextDraw
+  simp only [nextAdv_pre, bind_assoc, pure_bind]
+  simp only [RSOR.keygen, bind_assoc, pure_bind]
+  refine bind_congr fun s => bind_congr fun s₁ => bind_congr fun s₂ => bind_congr fun out =>
+    bind_congr fun d0 => ?_
+  have hpos : (out.1.1.pos : ℕ) < out.1.1.req.fwd.hops.length := out.1.1.pos.isLt
+  have hsz := RSOR.path_size nike out.1.1.req.fwd [.recipient out.1.1.req.receiver]
+  have hkey : (out.1.1.req.fwd.hops[(out.1.1.pos : ℕ)]'hpos).key
+      = ⟨nike.derivePublicKey (nike.privateKeyFromSeed s), _, rfl⟩ :=
+    congrArg (·.key) out.1.1.relay
+  have hpk : ((RSOR.path nike out.1.1.req.fwd [.recipient out.1.1.req.receiver])[
+        (out.1.1.pos : ℕ)]!).publicKey
+      = Util.Bytes.ofVector (nike.encodePublicKey
+        (nike.derivePublicKey (nike.privateKeyFromSeed s))) := by
+    rw [RSOR.path_getElem! nike _ _ _ hpos]
+    exact congrArg (fun k : RSOR.Key nike => Util.Bytes.ofVector (nike.encodePublicKey k.1)) hkey
+  have hmod := modify_publicKey_self
+    (RSOR.path nike out.1.1.req.fwd [.recipient out.1.1.req.receiver]) out.1.1.pos
+    (Util.Bytes.ofVector (nike.encodePublicKey (nike.derivePublicKey (nike.privateKeyFromSeed s))))
+    (by rw [hsz]; exact hpos) hpk
+  have hlt : (out.1.1.pos : ℕ)
+      < (RSOR.path nike out.1.1.req.fwd [.recipient out.1.1.req.receiver]).size := by
+    rw [hsz]; exact hpos
+  simp only [forwardPlace, fwd0, hmod]
+  refine (ite_eq_left hlt).trans ?_
+  rw [procImplK_hopKeys nike cipher macS kdfS streamS geom _ _ _ _ _ hlt hpk]
+  unfold nextAdv
+  simp only [simulateQ_bind, simulateQ_procImpl_liftM]
+  rfl
+
 end ForwardNext
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
