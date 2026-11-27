@@ -554,6 +554,14 @@ honest relay's keys replaced differs from world 0 by at most `keyAdvantage` for 
 and the chance of that event (`play_false_sub_ideal_le`). The event is not bounded yet;
 whether a NIKE Sphinx packet builds should depend on the path and the geometry alone.
 
+The steps on the replaced keys are stated for a relay whatever its packet format, so that NIKE
+Sphinx and KEM Sphinx can share them. The first is the MAC step (`RelayMac.lean`,
+`gameAll_sub_gameOnly_le`): a relay that answers challenge packets with keys the game holds may
+answer them under the challenge header only, at the cost of a forgery against the MAC. The
+format enters through two facts: what the relay accepts verifies, and under the challenge
+header it uses the MAC key for that header's tag only. It is not yet used: neither NIKE Sphinx
+nor KEM Sphinx is an instance yet, and KEM Sphinx still has its own copy (`KEMSphinxKeyedMac`).
+
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two
 worlds.
