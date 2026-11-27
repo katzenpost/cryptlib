@@ -713,8 +713,15 @@ for it:
    - The hops after the relay: their keys and the element that reaches them come from the
      sender's secret and the replaced blinding factor. World 1 draws an independent secret
      for the original. That the two are distributed alike is a property of the NIKE
-     (blinding by a uniform factor), to be stated as a game on the NIKE whose advantage the
-     bound carries. Not stated yet.
+     (blinding by a uniform factor). It is stated as a game, `blindGame`, with advantage
+     `blindAdvantage` (`NIKESphinxTLUFinal.lean`): the adversary names a secret, a path and
+     a hop, and is given what lies after the hop (`tailOf`: the element that reaches the next
+     hop and the later hops' keys), from its secret or from an independent uniform one, the
+     hop's blinding factor uniform. In a prime-order group with uniform scalars the advantage
+     is zero; that is not proved for any NIKE here. No axiom is added. The tail of a path
+     with replaced keys is `tailOf` (`tailOf_hopKeysWith`), and the next layer is a function
+     of the later hops and the padding (`nextOfFn`, `nextOfFn_congr`,
+     `nextOfStream_eq_nextOfFn`). The reduction to the game is not written.
    - World 1 after its hidden-layer steps is the same game under a relabelling of its draws.
    How the pieces fit, for whoever continues this:
    - Both final games are `strRunP`: world 0 on the original with the empty patch, world 1 on
