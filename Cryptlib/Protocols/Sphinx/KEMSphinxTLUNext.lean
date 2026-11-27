@@ -525,14 +525,13 @@ version is not the packet version. -/
 def nextM0 : ByteArray :=
   ⟨#[1, 1]⟩ ++ ⟨Array.replicate (kem.ciphertextSize + geom.routingInfoLength) 0⟩
 
-omit [SampleableType kem.Plaintext] in
+omit [SampleableType kem.Plaintext] hvalid hmactag h16 names in
 /-- A relay that answers under the header of `nextM0` only answers nothing. -/
-theorem onlyHeader_nextM0 {pk : Key kem}
-    (ch : (nextSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names).Ch pk)
-    (o : (nextSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth)
+theorem onlyHeader_nextM0 {V R : Type} {S : KeyedSetup kem V R} {pk : Key kem}
+    (ch : S.Ch pk) (o : S.Oth)
     (c : kem.Ciphertext) (u : KeyTuple) (pkt : ByteArray) :
     onlyHeader cipher macS streamS geom
-        (tagged (S := (nextSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names)) macS
+        (tagged (S := S) macS
           (fun _ _ _ _ => nextM0 kem geom)) ch o c u pkt = none := by
   unfold onlyHeader
   split_ifs with h
@@ -540,8 +539,7 @@ theorem onlyHeader_nextM0 {pk : Key kem}
     have h2 := congrArg (fun x : ByteArray => x.extract 0 2) h
     simp only [ByteArray.extract_extract] at h2
     rw [Nat.zero_add, Nat.zero_add, Nat.min_eq_left (by unfold payloadOffset; omega)] at h2
-    have h3 : (tagged (S := (nextSetup kem cipher macS kdfS streamS geom hvalid hmactag h16
-      names)) macS
+    have h3 : (tagged (S := S) macS
         (fun _ _ _ _ => nextM0 kem geom) ch o c u).extract 0 2 = ⟨#[1, 1]⟩ := by
       unfold tagged nextM0
       rw [Cryptlib.Util.Bytes.extract_append_of_le _ _
@@ -550,6 +548,40 @@ theorem onlyHeader_nextM0 {pk : Key kem}
     rw [h2, h3]
     decide
   · rfl
+
+include hmactag in
+/-- **The MAC step for a ciphertext that is never shown.** If a keyed game's view does not use
+the node's MAC key, then with uniform keys the node may reject every packet that carries the
+challenge ciphertext, at the cost of a forgery against the MAC. -/
+theorem keyedIdeal_sub_reject_le {V R : Type} {S : KeyedSetup kem V R} (A : KeyedAdversary S)
+    (hview : ∀ {pk : Key kem} (ch : S.Ch pk) (o : S.Oth) (c : kem.Ciphertext) (rest : RestKeys)
+      (km : Vector UInt8 32),
+      S.view ch o c (withMAC rest km) = S.view ch o c (withMAC rest default))
+    (hfin : ∀ {pk : Key kem} (ch : S.Ch pk) (o : S.Oth) (c : kem.Ciphertext) (u u' : KeyTuple),
+      S.final ch o c u = S.final ch o c u') :
+    |(Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom A)}[x = true]).toReal
+      - (Pr{let x ← (keyedGameH cipher macS kdfS streamS geom A
+          (fun _ _ _ _ _ => none))}[x = true]).toReal|
+    ≤ (Pr{let x ← (Primitives.MAC.forgeExp macS (forgeAdv cipher macS kdfS streamS geom A
+        (fun _ _ _ _ => nextM0 kem geom)
+        (fun ch o c rest _ => S.view ch o c (withMAC rest default))))}[x = true]).toReal := by
+  have h := keyedIdeal_sub_tagged_le cipher macS kdfS streamS geom A hmactag
+    (fun _ _ _ _ => nextM0 kem geom)
+    (fun ch o c rest _ => S.view ch o c (withMAC rest default))
+    (fun _ => True)
+    (fun _ _ _ => by
+      unfold nextM0
+      rw [ByteArray.size_append]
+      show 2 + (Array.replicate _ (0 : UInt8)).size = _
+      rw [Array.size_replicate, Nat.add_assoc])
+    (fun d u _ => hview d.cs.1 d.o d.c (restOf u) u.2.2.1) hfin
+  have e : (fun {pk : Key kem} => onlyHeader cipher macS streamS geom
+        (tagged (S := S) macS (fun _ _ _ _ => nextM0 kem geom)) (pk := pk))
+      = fun {pk : Key kem} _ _ _ _ _ => none := by
+    funext pk ch o c u pkt
+    exact onlyHeader_nextM0 kem cipher macS streamS geom ch o c u pkt
+  rw [e] at h
+  simpa using h
 
 /-- **The MAC step for the original's ciphertext.** No tag under the keys of the original's
 layer at the relay is shown, so with uniform keys the relay may reject every packet that carries
@@ -567,26 +599,77 @@ theorem nextIdeal_sub_reject_le
         (fun ch o c rest _ => nextView kem cipher macS kdfS streamS geom hvalid hmactag h16
           names ch o c
           (withMAC rest default))))}[x = true]).toReal := by
-  have h := keyedIdeal_sub_tagged_le cipher macS kdfS streamS geom
-    (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A) hmactag
-    (fun _ _ _ _ => nextM0 kem geom)
-    (fun ch o c rest _ => nextView kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o c
-      (withMAC rest default))
-    (fun _ => True)
-    (fun _ _ _ => by
-      unfold nextM0
-      rw [ByteArray.size_append]
-      show 2 + (Array.replicate _ (0 : UInt8)).size = _
-      rw [Array.size_replicate, Nat.add_assoc])
-    (fun _ _ _ => rfl) (fun _ _ _ _ _ => rfl)
-  have e : (fun {pk : Key kem} => onlyHeader cipher macS streamS geom
-        (tagged (S := (nextSetup kem cipher macS kdfS streamS geom hvalid hmactag h16 names)) macS
-          (fun _ _ _ _ => nextM0 kem geom)) (pk := pk))
-      = fun {pk : Key kem} _ _ _ _ _ => none := by
-    funext pk ch o c u pkt
-    exact onlyHeader_nextM0 kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o c u pkt
-  rw [e] at h
-  simpa using h
+  exact keyedIdeal_sub_reject_le kem cipher macS kdfS streamS geom hmactag
+    (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+    (fun _ _ _ _ _ => rfl) (fun _ _ _ _ _ => rfl)
+
+/-! ## The keystream of a hop whose ciphertext is never shown -/
+
+/-- The adversary against the keystream generator for a keyed game whose view and score read
+the node's keys through their header keystream only, with the node rejecting the challenge
+ciphertext. -/
+def rejectStreamAdv {V R : Type} {S : KeyedSetup kem V R} (A : KeyedAdversary S)
+    (viewU : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → ByteArray → V)
+    (finU : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → R → Bool) :
+    PRGScheme.PRGAdversary (Keystream geom) := fun U' => do
+  let k ← keygen kem
+  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom k.2) (A.pre k.1)
+  let s' ← $ᵗ (Vector UInt8 32)
+  let o ← S.drawOth cs.1
+  simulateQ (procImplF kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s').1
+      (fun _ => none))
+    (finU cs.1 o (encapOf kem k.1.1 s').1
+      <$> A.post cs.2 (viewU cs.1 o (encapOf kem k.1.1 s').1 (ofVector U')))
+
+omit [SampleableType kem.Plaintext] hvalid hmactag h16 names in
+/-- **The stream cipher step for a ciphertext that is never shown.** Once the node rejects the
+challenge ciphertext, a keyed game that reads the node's keys through their header keystream is
+the real experiment of the keystream generator for `rejectStreamAdv`. -/
+theorem keyedReject_eq_prg {V R : Type} {S : KeyedSetup kem V R} (A : KeyedAdversary S)
+    (viewU : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → ByteArray → V)
+    (finU : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → R → Bool)
+    (hview : ∀ {pk : Key kem} (ch : S.Ch pk) (o : S.Oth) (c : kem.Ciphertext) (t : KeyTuple),
+      S.view ch o c t = viewU ch o c (ksOf streamS geom t))
+    (hfin : ∀ {pk : Key kem} (ch : S.Ch pk) (o : S.Oth) (c : kem.Ciphertext) (t : KeyTuple),
+      S.final ch o c t = finU ch o c) :
+    Pr{let x ← (keyedGameH cipher macS kdfS streamS geom A (fun _ _ _ _ _ => none))}[x = true]
+      = Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+        (rejectStreamAdv kem cipher macS kdfS streamS geom A viewU finU))}[x = true] := by
+  refine EvalDistEq.prEvent_eq ?_ _
+  have hb : ∀ {α β : Type},
+      Function.Bijective (Function.uncurry fun (a : α) (b : β) => (a, b)) :=
+    fun {_ _} => Function.bijective_id
+  let K : Vector UInt8 16 → Vector UInt8 32 → ProbComp Bool := fun iv ke =>
+    rejectStreamAdv kem cipher macS kdfS streamS geom A viewU finU
+      ((keystreamPRG streamS geom).gen (ke, iv))
+  have h0 : keyedGameH cipher macS kdfS streamS geom A (fun _ _ _ _ _ => none)
+      = $ᵗ KeyTuple >>= fun u => K u.2.1 u.2.2.2 := by
+    unfold keyedGameH
+    simp only [K, rejectStreamAdv, hview, hfin, ksOf, keystreamPRG,
+      Cryptlib.Util.Bytes.ofVector_toVecN _ (streamS.keystream_size _ _ _)]
+  have hR : PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+        (rejectStreamAdv kem cipher macS kdfS streamS geom A viewU finU)
+      = $ᵗ (Vector UInt8 32 × Vector UInt8 16) >>= fun s => K s.2 s.1 := rfl
+  rw [h0, hR]
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective
+    (g := fun (kp : Vector UInt8 48)
+      (t : Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32) => (kp, t)) hb
+    (fun u => K u.2.1 u.2.2.2)).symm ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 48))
+    ($ᵗ (Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32) >>= fun t => K t.1 t.2.2)) ?_
+  refine EvalDistEq.trans (evalDistEq_pair_of_bijective
+    (g := fun (iv : Vector UInt8 16) (r : Vector UInt8 32 × Vector UInt8 32) => (iv, r)) hb
+    (fun t => K t.1 t.2.2)).symm ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun iv =>
+    (evalDistEq_pair_of_bijective
+      (g := fun (km ke : Vector UInt8 32) => (km, ke)) hb (fun r => K iv r.2)).symm) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun iv =>
+    OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 32))
+      ($ᵗ (Vector UInt8 32) >>= fun ke => K iv ke)) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ fun iv ke => K iv ke) ?_
+  exact evalDistEq_pair_of_bijective
+    (g := fun (ke : Vector UInt8 32) (iv : Vector UInt8 16) => (ke, iv)) hb
+    (fun s => K s.2 s.1)
 
 /-! ## The keystream of the original's layer at the relay -/
 
@@ -621,43 +704,19 @@ theorem nextReject_eq_prg (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Ad
       = Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
         (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names
           A))}[x = true] := by
-  refine EvalDistEq.prEvent_eq ?_ _
-  have hb : ∀ {α β : Type},
-      Function.Bijective (Function.uncurry fun (a : α) (b : β) => (a, b)) :=
-    fun {_ _} => Function.bijective_id
-  let K : Vector UInt8 16 → Vector UInt8 32 → ProbComp Bool := fun iv ke =>
-    nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A
-      ((keystreamPRG streamS geom).gen (ke, iv))
-  have h0 : keyedGameH cipher macS kdfS streamS geom
+  have h := keyedReject_eq_prg kem cipher macS kdfS streamS geom
+    (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+    (fun ch o _ U => nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o U)
+        (fun _ _ _ out => out)
+    (fun _ _ _ _ => rfl) (fun _ _ _ _ => rfl)
+  have e : rejectStreamAdv kem cipher macS kdfS streamS geom
         (nextAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
-        (fun _ _ _ _ _ => none)
-      = $ᵗ KeyTuple >>= fun u => K u.2.1 u.2.2.2 := by
-    unfold keyedGameH
-    simp only [K, nextStreamAdv, nextStreamAdvF, nextSetup, nextView, ksOf, keystreamPRG, id_map',
-      Cryptlib.Util.Bytes.ofVector_toVecN _ (streamS.keystream_size _ _ _)]
-  have hR : PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
-        (nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)
-      = $ᵗ (Vector UInt8 32 × Vector UInt8 16) >>= fun s => K s.2 s.1 := rfl
-  rw [h0, hR]
-  refine EvalDistEq.trans (evalDistEq_pair_of_bijective
-    (g := fun (kp : Vector UInt8 48)
-      (t : Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32) => (kp, t)) hb
-    (fun u => K u.2.1 u.2.2.2)).symm ?_
-  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 48))
-    ($ᵗ (Vector UInt8 16 × Vector UInt8 32 × Vector UInt8 32) >>= fun t => K t.1 t.2.2)) ?_
-  refine EvalDistEq.trans (evalDistEq_pair_of_bijective
-    (g := fun (iv : Vector UInt8 16) (r : Vector UInt8 32 × Vector UInt8 32) => (iv, r)) hb
-    (fun t => K t.1 t.2.2)).symm ?_
-  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun iv =>
-    (evalDistEq_pair_of_bijective
-      (g := fun (km ke : Vector UInt8 32) => (km, ke)) hb (fun r => K iv r.2)).symm) ?_
-  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun iv =>
-    OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 32))
-      ($ᵗ (Vector UInt8 32) >>= fun ke => K iv ke)) ?_
-  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ fun iv ke => K iv ke) ?_
-  exact evalDistEq_pair_of_bijective
-    (g := fun (ke : Vector UInt8 32) (iv : Vector UInt8 16) => (ke, iv)) hb
-    (fun s => K s.2 s.1)
+        (fun ch o _ U => nextViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 names ch o
+            U) (fun _ _ _ out => out)
+      = nextStreamAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A := by
+    funext U'
+    simp only [rejectStreamAdv, nextStreamAdv, nextStreamAdvF, nextSetup, id_map']
+  rw [h, e]
 
 /-! ## World 1 with both keystreams uniform -/
 
