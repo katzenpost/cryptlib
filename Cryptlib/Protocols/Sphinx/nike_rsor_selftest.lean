@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Cryptlib.Protocols.Sphinx.Geometry
 import Cryptlib.Protocols.Sphinx.NIKESphinxRSOR
+import Cryptlib.Protocols.Sphinx.NIKESphinxHeaderFn
 import Cryptlib.Primitives.NIKE.Schemes
 
 /-!
@@ -163,6 +164,34 @@ def runSenderReply (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidForNIKE n
     ++ s!"answered {answers} times: {if ok then "ok" else "FAIL"}")
   pure ok
 
+/-- A packet from each hop's group element and keys. On the sender's own keys and the elements
+they blind, `nikePktFn` must give the packet `newNIKEPacket` builds. -/
+def runPacketFn (nike : NIKE) (geom : Geometry) (nFwd : Nat) : IO Bool := do
+  let fwd ← (List.range nFwd).mapM fun _ => newRelay nike
+  let fh := fwd.map (·.1)
+  if h : fh.length ≤ geom.nrHops ∧ (fh.map (·.name)).Nodup then
+    let hops := RSOR.path nike (⟨fh, h.1, h.2⟩ : Cryptlib.Protocols.RSOR.Route geom.nrHops Name
+      (RSOR.Key nike)) [.recipient (← randomVector 32)]
+    let d ← randomDraw nike geom
+    let payload := Cryptlib.Util.Bytes.ofVector (← randomVector geom.forwardPayloadLength)
+    let keys := (RSOR.hopKeys nike kdfS (RSOR.clientKey nike geom d) hops hops.size).toArray
+    let want := newNIKEPacket nike wbCipher macS kdfS streamS geom
+      (Cryptlib.Util.Bytes.ofVector d.1) (RSOR.filler nike geom hops d) hops payload
+    let got := nikePktFn geom
+      (Cryptlib.Protocols.Sphinx.KEMSphinx.keysKs geom streamS keys)
+      (Cryptlib.Protocols.Sphinx.KEMSphinx.keysTag macS keys)
+      (Cryptlib.Protocols.Sphinx.KEMSphinx.keysEnc wbCipher keys)
+      (groupElem nike (RSOR.clientKey nike geom d) keys) (RSOR.filler nike geom hops d) hops
+      payload
+    match want with
+    | .ok p =>
+      if got = some p then pure true
+      else IO.eprintln "  runPacketFn: nikePktFn differs from newNIKEPacket" *> pure false
+    | .error e => IO.eprintln s!"  runPacketFn: newNIKEPacket failed: {e}" *> pure false
+  else
+    IO.eprintln "  runPacketFn: the path is not a route"
+    pure false
+
 def runSuite (schemeName : String) (nike : NIKE) : IO Bool := do
   IO.println s!"-- {schemeName} --"
   let geom := ofNIKEWith schemeName nike 103 true 5
@@ -177,6 +206,11 @@ def runSuite (schemeName : String) (nike : NIKE) : IO Bool := do
       ++ (if roundOk then "ok" else "FAIL"))
     ok := ok && roundOk
   ok := (← runSenderReply nike geom hvalid h16 5) && ok
+  for n in [1, 3, 5] do
+    let fnOk ← runPacketFn nike geom n
+    IO.println (s!"a packet from the hops' group elements and keys ({n} hops): "
+      ++ (if fnOk then "ok" else "FAIL"))
+    ok := ok && fnOk
   pure ok
 
 def main : IO UInt32 := do

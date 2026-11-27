@@ -120,6 +120,7 @@ import Cryptlib.Protocols.Sphinx.KEMSphinxSLURelay
 import Cryptlib.Protocols.Sphinx.KEMSphinxSLUEvents
 import Cryptlib.Protocols.Sphinx.KEMSphinxSTI
 import Cryptlib.Protocols.Sphinx.NIKESphinxRSOR
+import Cryptlib.Protocols.Sphinx.NIKESphinxHeaderFn
 import Cryptlib.Protocols.Sphinx.Schemes
 import Cryptlib.Protocols.GroupComm
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.AckCodec

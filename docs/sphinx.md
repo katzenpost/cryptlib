@@ -493,6 +493,11 @@ paper proves it. The plan is to state the game of step 1 for our NIKE and KDF an
 advantage as the term the theorems carry, as KEM Sphinx carries the KEM and KDF terms. Gap
 Diffie–Hellman is then the assumption behind that term, by the paper's Theorem 3.
 
+In Lean so far (`NIKESphinxHeaderFn.lean`): a packet as a function of each hop's group element,
+header keystream, tagging function and payload encryption (`nikePktFn`, `groupElem`). The
+self-test compares it with `newNIKEPacket` on the sender's own keys (`runPacketFn`); that the
+two agree is not proved yet.
+
 Steps, in order:
 
 - the game: a hop's derived keys, blinding factor included, replaced by uniform ones, with the
