@@ -708,6 +708,12 @@ for it:
      of the uniform keystream, then the padding in front (`hdrMsg_struct`). Xoring a fixed
      mask into the head turns them into the bytes of the replacement, whose path ends at the
      relay. After this the onion shown does not depend on the hops after the relay.
+     Proved (`hdrMsg_shift`, at the level of the header function): what the relay's keystream
+     masks is its fragment and the next layer's routing information (`hopContent`,
+     `hdrMsg_content`), which read the hops in front through the padding only
+     (`hopContent_congr`, `padAt_congr_rest`); shifting the head of the keystream by the
+     difference of the two contents gives the replacement's bytes (`xorBytes_shift`, shared
+     with the KEM proof). Not yet applied to the game.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).

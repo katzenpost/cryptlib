@@ -4,6 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Cryptlib.Protocols.Sphinx.NIKESphinxGame
+import Cryptlib.Protocols.Sphinx.KEMSphinxPad
 
 namespace Cryptlib.Protocols.Sphinx.NIKESphinx
 
@@ -866,6 +867,150 @@ theorem encTrace_size_const (enc : ℕ → ByteArray → ByteArray) (n : ℕ) (i
   | base => rw [encTrace_const enc n init e j hj he]
   | succ t ht ih =>
     rw [encTrace_succ, hsz (n - 1 - t) (by omega), ih (by omega)]
+
+omit nike in
+/-- The bytes under the tag of the layer after hop `j` read the hops up to `j` through the
+padding after hop `j` only. -/
+theorem hdrMsg_congr_tail (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ge ge' : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (j : ℕ)
+    (hj : j + 1 < path.size)
+    (h : ∀ i, j < i → ks i = ks' i ∧ tag i = tag' i ∧ ge i = ge' i)
+    (hp : padAt geom ks j = padAt geom ks' j) :
+    hdrMsg geom ks tag ge filler path (j + 1) = hdrMsg geom ks' tag' ge' filler path (j + 1) := by
+  have hpad : ∀ k : ℕ → ByteArray, (if j + 1 > 0 then padAt geom k (j + 1 - 1)
+      else ByteArray.empty) = padAt geom k j := fun k => ite_eq_left (Nat.succ_pos j)
+  unfold hdrMsg
+  rw [nikeHdrTrace_congr_tail geom ks ks' tag tag' ge ge' filler path j h hp
+    (path.size - 1 - (j + 1)) (by omega), hpad, hpad, hp]
+  simp only [(h (j + 1) (by omega)).1, (h (j + 1) (by omega)).2.2]
+
+omit nike in
+/-- The padding after hop `j` reads hop `j`'s keystream from its tail on, and the hops in front. -/
+theorem padAt_congr_rest (ks ks' : ℕ → ByteArray) (hks : ∀ k, (ks k).size = (geom.routingInfoLength
+    + geom.perHopRoutingInfoLength))
+    (hks' : ∀ k, (ks' k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (j : ℕ) (h
+        : ∀ i < j, ks i = ks' i)
+    (hr : (ks j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength) (geom.routingInfoLength + geom.perHopRoutingInfoLength) =
+        (ks' j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength) (geom.routingInfoLength + geom.perHopRoutingInfoLength)) :
+    padAt geom ks j = padAt geom ks' j := by
+  have hp : (if j > 0 then padAt geom ks (j - 1) else ByteArray.empty)
+      = (if j > 0 then padAt geom ks' (j - 1) else ByteArray.empty) := by
+    by_cases hj : j > 0
+    · rw [ite_eq_left hj, ite_eq_left hj]
+      exact KEMSphinx.padAt_congr geom ks ks' (j - 1) fun m hm => h m (by omega)
+    · rw [ite_eq_right hj, ite_eq_right hj]
+  rw [padAt_step geom ks hks j, padAt_step geom ks' hks' j, hp, hks, hks', hr]
+
+/-- What hop `i`'s keystream masks in its layer: the hop's fragment, then the next layer's
+routing information. It does not read the head of hop `i`'s keystream. -/
+def hopContent (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (i : ℕ) : ByteArray :=
+  (match nikeFragment geom path (tag (i + 1) (hdrMsg geom ks tag ge filler path (i + 1))) i with
+    | .ok F => F
+    | .error _ => ByteArray.empty)
+  ++ (hdrMsg geom ks tag ge filler path (i + 1)).extract (2 + nike.publicKeySize)
+    (2 + nike.publicKeySize + (((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+        geom.perHopRoutingInfoLength) - geom.perHopRoutingInfoLength))
+
+/-- **The bytes under the tag of a layer before the last, by their content**: the element,
+`hopContent` masked by the head of the hop's keystream, and the padding of the hops in
+front. -/
+theorem hdrMsg_content (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (i : ℕ)
+    (hi : i + 1 < path.size) (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength) (hrouting :
+        geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hn : path.size ≤ geom.nrHops)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength) (hks : ∀ k,
+        (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (htag : ∀ m x, (tag m x).size = macLength) (hcmd : path[i]!.commands = [])
+    (hT : (nikeHdrTrace geom ks tag ge filler path (path.size - i)).isSome) (hge1 : (ge (i +
+        1)).size = nike.publicKeySize) :
+    hdrMsg geom ks tag ge filler path i = v0AD ++ ge i
+        ++ (xorBytes (hopContent nike geom ks tag ge filler path i) ((ks i).extract 0
+            ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+            geom.perHopRoutingInfoLength))
+          ++ (if i > 0 then padAt geom ks (i - 1) else ByteArray.empty))
+      ∧ (hopContent nike geom ks tag ge filler path i).size = ((geom.routingInfoLength +
+          geom.perHopRoutingInfoLength) - (i + 1) * geom.perHopRoutingInfoLength) := by
+  obtain ⟨F, B, hm0, hm1, hF, hFB, -, -, -, hfr⟩ := hdrMsg_struct geom ks tag ge filler path i hi
+    hnnh hle hrouting hn hfill hks htag hcmd hT
+  have hv : v0AD.size = 2 := rfl
+  have hva : (v0AD ++ ge (i + 1)).size = 2 + nike.publicKeySize := by
+    rw [ByteArray.size_append, hv, hge1]
+  have hB : (hdrMsg geom ks tag ge filler path (i + 1)).extract (2 + nike.publicKeySize)
+      (2 + nike.publicKeySize + (((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1)
+          * geom.perHopRoutingInfoLength) - geom.perHopRoutingInfoLength)) = B := by
+    rw [hm1, Util.Bytes.extract_append_of_le _ _ (by rw [ByteArray.size_append, hva]; omega)]
+    have := Util.Bytes.extract_append_right (v0AD ++ ge (i + 1)) B
+    rw [hva] at this
+    rw [show ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+        geom.perHopRoutingInfoLength) - geom.perHopRoutingInfoLength = B.size by omega]
+    exact this
+  have hc : hopContent nike geom ks tag ge filler path i = F ++ B := by
+    unfold hopContent
+    rw [hfr, hB]
+  rw [hc]
+  exact ⟨hm0, by rw [ByteArray.size_append]; exact hFB⟩
+
+/-- `hopContent` reads the hops up to `j` through the padding after hop `j` only. -/
+theorem hopContent_congr (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ge ge' : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (j : ℕ)
+    (hj : j + 1 < path.size)
+    (h : ∀ i, j < i → ks i = ks' i ∧ tag i = tag' i ∧ ge i = ge' i)
+    (hp : padAt geom ks j = padAt geom ks' j) :
+    hopContent nike geom ks tag ge filler path j = hopContent nike geom ks' tag' ge' filler path j
+        := by
+  unfold hopContent
+  rw [hdrMsg_congr_tail geom ks ks' tag tag' ge ge' filler path j hj h hp,
+    (h (j + 1) (by omega)).2.1]
+
+/-- **The keystream shift.** The bytes under the tag of hop `i` on a path that goes on are its
+bytes on a path that ends at it, when the hops in front and the element are the same and the
+head of its keystream is shifted by the difference of what the two mask. -/
+theorem hdrMsg_shift (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (i : ℕ)
+    (hi : i + 1 < path.size) (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength) (hrouting :
+        geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hn : path.size ≤ geom.nrHops)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength) (hks : ∀ k,
+        (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (htag : ∀ m x, (tag m x).size = macLength) (hcmd : path[i]!.commands = [])
+    (hT : (nikeHdrTrace geom ks tag ge filler path (path.size - i)).isSome) (hge1 : (ge (i +
+        1)).size = nike.publicKeySize)
+    (ks' : ℕ → ByteArray) (tag' : ℕ → ByteArray → ByteArray) (ge' : ℕ → ByteArray)
+    (filler' : ByteArray) (path' : Array PathHop) (hi' : i + 1 = path'.size) (F' : ByteArray)
+    (hF' : nikeFragment geom path' ByteArray.empty i = .ok F')
+    (hX' : (F' ++ (if geom.nrHops > path'.size then filler' else ByteArray.empty)).size =
+        ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+        geom.perHopRoutingInfoLength))
+    (hks' : ∀ k, (ks' k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hge : ge
+        i = ge' i) (hfront : ∀ m < i, ks m = ks' m)
+    (hshift : (ks i).extract 0 ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+        geom.perHopRoutingInfoLength) = xorBytes ((ks' i).extract 0 ((geom.routingInfoLength +
+        geom.perHopRoutingInfoLength) - (i + 1) * geom.perHopRoutingInfoLength))
+      (xorBytes (F' ++ (if geom.nrHops > path'.size then filler' else ByteArray.empty))
+        (hopContent nike geom ks tag ge filler path i))) :
+    hdrMsg geom ks tag ge filler path i = hdrMsg geom ks' tag' ge' filler' path' i := by
+  obtain ⟨hm, hc⟩ := hdrMsg_content nike geom ks tag ge filler path i hi hnnh hle hrouting hn
+    hfill hks htag hcmd hT hge1
+  have hp : (if i > 0 then padAt geom ks (i - 1) else ByteArray.empty) = (if i > 0 then padAt geom
+      ks' (i - 1) else ByteArray.empty) := by
+    by_cases hj : i > 0
+    · rw [ite_eq_left hj, ite_eq_left hj]
+      exact KEMSphinx.padAt_congr geom ks ks' (i - 1) fun m hm => hfront m (by omega)
+    · rw [ite_eq_right hj, ite_eq_right hj]
+  have hsz : ((ks' i).extract 0 ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1)
+      * geom.perHopRoutingInfoLength)).size = ((geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) - (i + 1) * geom.perHopRoutingInfoLength) := by
+    rw [ByteArray.size_extract, hks']
+    omega
+  rw [hm, hdrMsg_last geom ks' tag' ge' filler' path' i hi' F' hF', hshift,
+    KEMSphinx.xorBytes_shift _ _ _ (hc.trans hX'.symm) (hsz.trans hc.symm), hge, hp]
+  simp only [ByteArray.append_assoc]
 
 end Layer
 
