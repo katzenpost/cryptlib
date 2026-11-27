@@ -366,6 +366,17 @@ theorem layer_zero_pktFn (hops : Array PathHop) (d : RSOR.Draw nike geom)
     rw [(hchain n (by omega)).2.2]
     rfl
 
+/-- The sender's hop keys read the relays' public keys only. -/
+theorem hopKeys_congr_pub (c : nike.PrivateKey) (hops hops' : Array PathHop) (n : ℕ)
+    (h : ∀ i < n, hops[i]!.publicKey = hops'[i]!.publicKey) :
+    RSOR.hopKeys nike kdfS c hops n = RSOR.hopKeys nike kdfS c hops' n := by
+  induction n with
+  | zero => rfl
+  | succ n ih =>
+    rw [RSOR.hopKeys_succ, RSOR.hopKeys_succ, ih fun i hi => h i (by omega)]
+    unfold RSOR.hopKey
+    rw [ih fun i hi => h i (by omega), h n (by omega)]
+
 /-- The sender's keys for the first `i` hops are the first `i` of its keys. -/
 theorem hopKeys_take (c : nike.PrivateKey) (hops : Array PathHop) (i n : ℕ) (h : i ≤ n) :
     (RSOR.hopKeys nike kdfS c hops n).take i = RSOR.hopKeys nike kdfS c hops i := by

@@ -47,13 +47,14 @@ def setKey (r : RSOR.Randomness nike geom) (d : Vector UInt8 nike.privateKeySize
     RSOR.Randomness nike geom :=
   ((d, r.1.2), r.2)
 
-/-- **On the sender's own keys it is the sender's onion**, when that onion builds. -/
+/-- **On the sender's own keys it is the sender's onion**, at any layer, when the onion
+builds. -/
 theorem onionOfKeys_real (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom)
-    (d : Vector UInt8 nike.privateKeySize) (pkt : ByteArray)
+    (d : Vector UInt8 nike.privateKeySize) (pkt : ByteArray) (i : Fin q.fwd.hops.length)
     (h : RSOR.layer nike cipher macS kdfS streamS geom
       (RSOR.path nike q.fwd [.recipient q.receiver]) (setKey r d).1
       (RSOR.body nike macS kdfS streamS geom q (setKey r d)) 0 = .ok pkt) :
-    onionOfKeys nike cipher macS kdfS streamS geom 0 q r
+    onionOfKeys nike cipher macS kdfS streamS geom i q r
         (groupElem nike ((nike.decodePrivateKey d).getD default)
           (RSOR.hopKeys nike kdfS ((nike.decodePrivateKey d).getD default)
             (RSOR.path nike q.fwd [.recipient q.receiver])
@@ -61,11 +62,17 @@ theorem onionOfKeys_real (q : RSOR.Request nike geom) (r : RSOR.Randomness nike 
         (RSOR.hopKeys nike kdfS ((nike.decodePrivateKey d).getD default)
           (RSOR.path nike q.fwd [.recipient q.receiver])
           (RSOR.path nike q.fwd [.recipient q.receiver]).size)
-      = RSOR.form nike cipher macS kdfS streamS geom q (setKey r d) q.first := by
-  have hf : RSOR.form nike cipher macS kdfS streamS geom q (setKey r d) q.first
-      = split geom pkt := by
+      = RSOR.form nike cipher macS kdfS streamS geom q (setKey r d) i := by
+  have hf : RSOR.form nike cipher macS kdfS streamS geom q (setKey r d) i
+      = split geom (peels nike cipher streamS geom
+        (RSOR.hopKeys nike kdfS (RSOR.clientKey nike geom (setKey r d).1) (RSOR.path nike q.fwd
+            [.recipient q.receiver]) (RSOR.path nike q.fwd [.recipient q.receiver]).size)
+        i pkt) := by
     unfold RSOR.form
-    rw [show ((q.first : Fin q.fwd.hops.length) : ℕ) = 0 from rfl, h]
+    rw [layer_peels nike cipher macS kdfS streamS geom _ _ _ (i : ℕ) (RSOR.path nike q.fwd
+        [.recipient q.receiver]).size
+      (by rw [RSOR.path_size]; exact le_of_lt i.isLt), h]
+    rfl
   have hp := layer_zero_pktFn nike cipher macS kdfS streamS geom _ _ _ pkt h
     (RSOR.path_keys nike q.fwd [.recipient q.receiver])
   rw [hf]
@@ -78,7 +85,6 @@ theorem onionOfKeys_real (q : RSOR.Request nike geom) (r : RSOR.Randomness nike 
     funext fun i => (groupElem_eq_blindElem nike _ _ i).symm]
   dsimp only [setKey, RSOR.clientKey, RSOR.filler, RSOR.body, RSOR.surb] at hp ⊢
   rw [hp]
-  rfl
 
 omit cipher macS kdfS streamS in
 /-- Drawing the challenger's randomness and a secret, and putting the secret on the forward
@@ -589,8 +595,9 @@ theorem play_false_sub_keyGame_le (names : Role → Name) (A : (Protocols.RSOR.f
     < (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]).size by
       rw [hsz]; exact hpos)).symm
   dsimp only [forwardView, fwd0]
-  rw [onionOfKeys_real nike cipher macS kdfS streamS geom D.c.req D.o D.d pkt hpkt]
-  rfl
+  have e := onionOfKeys_real nike cipher macS kdfS streamS geom D.c.req D.o D.d pkt
+    D.c.req.first hpkt
+  rw [show onionOfKeys nike cipher macS kdfS streamS geom 0 D.c.req D.o _ _ = _ from e]
 
 /-- **World 0 of TLU→ with the honest relay's keys replaced.** Playing world 0 with the relay's
 keys for the adversary's onion uniform, the hops after it derived from them, and the relay
@@ -2088,6 +2095,35 @@ theorem forward_world0_le (names : Role → Name) (A : (Protocols.RSOR.forwardUn
         hvalid hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
         A))}[b = true]).toReal
   linarith
+
+/-! ## World 1: the replacement onion -/
+
+/-- What the challenger draws in world 1: the randomness of the adversary's own onion, and the
+replacement's message, receiver and randomness. -/
+def shortDraw : ProbComp (RSOR.Randomness nike geom × Msg geom × Name
+    × RSOR.Randomness nike geom) := do
+  let r ← $ᵗ (RSOR.Randomness nike geom)
+  let m ← $ᵗ (Msg geom)
+  let n ← $ᵗ Name
+  let r' ← $ᵗ (RSOR.Randomness nike geom)
+  return (r, m, n, r')
+
+/-- World 1: the replacement that ends at the honest relay, and the relay patched around the
+replacement's layer there. The keys replaced are those of the forward path up to the relay. -/
+def fwd1 (names : Role → Name) : FwdWorld nike cipher macS kdfS streamS geom hvalid hmactag h16
+    names where
+  Oth := RSOR.Randomness nike geom × Msg geom × Name × RSOR.Randomness nike geom
+  draw := shortDraw nike geom
+  req ch o := ch.c.short o.2.1 o.2.2.1
+  rnd o := o.2.2.2
+  patch ch o mine := ch.c.patch o.1 mine
+  hops ch := RSOR.path nike (ch.c.req.fwd.take (ch.c.pos + 1)) []
+  size_eq ch o := (RSOR.path_size nike _ _).trans (RSOR.path_size nike _ _).symm
+  pos_lt ch := lt_of_lt_of_eq
+    (show (ch.c.pos : ℕ) < (List.take ((ch.c.pos : ℕ) + 1) ch.c.req.fwd.hops).length by
+      rw [List.length_take]
+      exact lt_min (Nat.lt_succ_self _) ch.c.pos.isLt)
+    (RSOR.path_size nike (ch.c.req.fwd.take (ch.c.pos + 1)) []).symm
 
 end Forward
 
