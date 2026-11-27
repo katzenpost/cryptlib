@@ -532,6 +532,15 @@ A sender's packet is `nikePktFn` on the sender's hop keys and the elements they 
 game's two worlds differ in the keys alone. This is not yet used: the reduction of TLU→ to the
 game is the next step.
 
+The reduction, for any property and any of the three honest roles (`NIKESphinxProp.lean`): the
+relay whose keys the game replaces answers through an oracle (`viaOracle`, `viaOracle_honest`),
+and an adversary of the property gives an adversary on the key game (`propAdvOf`), which draws
+the other two honest relays' keys and builds the world it shows from the first group element
+and the hops' keys. Played by that adversary, the key game's real world is the property's game
+against the honest relays on the world built from the sender's own keys
+(`keyGame_true_propAdvOf`). What is left for TLU→ is to give the worlds of that game as such
+views, and then the steps on the replaced keys: MAC, keystream, payload cipher.
+
 Steps, in order:
 
 - the game: a hop's derived keys, blinding factor included, replaced by uniform ones, with the

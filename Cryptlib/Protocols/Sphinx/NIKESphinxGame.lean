@@ -247,9 +247,9 @@ def keysOfDraw (u : KeyTuple × Vector UInt8 32) : HopKeys where
 /-- An adversary on the key game. With the relay's oracle it chooses a path and the relay's
 place on it; then it is given the sender's group element and every hop's keys. -/
 structure KeyAdversary where
-  St : Type
-  pre : RSOR.Key nike → OracleComp procSpec ((Array PathHop × ℕ) × St)
-  post : St → ByteArray → List HopKeys → OracleComp procSpec Bool
+  St : RSOR.Key nike → Type
+  pre : (pk : RSOR.Key nike) → OracleComp procSpec ((Array PathHop × ℕ) × St pk)
+  post : {pk : RSOR.Key nike} → St pk → ByteArray → List HopKeys → OracleComp procSpec Bool
 
 variable {nike}
 
