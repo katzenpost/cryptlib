@@ -175,4 +175,32 @@ theorem gameAll_sub_gameOnly_le (good : X → Prop)
 
 end Mac
 
+/-! ## Answering some packets in front of a relay -/
+
+/-- In front of a relay's oracle: the packets `chal` picks are answered by `f`, and the rest are
+passed on. -/
+def first (chal : ByteArray → Bool) (f : ByteArray → ProcResult) :
+    QueryImpl procSpec (OracleComp procSpec) :=
+  QueryImpl.add unifSpec.passthrough fun pkt =>
+    if chal pkt = true then pure (f pkt)
+    else (liftM ((ByteArray →ₒ ProcResult).query pkt) : OracleComp procSpec ProcResult)
+
+/-- `first` in front of a relay with the answers `ans` is a relay with the answers `f` for the
+packets `chal` picks, and `ans` for the rest. -/
+theorem relayImpl_comp_first (ans : ByteArray → ProcResult) (chal : ByteArray → Bool)
+    (f : ByteArray → ProcResult) :
+    relayImpl ans ∘ₛ first chal f
+      = relayImpl (fun pkt => if chal pkt = true then f pkt else ans pkt) := by
+  funext t
+  cases t with
+  | inl t =>
+    simp [first, relayImpl, QueryImpl.add_eq_hAdd]
+    exact (QueryImpl.simulateQ_add_liftM_query_left (QueryImpl.id' unifSpec) _ t).trans (by simp)
+  | inr pkt =>
+    simp only [first, relayImpl, QueryImpl.apply_compose, QueryImpl.add_eq_hAdd,
+      QueryImpl.add_apply_inr]
+    split_ifs
+    · simp
+    · rw [QueryImpl.simulateQ_add_liftM_query_right]
+
 end Cryptlib.Protocols.Sphinx.Relay
