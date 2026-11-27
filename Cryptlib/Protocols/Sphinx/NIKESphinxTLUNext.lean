@@ -167,11 +167,9 @@ def strOnion (names : Role → Name) (W : FwdWorld nike cipher macS kdfS streamS
     (Util.Bytes.ofVector U) (Util.Bytes.ofVector (strTag nike cipher macS kdfS streamS geom hvalid
         hmactag h16 names W x U)) (Util.Bytes.ofVector u)
 
-/-- The second phase of world 1 as an adversary on the key game for the original onion plays
-it: the replacement's element is answered in front of the relay's oracle, under one header, from
-the keystream `U` and the ideal cipher's blocks `u` and `v`; the original's next layer is built
-from the group element `a` and the keys `ks` it is handed. The relay's own key is not used. -/
-def nextPost (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) {pk
+/-- The second phase of the adversary on the original onion, with the original's next layer
+`nx` given. -/
+def nextPostN (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) {pk
     : RSOR.Key nike}
     (ch : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names pk) (ast : A.State)
         (log : Protocols.RSOR.Log 𝒮)
@@ -179,15 +177,13 @@ def nextPost (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :
         streamS geom hvalid hmactag h16 names).Oth)
     (d' : Vector UInt8 nike.privateKeySize) (u v : Vector UInt8 (geom.payloadTagLength +
         geom.forwardPayloadLength))
-    (a : ByteArray) (ks : List HopKeys) : OracleComp procSpec Bool :=
+    (nxt : Onion geom → Onion geom) : OracleComp procSpec Bool :=
   let x : StrX nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
       kdfS streamS geom hvalid hmactag h16 names) A := (km, seed, ⟨(pk, default), ch.keys, ch.c,
       ast, log, o, d'⟩)
   let mine := strOnion nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
       cipher macS kdfS streamS geom hvalid hmactag h16 names) x U u ch.c.pos
-  let next := if (ch.c.pos : ℕ) + 1 < ch.c.req.fwd.hops.length then
-      onionOfKeys nike cipher macS kdfS streamS geom (ch.c.pos + 1) ch.c.req o.1 a ks
-    else mine
+  let next := nxt mine
   simulateQ (Relay.first
       (fun pkt => decide (pkt.extract 2 (2 + nike.publicKeySize)
         = drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
@@ -226,6 +222,24 @@ def nextPost (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :
         A.guess ast (strOnion nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
             nike cipher macS kdfS streamS geom hvalid hmactag h16 names) x U u 0)
       else pure false)).run' log)
+
+/-- The second phase of world 1 as an adversary on the key game for the original onion plays
+it: the replacement's element is answered in front of the relay's oracle, under one header, from
+the keystream `U` and the ideal cipher's blocks `u` and `v`; the original's next layer is built
+from the group element `a` and the keys `ks` it is handed. The relay's own key is not used. -/
+def nextPost (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) {pk
+    : RSOR.Key nike}
+    (ch : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names pk) (ast : A.State)
+        (log : Protocols.RSOR.Log 𝒮)
+    (U : KEMSphinx.Keystream geom) (km seed : Vector UInt8 32) (o : (fwd1 nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names).Oth)
+    (d' : Vector UInt8 nike.privateKeySize) (u v : Vector UInt8 (geom.payloadTagLength +
+        geom.forwardPayloadLength))
+    (a : ByteArray) (ks : List HopKeys) : OracleComp procSpec Bool :=
+  nextPostN nike cipher macS kdfS streamS geom hvalid hmactag h16 names A ch ast log U km seed o d'
+    u v fun mine => if (ch.c.pos : ℕ) + 1 < ch.c.req.fwd.hops.length then
+      onionOfKeys nike cipher macS kdfS streamS geom (ch.c.pos + 1) ch.c.req o.1 a ks
+    else mine
 
 /-- **The adversary on the key game for the original onion.** Its first phase is the first phase
 of TLU→ with the original's forward path as the path of keys. Its second phase draws what the
@@ -281,7 +295,7 @@ theorem nextPost_real (names : Role → Name) (A : (Protocols.RSOR.forwardUnlink
           (if (ch.c.pos : ℕ) + 1 < ch.c.req.fwd.hops.length then
             onionOfKeys nike cipher macS kdfS streamS geom (ch.c.pos + 1) ch.c.req o.1 a ks
           else mine) o.1 mine) := by
-  unfold nextPost
+  unfold nextPost nextPostN
   dsimp only
   rw [show procImpl nike cipher macS kdfS streamS geom k.2
       = relayImpl (procWith nike cipher macS streamS geom (relayKeys nike kdfS k.2)) from rfl,
@@ -1120,6 +1134,277 @@ theorem keyGame_false_nextAdv_sub_le (names : Role → Name) (A : (Protocols.RSO
             none)}[b = true]).toReal := by
   rw [keyGame_false_nextAdv]
   exact Relay.gameHand_sub_le _ _ _ _ _ _
+
+/-! ## The next layer's keystream -/
+
+/-- A hop's draws, from its header key and IV and its other draws. -/
+def keys4 (s : Vector UInt8 32 × Vector UInt8 16)
+    (y : Vector UInt8 48 × Vector UInt8 32 × Vector UInt8 32) :
+    KEMSphinx.KeyTuple × Vector UInt8 32 :=
+  ((y.1, s.2, y.2.1, s.1), y.2.2)
+
+theorem keys4_bijective : Function.Bijective (Function.uncurry keys4) :=
+  Function.bijective_iff_has_inverse.2
+    ⟨fun w => ((w.1.2.2.2, w.1.2.1), (w.1.1, w.1.2.2.1, w.2)),
+      fun ⟨⟨_, _⟩, _, _, _⟩ => rfl, fun ⟨⟨_, _, _, _⟩, _⟩ => rfl⟩
+
+/-- The second phase of `nextAdv` against the relay that refuses the element `e`, the
+original's next layer given by `nxt`. -/
+def nextRunN (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) (p :
+    NextPre nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+    (U : KEMSphinx.Keystream geom) (km seed : Vector UInt8 32) (o : (fwd1 nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names).Oth)
+    (d' : Vector UInt8 nike.privateKeySize) (u v : Vector UInt8 (geom.payloadTagLength +
+        geom.forwardPayloadLength))
+    (e : ByteArray) (nxt : Onion geom → Onion geom) : ProbComp Bool :=
+  simulateQ (relayImpl fun pkt =>
+      if decide (pkt.extract 2 (2 + nike.publicKeySize) = e) = true then none
+      else procWith nike cipher macS streamS geom (relayKeys nike kdfS p.k.2) pkt)
+    (nextPostN nike cipher macS kdfS streamS geom hvalid hmactag h16 names A (⟨p.keys, p.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names p.k.1) p.st p.log U
+        km seed o d' u v
+      nxt)
+
+/-- The draws of the key game's other world for `nextAdv`, the relay's header key and IV for
+the original drawn apart. -/
+structure Next4 (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    where
+  s : Vector UInt8 32 × Vector UInt8 16
+  y : Vector UInt8 48 × Vector UInt8 32 × Vector UInt8 32
+  p : NextPre nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  U : KEMSphinx.Keystream geom
+  km : Vector UInt8 32
+  seed : Vector UInt8 32
+  o : (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth
+  d' : Vector UInt8 nike.privateKeySize
+  u : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+  v : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+
+/-- The draws of `Next4` after the relay's keys for the original. -/
+def next4Rest (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (s : Vector UInt8 32 × Vector UInt8 16)
+    (y : Vector UInt8 48 × Vector UInt8 32 × Vector UInt8 32) : ProbComp (Next4 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names A) := do
+  let p ← nextPre nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
+  let U ← $ᵗ (KEMSphinx.Keystream geom)
+  let km ← $ᵗ (Vector UInt8 32)
+  let seed ← $ᵗ (Vector UInt8 32)
+  let o ← shortDraw nike geom
+  let d' ← $ᵗ (Vector UInt8 nike.privateKeySize)
+  let u ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+  let v ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+  return ⟨s, y, p, U, km, seed, o, d', u, v⟩
+
+/-- The draw of `Next4`. -/
+def next4Draw (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    ProbComp (Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) := do
+  let s ← $ᵗ (Vector UInt8 32 × Vector UInt8 16)
+  let y ← $ᵗ (Vector UInt8 48 × Vector UInt8 32 × Vector UInt8 32)
+  next4Rest nike cipher macS kdfS streamS geom hvalid hmactag h16 names A s y
+
+/-- The game after step 3 on a draw: the original's next layer built from the replaced keys. -/
+def next4RunK (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) (z
+    : Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) : ProbComp Bool :=
+  nextRunN nike cipher macS kdfS streamS geom hvalid hmactag h16 names A z.p z.U z.km z.seed z.o
+      z.d' z.u z.v (nextElemI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y,
+      z.p))
+    fun mine => if (z.p.c.pos : ℕ) + 1 < z.p.c.req.fwd.hops.length then
+      onionOfKeys nike cipher macS kdfS streamS geom (z.p.c.pos + 1) z.p.c.req z.o.1
+        (groupElem nike ((nike.decodePrivateKey z.p.d0).getD default) (nextKeysI nike cipher macS
+            kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y, z.p)).toArray 0) (nextKeysI nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y, z.p))
+    else mine
+
+/-- The same with the original's next layer built from the relay's header keystream `W`, its
+MAC key and its blinding seed. -/
+def next4RunS (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) (z
+    : Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) (W : ByteArray) :
+    ProbComp Bool :=
+  nextRunN nike cipher macS kdfS streamS geom hvalid hmactag h16 names A z.p z.U z.km z.seed z.o
+      z.d' z.u z.v (nextElemI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 default
+      z.y, z.p))
+    fun mine => if (z.p.c.pos : ℕ) + 1 < z.p.c.req.fwd.hops.length then
+      nextOfStream nike cipher macS kdfS streamS geom z.p.c.req z.o.1
+        (groupElem nike ((nike.decodePrivateKey z.p.d0).getD default) (nextKeysI nike cipher macS
+            kdfS streamS geom hvalid hmactag h16 (keys4 default z.y, z.p)).toArray 0) (nextKeysI
+            nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 default z.y, z.p))
+            z.p.c.pos W
+    else mine
+
+/-- **The adversary against the keystream generator, for the original's next layer**: it plays
+the game after step 3 from the keystream it is given. -/
+def nextStreamAdv (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    :
+    PRGScheme.PRGAdversary (KEMSphinx.Keystream geom) := fun W => do
+  let y ← $ᵗ (Vector UInt8 48 × Vector UInt8 32 × Vector UInt8 32)
+  let z ← next4Rest nike cipher macS kdfS streamS geom hvalid hmactag h16 names A default y
+  next4RunS nike cipher macS kdfS streamS geom hvalid hmactag h16 names A z (Util.Bytes.ofVector W)
+
+/-- The draws for which the original's packet, built with the replaced keys, does not have a
+header of a header's length. -/
+def next4Bad {names : Role → Name} {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary} (z :
+    Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) : Prop :=
+  (z.p.c.pos : ℕ) + 1 < z.p.c.req.fwd.hops.length ∧
+    ∃ st, nikeHdrTrace geom (keysKs geom streamS (nextKeysI nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 (keys4 z.s z.y, z.p)).toArray)
+        (keysTag macS (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s
+            z.y, z.p)).toArray)
+        (blindElem nike (groupElem nike ((nike.decodePrivateKey z.p.d0).getD default) (nextKeysI
+            nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y, z.p)).toArray 0)
+          (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y,
+              z.p)).toArray)
+        (RSOR.filler nike geom (RSOR.path nike z.p.c.req.fwd [.recipient z.p.c.req.receiver])
+            z.o.1.1) (RSOR.path nike z.p.c.req.fwd [.recipient z.p.c.req.receiver]) (RSOR.path nike
+            z.p.c.req.fwd [.recipient z.p.c.req.receiver]).size = some st ∧
+      (v0AD ++ blindElem nike (groupElem nike ((nike.decodePrivateKey z.p.d0).getD default)
+          (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y,
+          z.p)).toArray 0)
+          (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y,
+              z.p)).toArray 0 ++ st.1 ++ st.2).size
+        ≠ 2 + nike.publicKeySize + geom.routingInfoLength + macLength
+
+set_option maxHeartbeats 4000000 in
+/-- The game after step 3, as its draws and then the second phase. -/
+theorem nextGame_none_evalDistEq (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) :
+    nextGame nike cipher macS kdfS streamS geom hvalid hmactag h16 names A (fun _ _ => none) =ᵈ
+        next4Draw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= next4RunK nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names A := by
+  have of_eq : ∀ {a b : ProbComp Bool}, a = b → a =ᵈ b := fun h => h ▸ EvalDistEq.rfl
+  unfold nextGame Relay.gameHand
+  simp only [bind_assoc, pure_bind]
+  refine EvalDistEq.trans (KEMSphinx.evalDistEq_pair_of_bijective keys4_bijective _).symm (of_eq ?_)
+  unfold next4Draw next4Rest next4RunK nextRunN nextRunI nextAdv
+  dsimp only
+  simp only [bind_assoc, pure_bind, simulateQ_bind, KEMSphinx.simulateQ_relayImpl_liftM]
+  rfl
+
+set_option maxHeartbeats 4000000 in
+/-- The keystream generator's real experiment for `nextStreamAdv`, over the same draws. -/
+theorem prgReal_nextStreamAdv (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) :
+    PRGScheme.prgRealExperiment (KEMSphinx.keystreamPRG streamS geom) (nextStreamAdv nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names A)
+      = next4Draw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun z =>
+          next4RunS nike cipher macS kdfS streamS geom hvalid hmactag h16 names A z
+        (Util.Bytes.ofVector ((KEMSphinx.keystreamPRG streamS geom).gen z.s)) := by
+  unfold PRGScheme.prgRealExperiment nextStreamAdv next4Draw next4Rest
+  simp only [bind_assoc, pure_bind]
+  rfl
+
+set_option maxHeartbeats 4000000 in
+/-- On a draw that is not bad, the next layer from the replaced keys is the next layer from the
+relay's keystream. -/
+theorem next4_run_eq (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) (z : Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16 names A)
+    (hz : ¬ next4Bad nike cipher macS kdfS streamS geom hvalid hmactag h16 z) :
+    next4RunK nike cipher macS kdfS streamS geom hvalid hmactag h16 names A z = next4RunS nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names A z
+      (Util.Bytes.ofVector ((KEMSphinx.keystreamPRG streamS geom).gen z.s)) := by
+  have hjp : (z.p.c.pos : ℕ) < (RSOR.path nike z.p.c.req.fwd [.recipient z.p.c.req.receiver]).size
+      :=
+    lt_of_lt_of_eq z.p.c.pos.isLt (RSOR.path_size nike _ _).symm
+  have hKj : (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y,
+      z.p)).toArray[(z.p.c.pos : ℕ)]! = keysOfDraw (keys4 z.s z.y) :=
+    toArray_getElem!_of_getElem? _ _ _
+      (hopKeysWith_getElem nike kdfS ((nike.decodePrivateKey z.p.d0).getD default) (RSOR.path nike
+          z.p.c.req.fwd [.recipient z.p.c.req.receiver]) z.p.c.pos _ (RSOR.path nike z.p.c.req.fwd
+          [.recipient z.p.c.req.receiver]).size hjp)
+  have hKj0 : (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 default z.y,
+      z.p)).toArray[(z.p.c.pos : ℕ)]! = keysOfDraw (keys4 default z.y) :=
+    toArray_getElem!_of_getElem? _ _ _
+      (hopKeysWith_getElem nike kdfS ((nike.decodePrivateKey z.p.d0).getD default) (RSOR.path nike
+          z.p.c.req.fwd [.recipient z.p.c.req.receiver]) z.p.c.pos _ (RSOR.path nike z.p.c.req.fwd
+          [.recipient z.p.c.req.receiver]).size hjp)
+  have he : nextElemI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y, z.p) =
+      nextElemI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 default z.y, z.p) :=
+    (groupElem_hopKeysWith nike kdfS ((nike.decodePrivateKey z.p.d0).getD default) (RSOR.path nike
+        z.p.c.req.fwd [.recipient z.p.c.req.receiver]) z.p.c.pos _ (RSOR.path nike z.p.c.req.fwd
+        [.recipient z.p.c.req.receiver]).size (le_of_lt hjp)).trans
+      (groupElem_hopKeysWith nike kdfS ((nike.decodePrivateKey z.p.d0).getD default) (RSOR.path
+          nike z.p.c.req.fwd [.recipient z.p.c.req.receiver]) z.p.c.pos _ (RSOR.path nike
+          z.p.c.req.fwd [.recipient z.p.c.req.receiver]).size (le_of_lt hjp)).symm
+  have hA0 : groupElem nike ((nike.decodePrivateKey z.p.d0).getD default) (nextKeysI nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y, z.p)).toArray 0
+      = groupElem nike ((nike.decodePrivateKey z.p.d0).getD default) (nextKeysI nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 (keys4 default z.y, z.p)).toArray 0 :=
+    groupElem_congr nike _ _ _ 0 fun n hn => absurd hn (Nat.not_lt_zero n)
+  have hW : keysKs geom streamS (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (keys4 z.s z.y, z.p)).toArray z.p.c.pos
+      = Util.Bytes.ofVector ((KEMSphinx.keystreamPRG streamS geom).gen z.s) := by
+    unfold keysKs
+    rw [hKj]
+    exact (Util.Bytes.ofVector_toVecN _ (streamS.keystream_size _ _ _)).symm
+  have hf : (fun mine : Onion geom =>
+        if (z.p.c.pos : ℕ) + 1 < z.p.c.req.fwd.hops.length then
+          onionOfKeys nike cipher macS kdfS streamS geom (z.p.c.pos + 1) z.p.c.req z.o.1
+            (groupElem nike ((nike.decodePrivateKey z.p.d0).getD default) (nextKeysI nike cipher
+                macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y, z.p)).toArray 0)
+                (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y,
+                z.p))
+        else mine)
+      = fun mine => if (z.p.c.pos : ℕ) + 1 < z.p.c.req.fwd.hops.length then
+          nextOfStream nike cipher macS kdfS streamS geom z.p.c.req z.o.1
+            (groupElem nike ((nike.decodePrivateKey z.p.d0).getD default) (nextKeysI nike cipher
+                macS kdfS streamS geom hvalid hmactag h16 (keys4 default z.y, z.p)).toArray 0)
+                (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 default
+                z.y, z.p)) z.p.c.pos
+            (Util.Bytes.ofVector ((KEMSphinx.keystreamPRG streamS geom).gen z.s))
+        else mine :=
+    funext fun mine => by
+      by_cases hlt : (z.p.c.pos : ℕ) + 1 < z.p.c.req.fwd.hops.length
+      · rw [ite_eq_left hlt, ite_eq_left hlt,
+          onionOfKeys_succ nike cipher macS kdfS streamS geom z.p.c.req z.o.1
+            (groupElem nike ((nike.decodePrivateKey z.p.d0).getD default) (nextKeysI nike cipher
+                macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y, z.p)).toArray 0)
+                (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y,
+                z.p)) z.p.c.pos hjp
+            (lt_of_lt_of_eq hjp (hopKeysWith_length nike kdfS ((nike.decodePrivateKey z.p.d0).getD
+                default) (RSOR.path nike z.p.c.req.fwd [.recipient z.p.c.req.receiver]) z.p.c.pos _
+              (RSOR.path nike z.p.c.req.fwd [.recipient z.p.c.req.receiver]).size).symm) h16
+            (fun st hst => Classical.not_not.mp fun hne => hz ⟨hlt, st, hst, hne⟩),
+          hW, hA0]
+        exact nextOfStream_congr nike cipher macS kdfS streamS geom z.p.c.req z.o.1 _
+          (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 z.s z.y, z.p))
+              (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 (keys4 default z.y,
+              z.p)) z.p.c.pos _ hjp
+          (fun i hi => toArray_getElem!_congr _ _ i ((hopKeysWith_congr nike kdfS
+              ((nike.decodePrivateKey z.p.d0).getD default) (RSOR.path nike z.p.c.req.fwd
+              [.recipient z.p.c.req.receiver])
+            z.p.c.pos (keysOfDraw (keys4 z.s z.y)) (keysOfDraw (keys4 default z.y)) rfl (RSOR.path
+                nike z.p.c.req.fwd [.recipient z.p.c.req.receiver]).size).2 i hi))
+          ((congrArg (·.headerMAC) hKj).trans (congrArg (·.headerMAC) hKj0).symm)
+          ((congrArg (·.blindingFactor) hKj).trans (congrArg (·.blindingFactor) hKj0).symm)
+          ((hopKeysWith_take nike kdfS ((nike.decodePrivateKey z.p.d0).getD default) (RSOR.path
+              nike z.p.c.req.fwd [.recipient z.p.c.req.receiver]) z.p.c.pos _ (RSOR.path nike
+              z.p.c.req.fwd [.recipient z.p.c.req.receiver]).size (le_of_lt hjp)).trans
+            (hopKeysWith_take nike kdfS ((nike.decodePrivateKey z.p.d0).getD default) (RSOR.path
+                nike z.p.c.req.fwd [.recipient z.p.c.req.receiver]) z.p.c.pos _ (RSOR.path nike
+                z.p.c.req.fwd [.recipient z.p.c.req.receiver]).size
+              (le_of_lt hjp)).symm)
+      · rw [ite_eq_right hlt, ite_eq_right hlt]
+  unfold next4RunK next4RunS
+  exact congr (congrArg _ he) hf
+
+/-- **Step 4 of the hidden layer, its real side.** The game after step 3 is the keystream
+generator's real experiment for `nextStreamAdv`, off the bad draws. -/
+theorem nextGame_none_sub_prgReal_le (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable
+    (S := 𝒮)).Adversary) :
+    |(Pr{let b ← (nextGame nike cipher macS kdfS streamS geom hvalid hmactag h16 names A fun _ _ =>
+        none)}[b = true]).toReal
+      - (Pr{let b ← (PRGScheme.prgRealExperiment (KEMSphinx.keystreamPRG streamS geom)
+          (nextStreamAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A))}[b =
+              true]).toReal|
+    ≤ (Pr{let z ← (next4Draw nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        A)}[next4Bad nike cipher macS kdfS streamS geom hvalid hmactag h16 z]).toReal := by
+  rw [(nextGame_none_evalDistEq nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      A).prEvent_eq (fun b => b = true),
+    prgReal_nextStreamAdv]
+  exact KEMSphinx.prEvent_bind_toReal_sub_le_of_bad (next4Draw nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names A) (next4RunK nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names A)
+    _ (next4Bad nike cipher macS kdfS streamS geom hvalid hmactag h16) (fun z hz => next4_run_eq
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 names A z hz) (fun b => b = true)
 
 end ForwardNext
 

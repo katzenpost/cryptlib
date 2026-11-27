@@ -658,16 +658,20 @@ steps (`NIKESphinxTLUNext.lean`):
    `RelayMac.lean`), and the key game's other world for `nextAdv` is such a relay game
    (`keyGame_false_nextAdv`, `nextGame`). The chance is carried, not bounded.
 4. Replace the keystream through which the next layer reads the replaced header key and IV.
-   The game step is not proved. Proved for it (`NIKESphinxPeel.lean`): a relay's `peel` on a
-   header and a payload is the header from its keystream and blinding factor, and the payload
-   decrypted (`peel_append`, `peelHdr`); so a layer of a packet is its header peeled and the
-   block the hops after it left, each hop's decryption undoing its encryption
-   (`peels_append`). Hence the layer after a hop reads that hop's header key and IV through
-   its keystream only and does not read its payload key (`onionOfKeys_succ`, `nextOfStream`,
-   `nextOfStream_congr`), when the packet's header has a header's length. That length is not
-   proved; it is a condition of the lemma.
+   Proved (`nextGame_none_sub_prgReal_le`): the game after step 3 is the real experiment of
+   the keystream generator for an adversary, `nextStreamAdv`, that builds the original's next
+   layer from the keystream it is given, off the draws where the original's packet built with
+   the replaced keys does not have a header of a header's length (`next4Bad`). Going to
+   uniform bytes then costs that generator's advantage, by definition. The next layer still
+   reads the replaced MAC key and blinding seed, as two more uniform draws.
+   It rests on (`NIKESphinxPeel.lean`): a relay's `peel` on a header and a payload is the
+   header from its keystream and blinding factor, and the payload decrypted (`peel_append`,
+   `peelHdr`); so a layer of a packet is its header peeled and the block the hops after it
+   left, each hop's decryption undoing its encryption (`peels_append`). Hence the layer after
+   a hop reads that hop's header key and IV through its keystream only and does not read its
+   payload key (`onionOfKeys_succ`, `nextOfStream`, `nextOfStream_congr`).
 
-Not proved yet for TLU→ of NIKE Sphinx: step 4, and the last comparison of the two worlds. The
+Not proved yet for TLU→ of NIKE Sphinx: the last comparison of the two worlds. The
 last comparison has to match the original's later layers, which are derived from the replaced
 blinding factor, in both worlds. SLU← and STI↔ are not started for NIKE Sphinx.
 
