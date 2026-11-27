@@ -570,7 +570,12 @@ that is not good (`keyGame_false_sub_gameOnly_le`). A property has to say how it
 from the one tag. For that: a header uses a hop's tagging function once, on the bytes `hdrMsg`,
 which do not depend on that function (`nikeHdrTrace_tagAt`, `nikePktFn_tagAt`), and two
 replacements with the same blinding factor give the same keys off the replaced hop
-(`hopKeysWith_congr`). Putting these together for the onion of TLU→ is not done yet. KEM Sphinx still has its own copy of the step
+(`hopKeysWith_congr`). So the onion uses the replaced hop's MAC key for one tag only
+(`onionOfKeys_tag`), and the MAC step holds for world 0 of TLU→ (`forward_ideal_sub_only_le`):
+with the honest relay's keys replaced, the relay may answer the element of the adversary's
+onion under that onion's header only, at the cost of a forgery against the MAC and the chance
+that the bytes its tag covers do not have a header's length. That chance is not bounded yet; it
+should be zero when the onion builds. KEM Sphinx still has its own copy of the step
 (`KEMSphinxKeyedMac`).
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the

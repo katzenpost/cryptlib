@@ -102,6 +102,91 @@ theorem evalDistEq_setKey {δ : Type} (K : RSOR.Randomness nike geom → ProbCom
     (EvalDistEq.bind_right _ fun r =>
       OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 nike.privateKeySize)) (K r))
 
+/-- The first layer of `q`'s onion, with the tag of hop `j` given. -/
+def onionOfTag (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
+    (ks : List HopKeys) (j : ℕ) (tag : ByteArray) : Onion geom :=
+  match nikePktFn geom (keysKs geom streamS ks.toArray)
+      (Function.update (keysTag macS ks.toArray) j fun _ => tag)
+      (keysEnc cipher ks.toArray) (blindElem nike a ks.toArray)
+      (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient q.receiver]) r.1) (RSOR.path nike
+          q.fwd [.recipient q.receiver])
+      (RSOR.body nike macS kdfS streamS geom q r) with
+  | some pkt => split geom pkt
+  | none => default
+
+/-- The bytes of `q`'s onion that hop `j`'s tag covers. -/
+def onionMsg (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
+    (ks : List HopKeys) (j : ℕ) : ByteArray :=
+  hdrMsg geom (keysKs geom streamS ks.toArray) (keysTag macS ks.toArray)
+    (blindElem nike a ks.toArray) (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient
+        q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver]) j
+
+omit cipher macS kdfS streamS geom in
+theorem toArray_getElem!_congr {α : Type} [Inhabited α] (l l' : List α) (i : ℕ)
+    (h : l[i]? = l'[i]?) : l.toArray[i]! = l'.toArray[i]! := by
+  simp [getElem!_def, h]
+
+/-- **The onion uses the replaced hop's MAC key for one tag only.** With the hop's keys replaced,
+the onion is the onion built from the replacement without its MAC key and the tag of
+`onionMsg` under that key. -/
+theorem onionOfKeys_tag (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike geom)
+    (a : ByteArray) (c : nike.PrivateKey) (hops : Array PathHop) (j : ℕ) (r : Rest)
+    (km : Vector UInt8 32) (n : ℕ) (hj : j < n) (hjp : j < (RSOR.path nike q.fwd [.recipient
+        q.receiver]).size) :
+    onionOfKeys nike cipher macS kdfS streamS geom q rnd a
+        (hopKeysWith nike kdfS c hops j (restKeys r km) n)
+      = onionOfTag nike cipher macS kdfS streamS geom q rnd a
+        (hopKeysWith nike kdfS c hops j (restKeys r default) n) j
+        (Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector km)
+          (onionMsg nike macS streamS geom q rnd a
+            (hopKeysWith nike kdfS c hops j (restKeys r default) n) j))) := by
+  have hne : ∀ i, i ≠ j → (hopKeysWith nike kdfS c hops j (restKeys r km) n).toArray[i]!
+      = (hopKeysWith nike kdfS c hops j (restKeys r default) n).toArray[i]! := fun i hi =>
+    toArray_getElem!_congr _ _ i ((hopKeysWith_congr nike kdfS c hops j (restKeys r km)
+      (restKeys r default) rfl n).2 i hi)
+  have hj1 : (hopKeysWith nike kdfS c hops j (restKeys r km) n).toArray[j]! = restKeys r km :=
+    toArray_getElem!_of_getElem? _ _ _ (hopKeysWith_getElem nike kdfS c hops j _ n hj)
+  have hj0 : (hopKeysWith nike kdfS c hops j (restKeys r default) n).toArray[j]!
+      = restKeys r default :=
+    toArray_getElem!_of_getElem? _ _ _ (hopKeysWith_getElem nike kdfS c hops j _ n hj)
+  have hks : keysKs geom streamS (hopKeysWith nike kdfS c hops j (restKeys r km) n).toArray
+      = keysKs geom streamS (hopKeysWith nike kdfS c hops j (restKeys r default) n).toArray := by
+    funext i
+    unfold keysKs
+    by_cases hi : i = j
+    · rw [hi, hj1, hj0]; rfl
+    · rw [hne i hi]
+  have henc : keysEnc cipher (hopKeysWith nike kdfS c hops j (restKeys r km) n).toArray
+      = keysEnc cipher (hopKeysWith nike kdfS c hops j (restKeys r default) n).toArray := by
+    funext i
+    unfold keysEnc
+    by_cases hi : i = j
+    · rw [hi, hj1, hj0]; rfl
+    · rw [hne i hi]
+  have hge : blindElem nike a (hopKeysWith nike kdfS c hops j (restKeys r km) n).toArray
+      = blindElem nike a (hopKeysWith nike kdfS c hops j (restKeys r default) n).toArray := by
+    funext i
+    refine blindElem_congr nike a _ _ (fun m => ?_) i
+    by_cases hm : m = j
+    · rw [hm, hj1, hj0]; rfl
+    · rw [hne m hm]
+  have htag : keysTag macS (hopKeysWith nike kdfS c hops j (restKeys r km) n).toArray
+      = Function.update
+        (keysTag macS (hopKeysWith nike kdfS c hops j (restKeys r default) n).toArray) j
+        (fun m => Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector km) m)) := by
+    funext i
+    by_cases hi : i = j
+    · rw [hi, Function.update_self]
+      unfold keysTag
+      rw [hj1]
+      rfl
+    · rw [Function.update_of_ne hi]
+      unfold keysTag
+      rw [hne i hi]
+  unfold onionOfKeys onionOfTag onionMsg
+  rw [hks, henc, hge, htag, nikePktFn_tagAt geom _ _ _ _ _ _ _ j hjp
+    (fun m => Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector km) m))]
+
 end Onion
 
 section Forward
@@ -270,6 +355,86 @@ theorem play_false_sub_ideal_le (names : Role → Name) (A : (Protocols.RSOR.for
         => x = true)]
   unfold keyAdvantage
   exact (abs_sub_le _ _ _).trans (add_le_add h1 le_rfl)
+
+/-- The hops' keys of a draw of world 0, the honest relay's without a MAC key. -/
+def forwardKeys0 (names : Role → Name) {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (x : Rest × PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+    (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness nike geom) A) : List
+    HopKeys :=
+  drawKeys nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable
+      (S := 𝒮)) .relay names (forwardPlace nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names) x default
+
+/-- The bytes of the adversary's onion that the honest relay's tag covers. -/
+def forwardMsg (names : Role → Name) {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary} (x
+    : Rest × PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+    (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness nike geom) A) :
+    ByteArray :=
+  onionMsg nike macS streamS geom x.2.c.req x.2.o
+    (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names x.2) (forwardKeys0 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names x).toArray 0)
+    (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names x) x.2.c.pos
+
+/-- World 0 from the honest relay's tag. -/
+def forwardViewT (names : Role → Name) {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (x : Rest × PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+    (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness nike geom) A)
+    (tag : Vector UInt8 macS.tagSize) : Protocols.RSOR.World 𝒮 :=
+  { onion := onionOfTag nike cipher macS kdfS streamS geom x.2.c.req x.2.o
+      (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names x.2) (forwardKeys0 nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names x).toArray 0)
+      (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names x) x.2.c.pos
+          (Util.Bytes.ofVector tag) }
+
+/-- **The MAC step for world 0 of TLU→.** With the honest relay's keys replaced, the relay may
+answer the element of the adversary's onion under that onion's header only, at the cost of a
+forgery against the MAC and the chance that the bytes its tag covers do not have a header's
+length. -/
+theorem forward_ideal_sub_only_le (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S
+    := 𝒮)).Adversary) :
+    |(Pr{let b ← (keyGame cipher macS kdfS streamS geom
+          (forwardAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) false)}[b =
+              true]).toReal
+      - (Pr{let b ← (macOnly nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names) _
+          ($ᵗ RSOR.Randomness nike geom) (forwardView nike cipher macS kdfS streamS geom hvalid
+              hmactag h16 names) A
+          (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names))}[b =
+              true]).toReal|
+    ≤ (Pr{let b ← (Primitives.MAC.forgeExp macS
+          (macForge nike cipher macS kdfS streamS geom hvalid hmactag h16
+              (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher
+              macS kdfS streamS geom hvalid hmactag h16 names) _ ($ᵗ RSOR.Randomness nike geom) A
+            (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (forwardViewT
+                nike cipher macS kdfS streamS geom hvalid hmactag h16 names)))}[b = true]).toReal
+      + (Pr{let x ← (macDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names _ ($ᵗ RSOR.Randomness nike geom)
+          A)}[¬ (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names x).size =
+              (2 + nike.publicKeySize + geom.routingInfoLength)]).toReal := by
+  refine keyGame_false_sub_gameOnly_le nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) _ _
+    (forwardView nike cipher macS kdfS streamS geom hvalid hmactag h16 names) A (forwardMsg nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (forwardViewT nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names)
+    (fun x => (forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names x).size = (2
+        + nike.publicKeySize + geom.routingInfoLength)) (fun x hg => hg) (fun x km _ => ?_)
+  have hpos : (x.2.c.pos : ℕ) < x.2.c.req.fwd.hops.length := x.2.c.pos.isLt
+  have hsz := RSOR.path_size nike x.2.c.req.fwd [.recipient x.2.c.req.receiver]
+  unfold drawView forwardView forwardViewT forwardMsg forwardKeys0
+  refine congrArg (fun o => ({ onion := o } : Protocols.RSOR.World 𝒮)) ?_
+  exact onionOfKeys_tag nike cipher macS kdfS streamS geom x.2.c.req x.2.o _ _ _ _ x.1 km _
+    (by
+      show (x.2.c.pos : ℕ) < (drawHops nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names) x.2).size
+      unfold drawHops forwardPlace
+      rw [Array.size_modify, hsz]
+      exact hpos)
+    (by rw [hsz]; exact hpos)
 
 end Forward
 

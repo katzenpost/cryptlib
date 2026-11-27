@@ -763,6 +763,54 @@ def macMsg {Oth : Type} {A : P.Adversary}
         ByteArray :=
   Util.Bytes.ofVector (Util.Bytes.toVecN (2 + nike.publicKeySize + geom.routingInfoLength) (M x))
 
+/-- The draws of the MAC step: the relay's draws other than its MAC key, and the game's. -/
+abbrev macDraw (Oth : Type) (draw : ProbComp Oth) (A : P.Adversary) :
+    ProbComp (Rest × PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth
+        A) := do
+  let r ← $ᵗ Rest
+  let D ← propDrawOf nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth draw A
+  return (r, D)
+
+/-- The key game's other world with the relay answering the element of its place under the
+header `M` with its tag only. -/
+abbrev macOnly (place : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid
+    hmactag h16 P ρ names pk → Array PathHop × ℕ)
+    (Oth : Type) (draw : ProbComp Oth)
+    (view : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
+        names pk → Oth → ByteArray → List HopKeys
+      → Protocols.RSOR.World 𝒮)
+    (A : P.Adversary) (M : Rest × PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 P
+        ρ names Oth A → ByteArray) : ProbComp Bool :=
+  Relay.gameOnly macS (macDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth
+      draw A) (2 + nike.publicKeySize + geom.routingInfoLength) (macMsg nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 P ρ names M)
+    (fun x pkt => decide (pkt.extract 2 (2 + nike.publicKeySize)
+      = drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place x.2))
+    (fun x => procWith nike cipher macS streamS geom (relayKeys nike kdfS x.2.k.2))
+    (fun x tag => procWith nike cipher (Primitives.MAC.MAC.const tag) streamS geom
+      (fun _ => .ok (restKeys x.1 default)))
+    (drawView nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place view) (drawRun
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place)
+
+/-- The forgery adversary of the MAC step. -/
+abbrev macForge (place : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid
+    hmactag h16 P ρ names pk → Array PathHop × ℕ)
+    (Oth : Type) (draw : ProbComp Oth) (A : P.Adversary)
+    (M : Rest × PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        ByteArray)
+    (viewT : Rest × PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A
+        → Vector UInt8 macS.tagSize
+      → Protocols.RSOR.World 𝒮) : Primitives.MAC.ForgeAdversary macS :=
+  Relay.forgeAdv macS (macDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth
+      draw A) (2 + nike.publicKeySize + geom.routingInfoLength) (macMsg nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 P ρ names M)
+    (fun x pkt => decide (pkt.extract 2 (2 + nike.publicKeySize)
+      = drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place x.2))
+    (fun x => procWith nike cipher macS streamS geom (relayKeys nike kdfS x.2.k.2))
+    (fun x tag => procWith nike cipher (Primitives.MAC.MAC.const tag) streamS geom
+      (fun _ => .ok (restKeys x.1 default)))
+    viewT (drawRun nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place)
+
 /-- **The MAC step for the key game's other world.** If the world shown uses the honest relay's
 MAC key for one tag only, the tag of the bytes `M` of the challenge header, the relay may answer
 the element of its place under that header only, at the cost of a forgery against the MAC and
@@ -789,42 +837,13 @@ theorem keyGame_false_sub_gameOnly_le
     |(Pr{let b ← (keyGame cipher macS kdfS streamS geom
           (propAdvOf nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth draw
               view A) false)}[b = true]).toReal
-      - (Pr{let b ← (Relay.gameOnly macS
-          (do
-            let r ← $ᵗ Rest
-            let D ← propDrawOf nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth
-                draw A
-            return (r, D))
-          (2 + nike.publicKeySize + geom.routingInfoLength) (macMsg nike cipher macS kdfS streamS
-              geom hvalid hmactag h16 P ρ names M)
-          (fun x pkt => decide (pkt.extract 2 (2 + nike.publicKeySize)
-            = drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place x.2))
-          (fun x => procWith nike cipher macS streamS geom (relayKeys nike kdfS x.2.k.2))
-          (fun x tag => procWith nike cipher (Primitives.MAC.MAC.const tag) streamS geom
-            (fun _ => .ok (restKeys x.1 default)))
-          (drawView nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place view)
-              (drawRun nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place))}[b =
-              true]).toReal|
-    ≤ (Pr{let b ← (Primitives.MAC.forgeExp macS (Relay.forgeAdv macS
-          (do
-            let r ← $ᵗ Rest
-            let D ← propDrawOf nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth
-                draw A
-            return (r, D))
-          (2 + nike.publicKeySize + geom.routingInfoLength) (macMsg nike cipher macS kdfS streamS
-              geom hvalid hmactag h16 P ρ names M)
-          (fun x pkt => decide (pkt.extract 2 (2 + nike.publicKeySize)
-            = drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place x.2))
-          (fun x => procWith nike cipher macS streamS geom (relayKeys nike kdfS x.2.k.2))
-          (fun x tag => procWith nike cipher (Primitives.MAC.MAC.const tag) streamS geom
-            (fun _ => .ok (restKeys x.1 default)))
-          viewT (drawRun nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names
-              place)))}[b = true]).toReal
-      + (Pr{let x ← (do
-            let r ← $ᵗ Rest
-            let D ← propDrawOf nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth
-                draw A
-            return (r, D))}[¬ good x]).toReal := by
+      - (Pr{let b ← (macOnly nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place
+          Oth draw view A M)}[b = true]).toReal|
+    ≤ (Pr{let b ← (Primitives.MAC.forgeExp macS
+          (macForge nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth draw
+              A M viewT))}[b = true]).toReal
+      + (Pr{let x ← (macDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth
+          draw A)}[¬ good x]).toReal := by
   rw [(keyGame_false_evalDistEq_gameAll nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
       names place Oth draw view A).prEvent_eq
     (fun b => b = true)]
