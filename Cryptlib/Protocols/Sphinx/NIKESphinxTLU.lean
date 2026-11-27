@@ -1121,10 +1121,7 @@ theorem forward_only_sub_pay_le (names : Role → Name) (A : (Protocols.RSOR.for
 payload game with an ideal cipher by the one-query advantage of `forwardPay`'s adversary
 against the payload cipher, and the chance of a draw that is not good. -/
 theorem forward_only_sub_ideal_le (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S
-    := 𝒮)).Adversary)
-    (hwf : ∀ iv, ∀ x ∈ support ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16
-        names A).draw iv),
-      ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).log x).WF) :
+    := 𝒮)).Adversary) :
     |(Pr{let b ← (macOnly nike cipher macS kdfS streamS geom hvalid hmactag h16
         (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
         kdfS streamS geom hvalid hmactag h16 names) _
@@ -1142,6 +1139,24 @@ theorem forward_only_sub_ideal_le (names : Role → Name) (A : (Protocols.RSOR.f
           - (Pr{let b ← (Primitives.WideBlockCipher.oneQueryExp cipher _
             (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).adv
                 false)}[b = true]).toReal| := by
+  have hwf : ∀ iv, ∀ x ∈ support ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names A).draw iv),
+      ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).log x).WF := by
+    intro iv (x : PayX nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) hx
+    change x ∈ support (($ᵗ (Vector UInt8 32)) >>= fun km => ($ᵗ (Vector UInt8 32)) >>= fun he =>
+      ($ᵗ (Vector UInt8 32)) >>= fun seed => forwardDraw nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names A >>= fun D =>
+        pure ((iv, km, he, seed, D) : PayX nike cipher macS kdfS streamS geom hvalid hmactag h16
+            names A)) at hx
+    obtain ⟨km, -, hx⟩ := (mem_support_bind_iff _ _ _).1 hx
+    obtain ⟨he, -, hx⟩ := (mem_support_bind_iff _ _ _).1 hx
+    obtain ⟨seed, -, hx⟩ := (mem_support_bind_iff _ _ _).1 hx
+    obtain ⟨D, hD, hx⟩ := (mem_support_bind_iff _ _ _).1 hx
+    obtain rfl : x = (iv, km, he, seed, D) := by
+      rw [support_pure] at hx
+      exact hx
+    exact propDraw_log_wf nike cipher macS kdfS streamS geom hvalid hmactag h16 _ .relay names _ _
+        A D hD
   have h1 := forward_only_sub_pay_le nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
   rw [← Protocols.RSOR.PayloadGame.exp_eq cipher (forwardPay nike cipher macS kdfS streamS geom
       hvalid hmactag h16 names A) hwf true,

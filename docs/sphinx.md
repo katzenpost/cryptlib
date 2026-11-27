@@ -604,8 +604,8 @@ relay encrypts has a payload's length (`payGood`). With the draws reordered so t
 and IV come first, this gives the payload step for world 0 (`forward_only_sub_ideal_le`): world
 0 after its MAC step differs from its payload game with an ideal cipher by the one-query
 advantage of `forwardPay`'s adversary against the payload cipher, and the chance of a draw
-that is not good. The statement still assumes the honest relays' logs after the first phase
-are well-formed (`hwf`); the KEM proof has that as a lemma and it is not yet carried over.
+that is not good. The honest relays' logs after the first phase are well-formed
+(`propDraw_log_wf`), which the cipher game needs.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two

@@ -468,6 +468,18 @@ def propDrawOf (Oth : Type) (draw : ProbComp Oth) (A : P.Adversary) :
   let d ← $ᵗ Vector UInt8 nike.privateKeySize
   return ⟨k, keysOf nike ρ k₁ k₂, out.1.1, out.1.2, out.2, o, d⟩
 
+/-- The honest relays' log after the adversary's first phase is well-formed. -/
+theorem propDraw_log_wf (Oth : Type) (draw : ProbComp Oth) (A : P.Adversary) :
+    ∀ D ∈ support (propDrawOf nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth
+        draw A), D.log.WF := by
+  intro D hD
+  unfold propDrawOf at hD
+  simp only [mem_support_bind_iff, support_pure, Set.mem_singleton_iff] at hD
+  obtain ⟨k, -, k₁, -, k₂, -, out, hout, o, -, d, -, rfl⟩ := hD
+  exact simulateQ_run_preserves_inv_of_query _ Protocols.RSOR.Log.WF
+    (fun t log hw => Protocols.RSOR.oracle_wf _ _ _ t log hw) _ _
+    ⟨fun _ _ h => absurd h List.not_mem_nil, fun _ _ _ h => absurd h List.not_mem_nil⟩ out hout
+
 /-- The second phase of the key game's real world on a draw: the adversary of `P` against the
 honest relays, on the world `view` shows from the sender's own group element and hop keys. -/
 def propRealOf (place : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid
