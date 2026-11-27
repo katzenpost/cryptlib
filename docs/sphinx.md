@@ -658,12 +658,12 @@ steps (`NIKESphinxTLUNext.lean`):
    `RelayMac.lean`), and the key game's other world for `nextAdv` is such a relay game
    (`keyGame_false_nextAdv`, `nextGame`). The chance is carried, not bounded.
 4. Replace the keystream through which the next layer reads the replaced header key and IV.
-   Proved (`nextGame_none_sub_prgReal_le`): the game after step 3 is the real experiment of
-   the keystream generator for an adversary, `nextStreamAdv`, that builds the original's next
-   layer from the keystream it is given, off the draws where the original's packet built with
-   the replaced keys does not have a header of a header's length (`next4Bad`). Going to
-   uniform bytes then costs that generator's advantage, by definition. The next layer still
-   reads the replaced MAC key and blinding seed, as two more uniform draws.
+   Proved (`nextGame_none_evalDistEq_prgReal`): the game after step 3 is the real experiment
+   of the keystream generator for an adversary, `nextStreamAdv`, that builds the original's
+   next layer from the keystream it is given. No event is carried: a header built from any
+   hops' keys has a header's length (`nikeHdrTrace_size`, `keysHdr_size`). Going to uniform
+   bytes then costs that generator's advantage, by definition. The next layer still reads the
+   replaced MAC key and blinding seed, as two more uniform draws.
    It rests on (`NIKESphinxPeel.lean`): a relay's `peel` on a header and a payload is the
    header from its keystream and blinding factor, and the payload decrypted (`peel_append`,
    `peelHdr`); so a layer of a packet is its header peeled and the block the hops after it

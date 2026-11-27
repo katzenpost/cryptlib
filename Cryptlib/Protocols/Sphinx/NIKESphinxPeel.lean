@@ -11,7 +11,7 @@ open Cryptlib.Protocols.Sphinx.Geometry (Geometry)
 open Cryptlib.Protocols.Sphinx.Types
 open Cryptlib.Protocols.Sphinx.Commands
 open Cryptlib.Protocols.Sphinx.Constants
-open Cryptlib.Protocols.Sphinx.Common (v0AD xorBytes size_xorBytes)
+open Cryptlib.Protocols.Sphinx.Common
 open Cryptlib.Protocols.Sphinx.KEMSphinx (keysEnc keysKs)
 open Cryptlib.Primitives.WideBlockCipher (WideBlockCipher)
 open Cryptlib.Primitives.StreamCipher (StreamCipher)
@@ -161,5 +161,71 @@ theorem peels_append (ks : List HopKeys) (n : ℕ) (init H : ByteArray)
       hh]
 
 end Peel
+
+/-! ## The length of a header -/
+
+section HeaderSize
+
+variable (geom : Geometry)
+
+/-- A hop's routing fragment has a hop's length. -/
+theorem nikeFragment_size (path : Array PathHop) (mac : ByteArray) (i : ℕ)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength) (frag : ByteArray)
+    (h : nikeFragment geom path mac i = .ok frag) :
+    frag.size = geom.perHopRoutingInfoLength := by
+  unfold nikeFragment at h
+  obtain ⟨f0, hf0, h⟩ := Except.eq_ok_of_bind_eq_ok h
+  have hsz := commandsToBytes_size_le hf0
+  obtain rfl := Except.ok.inj h
+  by_cases hl : (i == path.size - 1) = true
+  · simp only [hl, ↓reduceIte] at hsz ⊢
+    exact zeroPadTo_size hsz
+  · have hb : (i == path.size - 1) = false := Bool.not_eq_true _ ▸ hl
+    rw [hb] at hsz ⊢
+    simp only [Bool.false_eq_true, ↓reduceIte] at hsz ⊢
+    refine zeroPadTo_size ?_
+    rw [ByteArray.size_append, RoutingCommand.nextNodeHop_toBytes_size]
+    omega
+
+/-- **The routing information after `j` steps of the header has the filler's length and `j`
+hops', and the tag a tag's.** -/
+theorem nikeHdrTrace_size (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (htag : ∀ i m, (tag i m).size = macLength) (j : ℕ) (s : ByteArray × ByteArray)
+    (h : nikeHdrTrace geom ks tag ge filler path j = some s) :
+    s.1.size = (geom.nrHops - path.size + j) * geom.perHopRoutingInfoLength
+      ∧ (0 < j → s.2.size = macLength) := by
+  induction j generalizing s with
+  | zero =>
+    obtain rfl := Option.some.inj h
+    refine ⟨?_, fun h => absurd h (lt_irrefl 0)⟩
+    by_cases hn : geom.nrHops > path.size
+    · exact (congrArg ByteArray.size (ite_eq_left hn)).trans hfill
+    · refine (congrArg ByteArray.size (ite_eq_right hn)).trans ?_
+      rw [show geom.nrHops - path.size + 0 = 0 by omega, Nat.zero_mul]
+      rfl
+  | succ j ih =>
+    rw [nikeHdrTrace] at h
+    cases h0 : nikeHdrTrace geom ks tag ge filler path j with
+    | none => rw [h0] at h; cases h
+    | some s0 =>
+      rw [h0] at h
+      dsimp only at h
+      cases hf : nikeFragment geom path s0.2 (path.size - 1 - j) with
+      | error e => rw [hf] at h; cases h
+      | ok frag =>
+        rw [hf] at h
+        obtain rfl := Option.some.inj h
+        refine ⟨?_, fun _ => htag _ _⟩
+        rw [size_xorBytes, ByteArray.size_append, nikeFragment_size geom path _ _ hnnh hle frag hf,
+          (ih s0 h0).1, show geom.nrHops - path.size + (j + 1) = geom.nrHops - path.size + j + 1
+            from rfl, Nat.succ_mul]
+        omega
+
+end HeaderSize
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
