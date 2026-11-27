@@ -578,6 +578,13 @@ that the bytes its tag covers do not have a header's length. That chance is not 
 should be zero when the onion builds. KEM Sphinx still has its own copy of the step
 (`KEMSphinxKeyedMac`).
 
+The second shared step is the payload cipher's (`Protocols/RSORPayload.lean`, `PayloadGame`,
+`PayloadGame.exp_eq`): a game in which an honest relay decrypts under one header only is the
+one-query game of the payload cipher, for any scheme of the RSOR games. It rests on
+`viaDec_decOnce`, which was already stated for any scheme. Not yet used: world 0 of NIKE
+Sphinx after its MAC step has still to be written as such a game, and KEM Sphinx has its own
+copy (`KEMSphinxPayload`).
+
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two
 worlds.

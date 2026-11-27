@@ -125,6 +125,7 @@ import Cryptlib.Protocols.Sphinx.NIKESphinxGame
 import Cryptlib.Protocols.Sphinx.NIKESphinxProp
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLU
 import Cryptlib.Protocols.Sphinx.RelayMac
+import Cryptlib.Protocols.RSORPayload
 import Cryptlib.Protocols.Sphinx.Schemes
 import Cryptlib.Protocols.GroupComm
 import Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.AckCodec
