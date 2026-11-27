@@ -59,6 +59,75 @@ theorem hopKeysWith_hopKey (nike : NIKE) (kdfS : KDF) (c : nike.PrivateKey)
     · simp only [h, ite_false]
       rfl
 
+theorem toArray_getElem!_of_getElem? {α : Type} [Inhabited α] (l : List α) (j : ℕ) (t : α)
+    (h : l[j]? = some t) : l.toArray[j]! = t := by
+  simp [getElem!_def, h]
+
+open Cryptlib.Primitives.KDF (KDF) in
+theorem hopKeysWith_length (nike : NIKE) (kdfS : KDF) (c : nike.PrivateKey)
+    (hops : Array PathHop) (j : ℕ) (t : HopKeys) (n : ℕ) :
+    (hopKeysWith nike kdfS c hops j t n).length = n := by
+  induction n with
+  | zero => rfl
+  | succ n ih => rw [hopKeysWith, List.length_append, ih]; rfl
+
+open Cryptlib.Primitives.KDF (KDF) in
+/-- The replaced hop has the replacement. -/
+theorem hopKeysWith_getElem (nike : NIKE) (kdfS : KDF) (c : nike.PrivateKey)
+    (hops : Array PathHop) (j : ℕ) (t : HopKeys) (n : ℕ) (hj : j < n) :
+    (hopKeysWith nike kdfS c hops j t n)[j]? = some t := by
+  induction n with
+  | zero => omega
+  | succ n ih =>
+    rw [hopKeysWith]
+    by_cases h : j < n
+    · rw [List.getElem?_append_left (by rw [hopKeysWith_length]; exact h)]
+      exact ih h
+    · obtain rfl : j = n := by omega
+      rw [List.getElem?_append_right (by rw [hopKeysWith_length]), hopKeysWith_length]
+      simp
+
+open Cryptlib.Primitives.KDF (KDF) in
+/-- The hops in front of the replaced one have the sender's keys. -/
+theorem hopKeysWith_take (nike : NIKE) (kdfS : KDF) (c : nike.PrivateKey)
+    (hops : Array PathHop) (j : ℕ) (t : HopKeys) (n : ℕ) (hj : j ≤ n) :
+    (hopKeysWith nike kdfS c hops j t n).take j = RSOR.hopKeys nike kdfS c hops j := by
+  have hle : ∀ m, m ≤ j → hopKeysWith nike kdfS c hops j t m = RSOR.hopKeys nike kdfS c hops m := by
+    intro m
+    induction m with
+    | zero => intro _; rfl
+    | succ m ih =>
+      intro hm
+      rw [hopKeysWith, ih (by omega), RSOR.hopKeys_succ]
+      simp only [show m ≠ j by omega, ite_false]
+      rfl
+  induction n, hj using Nat.le_induction with
+  | base =>
+    rw [hle j le_rfl]
+    exact List.take_of_length_le (by rw [← hle j le_rfl, hopKeysWith_length])
+  | succ n hn ih =>
+    rw [hopKeysWith, List.take_append_of_le_length (by rw [hopKeysWith_length]; exact hn)]
+    exact ih
+
+/-- A group element reads the keys in front of it only. -/
+theorem groupElem_congr (nike : NIKE) (c : nike.PrivateKey) (K K' : Array HopKeys) (i : ℕ)
+    (h : ∀ n < i, K[n]! = K'[n]!) : groupElem nike c K i = groupElem nike c K' i := by
+  induction i with
+  | zero => rfl
+  | succ i ih =>
+    show nikeBlind nike (groupElem nike c K i) _ = nikeBlind nike (groupElem nike c K' i) _
+    rw [ih fun n hn => h n (by omega), h i (by omega)]
+
+open Cryptlib.Primitives.KDF (KDF) in
+/-- The element that reaches the replaced hop does not depend on the replacement. -/
+theorem groupElem_hopKeysWith (nike : NIKE) (kdfS : KDF) (c : nike.PrivateKey)
+    (hops : Array PathHop) (j : ℕ) (t : HopKeys) (n : ℕ) (hj : j ≤ n) :
+    groupElem nike c (hopKeysWith nike kdfS c hops j t n).toArray j
+      = groupElem nike c (RSOR.hopKeys nike kdfS c hops j).toArray j := by
+  refine groupElem_congr nike c _ _ j fun i hi => ?_
+  rw [← hopKeysWith_take nike kdfS c hops j t n hj]
+  simp [hi]
+
 /-- The group elements from the first: each blinded by the factor of the hop before. -/
 def blindElem (nike : NIKE) (a : ByteArray) (keys : Array HopKeys) : ℕ → ByteArray
   | 0 => a

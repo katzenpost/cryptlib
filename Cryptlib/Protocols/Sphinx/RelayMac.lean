@@ -21,7 +21,8 @@ such a packet only when the tag over the packet's first `off` bytes verifies und
 then it may answer the challenge packets under one header only, the header `M` with its tag, at
 the cost of a forgery against the MAC. The relay's format enters through two facts: what it
 accepts verifies, and under the challenge header it uses the MAC key for that header's tag
-only. -/
+only. The game's view may use the MAC key for the challenge header's tag only (`hview`), off
+a set of draws that is paid for. -/
 
 section Mac
 
@@ -29,7 +30,8 @@ variable {X V : Type} (macS : MAC) (mx : ProbComp X) (off : ℕ) (M : X → Byte
   (chal : X → ByteArray → Bool) (own : X → ByteArray → ProcResult)
   (procK : X → Vector UInt8 32 → ByteArray → ProcResult)
   (procT : X → Vector UInt8 macS.tagSize → ByteArray → ProcResult)
-  (viewT : X → Vector UInt8 macS.tagSize → V) (run : X → V → OracleComp procSpec Bool)
+  (view : X → Vector UInt8 32 → V) (viewT : X → Vector UInt8 macS.tagSize → V)
+  (run : X → V → OracleComp procSpec Bool)
 
 /-- The relay's answers: `hand` for a challenge packet, its own otherwise. -/
 def ansOf (x : X) (hand : ByteArray → ProcResult) (pkt : ByteArray) : ProcResult :=
@@ -44,14 +46,14 @@ def gameAll : ProbComp Bool := do
   let km ← $ᵗ (Vector UInt8 32)
   let x ← mx
   simulateQ (relayImpl (ansOf chal own x (procK x km)))
-    (run x (viewT x (macS.mac (ofVector km) (M x))))
+    (run x (view x km))
 
 /-- The game with the relay answering challenge packets under the challenge header only. -/
 def gameOnly : ProbComp Bool := do
   let km ← $ᵗ (Vector UInt8 32)
   let x ← mx
   simulateQ (relayImpl (ansOf chal own x (onlyT macS off M procT x (macS.mac (ofVector km) (M x)))))
-    (run x (viewT x (macS.mac (ofVector km) (M x))))
+    (run x (view x km))
 
 /-- What a packet the relay was sent offers as a forgery: the bytes its MAC covers, and its
 tag. -/
@@ -83,6 +85,7 @@ def isBad (x : X) (km : Vector UInt8 32) : procSpec.Domain → Bool
 
 /-- **The MAC step.** -/
 theorem gameAll_sub_gameOnly_le (good : X → Prop)
+    (hview : ∀ x km, good x → view x km = viewT x (macS.mac (ofVector km) (M x)))
     (hconst : ∀ x km pkt, pkt.extract 0 (off + macS.tagSize)
         = M x ++ ofVector (macS.mac (ofVector km) (M x)) →
       procK x km pkt = procT x (macS.mac (ofVector km) (M x)) pkt)
@@ -90,8 +93,8 @@ theorem gameAll_sub_gameOnly_le (good : X → Prop)
       pkt.extract 0 (off + macS.tagSize) ≠ M x ++ ofVector (macS.mac (ofVector km) (M x)) →
       pkt.extract 0 off ≠ M x ∧ macS.mac (ofVector km) (pkt.extract 0 off)
         = Util.Bytes.toVecN macS.tagSize (pkt.extract off (off + macS.tagSize))) :
-    |(Pr{let b ← gameAll macS mx M chal own procK viewT run}[b = true]).toReal
-      - (Pr{let b ← gameOnly macS mx off M chal own procT viewT run}[b = true]).toReal|
+    |(Pr{let b ← gameAll mx chal own procK view run}[b = true]).toReal
+      - (Pr{let b ← gameOnly macS mx off M chal own procT view run}[b = true]).toReal|
     ≤ (Pr{let b ← (Primitives.MAC.forgeExp macS
           (forgeAdv macS mx off M chal own procT viewT run))}[b = true]).toReal
       + (Pr{let x ← mx}[¬ good x]).toReal := by
@@ -100,7 +103,7 @@ theorem gameAll_sub_gameOnly_le (good : X → Prop)
     let x ← mx
     let z ← (simulateQ (Util.UntilBad.logged (relayImpl (ansOf chal own x
         (onlyT macS off M procT x (macS.mac (ofVector km) (M x))))))
-      (run x (viewT x (macS.mac (ofVector km) (M x))))).run []
+      (run x (view x km))).run []
     return z.2.any (isBad macS off M chal procK x km)
   have hstep := fun (km : Vector UInt8 32) (x : X) =>
     Util.UntilBad.prEvent_le_add_bad (relayImpl (ansOf chal own x (procK x km)))
@@ -121,15 +124,15 @@ theorem gameAll_sub_gameOnly_le (good : X → Prop)
               simpa [isBad, hc, hh] using ht
           · simp only [hc]
             rfl)
-      (run x (viewT x (macS.mac (ofVector km) (M x)))) (· = true)
-  have h12 : Pr{let b ← gameAll macS mx M chal own procK viewT run}[b = true]
-      ≤ Pr{let b ← gameOnly macS mx off M chal own procT viewT run}[b = true]
+      (run x (view x km)) (· = true)
+  have h12 : Pr{let b ← gameAll mx chal own procK view run}[b = true]
+      ≤ Pr{let b ← gameOnly macS mx off M chal own procT view run}[b = true]
         + Pr{let b ← badGame}[b = true] := by
     refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun km => ?_
     refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun x => ?_
     simpa only [bind_pure_comp, prEvent_map] using (hstep km x).1
-  have h21 : Pr{let b ← gameOnly macS mx off M chal own procT viewT run}[b = true]
-      ≤ Pr{let b ← gameAll macS mx M chal own procK viewT run}[b = true]
+  have h21 : Pr{let b ← gameOnly macS mx off M chal own procT view run}[b = true]
+      ≤ Pr{let b ← gameAll mx chal own procK view run}[b = true]
         + Pr{let b ← badGame}[b = true] := by
     refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun km => ?_
     refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun x => ?_
@@ -147,6 +150,7 @@ theorem gameAll_sub_gameOnly_le (good : X → Prop)
     refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun km => ?_
     refine prEvent_bind_le_add_of_bad_le mx _ _ (fun x => ¬ good x) (· = true) fun x hx => ?_
     have hg : good x := not_not.mp hx
+    rw [hview x km hg]
     refine prEvent_bind_mono_of_forall_le _ _ _ _ _ fun z =>
       prEvent_pure_bool_mono _ _ fun hany => ?_
     rw [List.any_eq_true] at hany ⊢

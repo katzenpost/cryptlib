@@ -560,8 +560,15 @@ Sphinx and KEM Sphinx can share them. The first is the MAC step (`RelayMac.lean`
 answer them under the challenge header only, at the cost of a forgery against the MAC. The
 format enters through two facts: what the relay accepts verifies, and under the challenge
 header it uses the MAC key for that header's tag only. The NIKE relay has both facts
-(`procWith_forgery`, `procWith_const` in `NIKESphinxGame.lean`). The step is not yet applied
-to a game of NIKE Sphinx, and KEM Sphinx still has its own copy (`KEMSphinxKeyedMac`).
+(`procWith_forgery`, `procWith_const` in `NIKESphinxGame.lean`), and the key game's other
+world, played by `propAdvOf`, is the step's first game: the relay answers a packet with the
+element of its place by the replaced keys and any other with its own key
+(`keyGame_false_evalDistEq_gameAll`). Applied to it, the step says: if the world shown uses the
+honest relay's MAC key for one tag only, the relay may answer the element of its place under
+the challenge header only, at the cost of a forgery against the MAC and the chance of a draw
+that is not good (`keyGame_false_sub_gameOnly_le`). A property has to say how its view is built
+from the one tag; that is not done for TLU→ yet. KEM Sphinx still has its own copy of the step
+(`KEMSphinxKeyedMac`).
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two

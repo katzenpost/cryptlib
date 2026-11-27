@@ -118,6 +118,29 @@ def keysExcept (sk : nike.PrivateKey) (a : ByteArray) (t : HopKeys) (ge : ByteAr
     Except String HopKeys :=
   if ge = a then pure t else relayKeys nike kdfS sk ge
 
+/-- A relay asks for the keys of one element only: the packet's. -/
+theorem procWith_keysOf (keysOf : ByteArray → Except String HopKeys) (pkt : ByteArray) :
+    procWith nike cipher macS streamS geom keysOf pkt
+      = procWith nike cipher macS streamS geom
+        (fun _ => keysOf (pkt.extract 2 (2 + nike.publicKeySize))) pkt := by
+  unfold procWith unwrapNIKEWith
+  rfl
+
+/-- The relay handed the keys `t` for the element `a` answers a packet with that element by `t`,
+and any other as it does with its own key. -/
+theorem procWith_keysExcept (sk : nike.PrivateKey) (a : ByteArray) (t : HopKeys)
+    (pkt : ByteArray) :
+    procWith nike cipher macS streamS geom (keysExcept nike kdfS sk a t) pkt
+      = if pkt.extract 2 (2 + nike.publicKeySize) = a then
+          procWith nike cipher macS streamS geom (fun _ => .ok t) pkt
+        else procWith nike cipher macS streamS geom (relayKeys nike kdfS sk) pkt := by
+  rw [procWith_keysOf nike cipher macS streamS geom (keysExcept nike kdfS sk a t)]
+  by_cases h : pkt.extract 2 (2 + nike.publicKeySize) = a
+  · simp only [keysExcept, h, ite_true]
+    rfl
+  · simp only [keysExcept, h, ite_false]
+    exact (procWith_keysOf nike cipher macS streamS geom (relayKeys nike kdfS sk) pkt).symm
+
 /-- **A relay is `procWith` on the keys it derives.** -/
 theorem unwrap_eq_procWith (sk : nike.PrivateKey) (pkt : ByteArray) :
     RSOR.unwrap nike cipher macS kdfS streamS geom sk pkt
