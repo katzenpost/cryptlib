@@ -639,6 +639,255 @@ theorem onionMsgStream_shift (q : RSOR.Request nike geom) (r r' : RSOR.Randomnes
   · rw [Function.update_self, Function.update_self]
     exact hshift
 
+set_option maxHeartbeats 4000000 in
+/-- **The onion shown: the original's is the replacement's, when the bytes under the relay's
+tag agree.** The hops in front are the same, and the relay's tag and encrypted block are given,
+so the two first layers are one packet. -/
+theorem onionOfStream_shift (cipher : WideBlockCipher) (q q' : RSOR.Request nike geom)
+    (r r' : RSOR.Randomness nike geom) (c : nike.PrivateKey) (t : HopKeys) (j : ℕ)
+    (U U' tg e : ByteArray) (hq' : q'.fwd = q.fwd.take (j + 1))
+    (hj : j + 1 < q.fwd.hops.length)
+    (hT : (nikeHdrTrace geom (Function.update (keysKs geom streamS (hopKeysWith nike kdfS c
+        (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+        q.receiver]).size).toArray) j U) (keysTag macS (hopKeysWith nike kdfS c (RSOR.path nike
+        q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+        q.receiver]).size).toArray) (blindElem nike (Util.Bytes.ofVector (nike.encodePublicKey
+        (nike.derivePublicKey c))) (hopKeysWith nike kdfS c (RSOR.path nike q.fwd [.recipient
+        q.receiver]) j t (RSOR.path nike q.fwd [.recipient q.receiver]).size).toArray)
+      (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient q.receiver]) r.1) (RSOR.path nike
+          q.fwd [.recipient q.receiver]) ((RSOR.path nike q.fwd [.recipient q.receiver]).size -
+          j)).isSome)
+    (hT' : (nikeHdrTrace geom (Function.update (keysKs geom streamS (hopKeysWith nike kdfS c
+        (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1))
+        []).size).toArray) j U') (keysTag macS (hopKeysWith nike kdfS c (RSOR.path nike (q.fwd.take
+        (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray)
+      (blindElem nike (Util.Bytes.ofVector (nike.encodePublicKey (nike.derivePublicKey c)))
+          (hopKeysWith nike kdfS c (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike
+          (q.fwd.take (j + 1)) []).size).toArray) (RSOR.filler nike geom (RSOR.path nike
+          (q.fwd.take (j + 1)) [.recipient q'.receiver]) r'.1) (RSOR.path nike (q.fwd.take (j + 1))
+          [.recipient q'.receiver]) ((RSOR.path nike (q.fwd.take (j + 1)) [.recipient
+          q'.receiver]).size - j)).isSome)
+    (hM : hdrMsg geom (Function.update (keysKs geom streamS (hopKeysWith nike kdfS c (RSOR.path
+        nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+        q.receiver]).size).toArray) j U) (keysTag macS (hopKeysWith nike kdfS c (RSOR.path nike
+        q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+        q.receiver]).size).toArray) (blindElem nike (Util.Bytes.ofVector (nike.encodePublicKey
+        (nike.derivePublicKey c))) (hopKeysWith nike kdfS c (RSOR.path nike q.fwd [.recipient
+        q.receiver]) j t (RSOR.path nike q.fwd [.recipient q.receiver]).size).toArray) (RSOR.filler
+        nike geom (RSOR.path nike q.fwd [.recipient q.receiver]) r.1)
+        (RSOR.path nike q.fwd [.recipient q.receiver]) j
+      = hdrMsg geom (Function.update (keysKs geom streamS (hopKeysWith nike kdfS c (RSOR.path nike
+          (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray) j
+          U') (keysTag macS (hopKeysWith nike kdfS c (RSOR.path nike (q.fwd.take (j + 1)) []) j t
+          (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray) (blindElem nike
+          (Util.Bytes.ofVector (nike.encodePublicKey (nike.derivePublicKey c))) (hopKeysWith nike
+          kdfS c (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1))
+          []).size).toArray) (RSOR.filler nike geom (RSOR.path nike (q.fwd.take (j + 1))
+          [.recipient q'.receiver]) r'.1)
+        (RSOR.path nike (q.fwd.take (j + 1)) [.recipient q'.receiver]) j)
+    (hsz : geom.nextNodeHopLength = nextNodeHopLength
+      ∧ geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength ∧ macS.tagSize = macLength ∧ tg.size
+          = macLength)
+    (hrouting : geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hb : (RSOR.body nike macS kdfS streamS geom q r).size = geom.forwardPayloadLength)
+    (hb' : (RSOR.body nike macS kdfS streamS geom q' r').size = geom.forwardPayloadLength) :
+    onionOfStream nike cipher macS kdfS streamS geom 0 q r (Util.Bytes.ofVector
+        (nike.encodePublicKey (nike.derivePublicKey c))) (hopKeysWith nike kdfS c (RSOR.path nike
+        q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient q.receiver]).size) j U
+        tg e
+      = onionOfStream nike cipher macS kdfS streamS geom 0 q' r' (Util.Bytes.ofVector
+          (nike.encodePublicKey (nike.derivePublicKey c))) (hopKeysWith nike kdfS c (RSOR.path nike
+          (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1)) []).size) j U' tg e :=
+          by
+  obtain ⟨hnnh, hle, hmactag, htg⟩ := hsz
+  have hsz0 := RSOR.path_size nike q.fwd [.recipient q.receiver]
+  have hlen : (q.fwd.take (j + 1)).hops.length = j + 1 := by
+    show (List.take (j + 1) q.fwd.hops).length = j + 1
+    rw [List.length_take]
+    omega
+  have hszS := RSOR.path_size nike (q.fwd.take (j + 1)) [.recipient q'.receiver]
+  have hsz1 := RSOR.path_size nike (q.fwd.take (j + 1)) []
+  have hP : (RSOR.path nike q'.fwd [.recipient q'.receiver]) = (RSOR.path nike (q.fwd.take (j + 1))
+      [.recipient q'.receiver]) := by rw [hq']
+  have hpub : ∀ i < j + 1, (RSOR.path nike (q.fwd.take (j + 1)) [])[i]!.publicKey = (RSOR.path nike
+      q.fwd [.recipient q.receiver])[i]!.publicKey := fun i hi => by
+    rw [RSOR.path_getElem! nike _ _ i (by omega), RSOR.path_getElem! nike _ _ i (by omega)]
+    exact congrArg (fun h : Protocols.RSOR.Hop Name (RSOR.Key nike) =>
+      Util.Bytes.ofVector (nike.encodePublicKey h.key.1)) List.getElem_take
+  have hcut : ∀ i < j + 1, (hopKeysWith nike kdfS c (RSOR.path nike (q.fwd.take (j + 1)) []) j t
+      (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray[i]! = (hopKeysWith nike kdfS c
+      (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+      q.receiver]).size).toArray[i]! := fun i hi => by
+    rw [hsz1, hlen]
+    exact hopKeysWith_cut nike kdfS c _ _ j t (j + 1) _ (by omega) hpub i hi
+  have hgj : (blindElem nike (Util.Bytes.ofVector (nike.encodePublicKey (nike.derivePublicKey c)))
+      (hopKeysWith nike kdfS c (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike
+      q.fwd [.recipient q.receiver]).size).toArray j).size = nike.publicKeySize :=
+    (blindElem_size nike _ _ _).trans (Util.Bytes.size_ofVector _)
+  have hgj' : (blindElem nike (Util.Bytes.ofVector (nike.encodePublicKey (nike.derivePublicKey c)))
+      (hopKeysWith nike kdfS c (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike
+      (q.fwd.take (j + 1)) []).size).toArray j).size = nike.publicKeySize :=
+    (blindElem_size nike _ _ _).trans (Util.Bytes.size_ofVector _)
+  have hs : nikeHdrTrace geom (Function.update (keysKs geom streamS (hopKeysWith nike kdfS c
+      (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+      q.receiver]).size).toArray) j U) (Function.update (keysTag macS (hopKeysWith nike kdfS c
+      (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+      q.receiver]).size).toArray) j fun _ => tg) (blindElem nike (Util.Bytes.ofVector
+      (nike.encodePublicKey (nike.derivePublicKey c))) (hopKeysWith nike kdfS c (RSOR.path nike
+      q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+      q.receiver]).size).toArray) (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient
+      q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver])
+        ((RSOR.path nike q.fwd [.recipient q.receiver]).size - j)
+      = nikeHdrTrace geom (Function.update (keysKs geom streamS (hopKeysWith nike kdfS c (RSOR.path
+          nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray)
+          j U') (Function.update (keysTag macS (hopKeysWith nike kdfS c (RSOR.path nike (q.fwd.take
+          (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray) j fun _ => tg)
+          (blindElem nike (Util.Bytes.ofVector (nike.encodePublicKey (nike.derivePublicKey c)))
+          (hopKeysWith nike kdfS c (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike
+          (q.fwd.take (j + 1)) []).size).toArray) (RSOR.filler nike geom (RSOR.path nike
+          (q.fwd.take (j + 1)) [.recipient q'.receiver]) r'.1) (RSOR.path nike (q.fwd.take (j + 1))
+          [.recipient q'.receiver])
+        ((RSOR.path nike (q.fwd.take (j + 1)) [.recipient q'.receiver]).size - j) := by
+    have h0 := nikeHdrTrace_isSome geom (Function.update (keysKs geom streamS (hopKeysWith nike
+        kdfS c (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+        q.receiver]).size).toArray) j U) (Function.update (keysKs geom streamS (hopKeysWith nike
+        kdfS c (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+        q.receiver]).size).toArray) j U) (Function.update (keysTag macS (hopKeysWith nike kdfS c
+        (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+        q.receiver]).size).toArray) j fun _ => tg) (keysTag macS (hopKeysWith nike kdfS c
+        (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+        q.receiver]).size).toArray)
+      (blindElem nike (Util.Bytes.ofVector (nike.encodePublicKey (nike.derivePublicKey c)))
+          (hopKeysWith nike kdfS c (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path
+          nike q.fwd [.recipient q.receiver]).size).toArray) (blindElem nike (Util.Bytes.ofVector
+          (nike.encodePublicKey (nike.derivePublicKey c))) (hopKeysWith nike kdfS c (RSOR.path nike
+          q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+          q.receiver]).size).toArray) (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient
+          q.receiver]) r.1) (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient q.receiver])
+          r.1) (RSOR.path nike q.fwd [.recipient q.receiver])
+      ((RSOR.path nike q.fwd [.recipient q.receiver]).size - j)
+    have h1 := nikeHdrTrace_isSome geom (Function.update (keysKs geom streamS (hopKeysWith nike
+        kdfS c (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1))
+        []).size).toArray) j U') (Function.update (keysKs geom streamS (hopKeysWith nike kdfS c
+        (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1))
+        []).size).toArray) j U') (Function.update (keysTag macS (hopKeysWith nike kdfS c (RSOR.path
+        nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray) j
+        fun _ => tg) (keysTag macS (hopKeysWith nike kdfS c (RSOR.path nike (q.fwd.take (j + 1))
+        []) j t (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray)
+      (blindElem nike (Util.Bytes.ofVector (nike.encodePublicKey (nike.derivePublicKey c)))
+          (hopKeysWith nike kdfS c (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike
+          (q.fwd.take (j + 1)) []).size).toArray) (blindElem nike (Util.Bytes.ofVector
+          (nike.encodePublicKey (nike.derivePublicKey c))) (hopKeysWith nike kdfS c (RSOR.path nike
+          (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray)
+          (RSOR.filler nike geom (RSOR.path nike (q.fwd.take (j + 1)) [.recipient q'.receiver])
+          r'.1) (RSOR.filler nike geom (RSOR.path nike (q.fwd.take (j + 1)) [.recipient
+          q'.receiver]) r'.1)
+      (RSOR.path nike (q.fwd.take (j + 1)) [.recipient q'.receiver]) ((RSOR.path nike (q.fwd.take
+          (j + 1)) [.recipient q'.receiver]).size - j)
+    rw [hT] at h0
+    rw [hT'] at h1
+    obtain ⟨s, hs0⟩ := Option.isSome_iff_exists.mp h0
+    obtain ⟨s', hs1⟩ := Option.isSome_iff_exists.mp h1
+    obtain ⟨a1, a2⟩ := nikeHdrTrace_at_msg nike geom _ _ _ _ _ j (by omega) hgj s hs0
+    obtain ⟨b1, b2⟩ := nikeHdrTrace_at_msg nike geom _ _ _ _ _ j (by rw [hszS, hlen]; omega)
+      hgj' s' hs1
+    have htag0 : ∀ (m : ℕ) (x : ByteArray), ((Function.update (keysTag macS (hopKeysWith nike kdfS
+        c (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+        q.receiver]).size).toArray) j fun _ => tg) m x).size = macLength := fun m x => by
+      by_cases hm : m = j
+      · rw [hm, Function.update_self]
+        exact htg
+      · rw [Function.update_of_ne hm]
+        exact (Util.Bytes.size_ofVector _).trans hmactag
+    have htag1 : ∀ (m : ℕ) (x : ByteArray), ((Function.update (keysTag macS (hopKeysWith nike kdfS
+        c (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1))
+        []).size).toArray) j fun _ => tg) m x).size = macLength := fun m x => by
+      by_cases hm : m = j
+      · rw [hm, Function.update_self]
+        exact htg
+      · rw [Function.update_of_ne hm]
+        exact (Util.Bytes.size_ofVector _).trans hmactag
+    have hfill : ∀ (pth : Array PathHop) (rr : RSOR.Randomness nike geom),
+        (RSOR.filler nike geom pth rr.1).size = (geom.nrHops - pth.size) *
+            geom.perHopRoutingInfoLength := fun pth rr => by
+      have hmul : (geom.nrHops - pth.size) * geom.perHopRoutingInfoLength
+          ≤ geom.routingInfoLength := by
+        rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
+        exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+      unfold RSOR.filler
+      rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+      omega
+    have hsize : s.1.size = s'.1.size := by
+      rw [(nikeHdrTrace_size geom _ _ _ _ _ hnnh hle (hfill _ r) htag0 _ s hs0).1,
+        (nikeHdrTrace_size geom _ _ _ _ _ hnnh hle (hfill _ r') htag1 _ s' hs1).1, hsz0, hszS, hlen]
+      have := q.fwd.length_le
+      congr 1
+      omega
+    rw [hs0, hs1]
+    refine congrArg some (Prod.ext ?_ ?_)
+    · rw [a1, b1, hdrMsg_update_tag geom _ _ _ _ _ j (by omega),
+        hdrMsg_update_tag geom _ _ _ _ _ j (by rw [hszS, hlen]; omega), hM,
+        hsize]
+    · rw [a2, b2, Function.update_self, Function.update_self]
+  have hpkt := nikePktFn_front geom (Function.update (keysKs geom streamS (hopKeysWith nike kdfS c
+      (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+      q.receiver]).size).toArray) j U) (Function.update (keysKs geom streamS (hopKeysWith nike kdfS
+      c (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1))
+      []).size).toArray) j U') (Function.update (keysTag macS (hopKeysWith nike kdfS c (RSOR.path
+      nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+      q.receiver]).size).toArray) j fun _ => tg) (Function.update (keysTag macS (hopKeysWith nike
+      kdfS c (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1))
+      []).size).toArray) j fun _ => tg) (Function.update (keysEnc cipher (hopKeysWith nike kdfS c
+      (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike q.fwd [.recipient
+      q.receiver]).size).toArray) j fun _ => e) (Function.update (keysEnc cipher (hopKeysWith nike
+      kdfS c (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1))
+      []).size).toArray) j fun _ => e)
+    (blindElem nike (Util.Bytes.ofVector (nike.encodePublicKey (nike.derivePublicKey c)))
+        (hopKeysWith nike kdfS c (RSOR.path nike q.fwd [.recipient q.receiver]) j t (RSOR.path nike
+        q.fwd [.recipient q.receiver]).size).toArray) (blindElem nike (Util.Bytes.ofVector
+        (nike.encodePublicKey (nike.derivePublicKey c))) (hopKeysWith nike kdfS c (RSOR.path nike
+        (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray)
+        (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient q.receiver]) r.1) (RSOR.filler
+        nike geom (RSOR.path nike (q.fwd.take (j + 1)) [.recipient q'.receiver]) r'.1) (RSOR.path
+        nike q.fwd [.recipient q.receiver])
+    (RSOR.path nike (q.fwd.take (j + 1)) [.recipient q'.receiver]) (RSOR.body nike macS kdfS
+        streamS geom q r) (RSOR.body nike macS kdfS streamS geom q' r')
+    j (by omega) (by rw [hszS, hlen]; omega)
+    (fun i hi => ⟨by
+        rw [Function.update_of_ne (by omega), Function.update_of_ne (by omega)]
+        unfold keysKs
+        rw [hcut i (by omega)], by
+        rw [Function.update_of_ne (by omega), Function.update_of_ne (by omega)]
+        funext x
+        unfold keysTag
+        rw [hcut i (by omega)],
+      blindElem_congr_lt nike _ _ _ i fun n hn => by rw [hcut n (by omega)], by
+        rw [Function.update_of_ne (by omega), Function.update_of_ne (by omega)]
+        funext x
+        unfold keysEnc
+        rw [hcut i (by omega)], by
+        rw [RSOR.path_getElem! nike _ _ i (by omega),
+          RSOR.path_getElem! nike _ _ i (by rw [hlen]; omega)]
+        exact (ite_eq_right (by omega)).trans (ite_eq_right (by rw [hlen]; omega)).symm, by
+        rw [RSOR.path_getElem! nike _ _ (i + 1) (by omega),
+          RSOR.path_getElem! nike _ _ (i + 1) (by rw [hlen]; omega)]
+        exact congrArg (fun h : Protocols.RSOR.Hop Name (RSOR.Key nike) => h.name)
+          List.getElem_take.symm⟩)
+    rfl hs e (fun b => by rw [Function.update_self]) (fun b => by rw [Function.update_self]) hb hb'
+  unfold onionOfStream
+  rw [hP, hpkt]
+  cases nikePktFn geom (Function.update (keysKs geom streamS (hopKeysWith nike kdfS c (RSOR.path
+      nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray) j
+      U') (Function.update (keysTag macS (hopKeysWith nike kdfS c (RSOR.path nike (q.fwd.take (j +
+      1)) []) j t (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray) j fun _ => tg)
+      (Function.update (keysEnc cipher (hopKeysWith nike kdfS c (RSOR.path nike (q.fwd.take (j +
+      1)) []) j t (RSOR.path nike (q.fwd.take (j + 1)) []).size).toArray) j fun _ => e) (blindElem
+      nike (Util.Bytes.ofVector (nike.encodePublicKey (nike.derivePublicKey c))) (hopKeysWith nike
+      kdfS c (RSOR.path nike (q.fwd.take (j + 1)) []) j t (RSOR.path nike (q.fwd.take (j + 1))
+      []).size).toArray) (RSOR.filler nike geom (RSOR.path nike (q.fwd.take (j + 1)) [.recipient
+      q'.receiver]) r'.1) (RSOR.path nike (q.fwd.take (j + 1)) [.recipient q'.receiver])
+    (RSOR.body nike macS kdfS streamS geom q' r') <;> rfl
+
 end Shift
 
 /-! ## The two final games -/

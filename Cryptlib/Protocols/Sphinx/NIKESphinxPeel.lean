@@ -1012,6 +1012,55 @@ theorem hdrMsg_shift (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteA
     KEMSphinx.xorBytes_shift _ _ _ (hc.trans hX'.symm) (hsz.trans hc.symm), hge, hp]
   simp only [ByteArray.append_assoc]
 
+/-- **The header's state after hop `i`'s step, read off the bytes under hop `i`'s tag**: the
+masked routing information is those bytes after the element, and the tag is the hop's tag on
+them. -/
+theorem nikeHdrTrace_at_msg (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (i : ℕ)
+    (hi : i < path.size) (hge : (ge i).size = nike.publicKeySize) (s : ByteArray × ByteArray)
+    (h : nikeHdrTrace geom ks tag ge filler path (path.size - i) = some s) :
+    s.1 = (hdrMsg geom ks tag ge filler path i).extract (2 + nike.publicKeySize)
+        (2 + nike.publicKeySize + s.1.size)
+      ∧ s.2 = tag i (hdrMsg geom ks tag ge filler path i) := by
+  rw [nikeHdrTrace_at geom ks tag ge filler path i hi] at h
+  have hv : v0AD.size = 2 := rfl
+  have hva : (v0AD ++ ge i).size = 2 + nike.publicKeySize := by
+    rw [ByteArray.size_append, hv, hge]
+  cases h1 : nikeHdrTrace geom ks tag ge filler path (path.size - 1 - i) with
+  | none => rw [h1] at h; cases h
+  | some s0 =>
+    rw [h1] at h
+    dsimp only at h
+    cases hf : nikeFragment geom path s0.2 i with
+    | error e => rw [hf] at h; cases h
+    | ok F =>
+      rw [hf] at h
+      obtain rfl := Option.some.inj h
+      refine ⟨?_, rfl⟩
+      dsimp only
+      unfold hdrMsg
+      rw [h1]
+      dsimp only
+      rw [hf]
+      dsimp only
+      rw [Util.Bytes.extract_append_of_le _ _ (by rw [ByteArray.size_append, hva])]
+      have := Util.Bytes.extract_append_right (v0AD ++ ge i)
+        (xorBytes (F ++ s0.1) ((ks i).extract 0 (geom.routingInfoLength
+          + geom.perHopRoutingInfoLength - (i + 1) * geom.perHopRoutingInfoLength)))
+      rw [hva] at this
+      exact this.symm
+
+omit nike in
+/-- The bytes under hop `j`'s tag do not read hop `j`'s tagging function. -/
+theorem hdrMsg_update_tag (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (j : ℕ)
+    (hj : j < path.size) (f : ByteArray → ByteArray) :
+    hdrMsg geom ks (Function.update tag j f) ge filler path j
+      = hdrMsg geom ks tag ge filler path j := by
+  unfold hdrMsg
+  rw [nikeHdrTrace_congr_tag geom ks (Function.update tag j f) tag ge filler path
+    (path.size - 1 - j) (by omega) fun i hi _ => Function.update_of_ne (by omega) f tag]
+
 end Layer
 
 /-! ## What a relay forwards -/

@@ -715,7 +715,9 @@ for it:
      difference of the two contents gives the replacement's bytes (`xorBytes_shift`, shared
      with the KEM proof). For a request and its replacement cut after the relay, with the
      hops' keys of the two games, the bytes under the relay's tag agree under the shift
-     (`onionMsgStream_shift`). Not yet applied to the games' runs.
+     (`onionMsgStream_shift`), and then the onions shown are one packet
+     (`onionOfStream_shift`: the header's state at the relay is read off those bytes,
+     `nikeHdrTrace_at_msg`). Not yet applied to the games' runs.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).
