@@ -214,6 +214,106 @@ theorem prEvent_swapReplyBad_le (names : Role → RSOR.Name) (A : (Protocols.RSO
     (Nat.sub_one_lt (Nat.ne_of_gt hf))
   exact ⟨hk, hgood.1, pkt, pktL, h0, hL⟩
 
+/-- The draws of the two keyed games of the sender on which no seed fails: the sender's, and
+those of the hops in front of it on the rest of the backward path. -/
+def swapSeedsGood (s : Vector UInt8 32) (n : ℕ) (seeds : Array (Vector UInt8 32)) : Prop :=
+  kem.Reliable (kem.stateFromSeed s) ∧ ∀ m, m < n - 1 → kem.Reliable (kem.stateFromSeed seeds[m]!)
+
+set_option maxHeartbeats 2000000 in
+/-- With reliable seeds a draw of the world with a fresh onion is good: the sender's key pair
+is a key pair and the fresh onion's first layer builds. -/
+theorem swapFreshGood_of_reliable
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary)
+    (d : KeyedDraw (swapFreshAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)) (hd
+        : d ∈ support (keyedDraw cipher macS kdfS streamS geom (swapFreshAdv kem cipher macS kdfS
+        streamS geom hvalid hmactag h16 names A)))
+    (hgood : swapSeedsGood kem d.s ((propChOf d).c.req.back.drop (propChOf d).c.pos).hops.length
+      (propOthOf d).2.2.2.1.1.toArray) :
+    swapFreshGood kem cipher macS kdfS streamS geom hvalid hmactag h16 d := by
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold keyedDraw at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, cs, -, s, -, o, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  exact ⟨hk, hgood.1,
+    layer_zero_builds kem cipher macS kdfS streamS hvalid
+      (Protocols.RSOR.BackwardChallenge.swapReq (propChOf d).c (propOthOf d).2.1
+        (propOthOf d).2.2.1).fwd
+      (List.length_pos_iff.2 ((propChOf d).c.req.back.drop_ne (propChOf d).c.pos.isLt)) _
+      (Or.inl ⟨_, rfl⟩) _ _
+      ((RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm),
+    hgood.2⟩
+
+/-- **A draw of the world with a fresh onion that is not good has a seed that is not
+reliable.** -/
+theorem prEvent_not_swapFreshGood_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (swapFreshAdv kem cipher macS kdfS streamS
+        geom hvalid hmactag h16 names A))}[¬ swapFreshGood kem cipher macS kdfS streamS geom hvalid
+        hmactag h16 d]
+      ≤ Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (swapFreshAdv kem cipher macS kdfS
+          streamS geom hvalid hmactag h16 names A))}[¬ swapSeedsGood kem d.s
+        ((propChOf d).c.req.back.drop (propChOf d).c.pos).hops.length
+        (propOthOf d).2.2.2.1.1.toArray] :=
+  prEvent_mono_of_support _ _ _ fun d hd hbad hgood =>
+    hbad (swapFreshGood_of_reliable kem cipher macS kdfS streamS geom hvalid hmactag h16 hsurb
+        names A d hd hgood)
+
+set_option maxHeartbeats 2000000 in
+/-- **So has one that is not good for the payload step**: at the sender, the last hop of the
+fresh onion's path, the bytes behind the tag are the zero tag and the payload. -/
+theorem prEvent_not_swapFreshGoodP_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (swapFreshAdv kem cipher macS kdfS streamS
+        geom hvalid hmactag h16 names A))}[¬ swapFreshGoodP kem cipher macS kdfS streamS geom
+        hvalid hmactag h16 d]
+      ≤ Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (swapFreshAdv kem cipher macS kdfS
+          streamS geom hvalid hmactag h16 names A))}[¬ swapSeedsGood kem d.s
+        ((propChOf d).c.req.back.drop (propChOf d).c.pos).hops.length
+        (propOthOf d).2.2.2.1.1.toArray] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood =>
+    hbad ⟨swapFreshGood_of_reliable kem cipher macS kdfS streamS geom hvalid hmactag h16 hsurb
+        names A d hd hgood, fun k => ?_⟩
+  have hf : 0 < ((propChOf d).c.req.back.drop (propChOf d).c.pos).hops.length :=
+    List.length_pos_iff.2 ((propChOf d).c.req.back.drop_ne (propChOf d).c.pos.isLt)
+  refine (congrArg ByteArray.size (relayBackAt_last kem cipher macS kdfS streamS geom _ _ _ _ _
+    ((Nat.sub_add_cancel hf).trans (RSOR.path_size kem _ _).symm))).trans ?_
+  rw [ByteArray.size_append]
+  exact congrArg₂ (· + ·) Array.size_replicate
+    ((RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm)
+
+set_option maxHeartbeats 2000000 in
+/-- **A draw of the world where a reply layer is sent on that is not good has a seed that is
+not reliable.** -/
+theorem prEvent_not_swapReplyGood_le (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair
+    (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (swapReplyAdv kem cipher macS kdfS streamS
+        geom hvalid hmactag h16 names A))}[¬ swapReplyGood kem cipher macS kdfS streamS geom hvalid
+        hmactag h16 d]
+      ≤ Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (swapReplyAdv kem cipher macS kdfS
+          streamS geom hvalid hmactag h16 names A))}[¬ swapSeedsGood kem d.s
+        ((propChOf d).c.req.back.drop (propChOf d).c.pos).hops.length
+        (propOthOf d).2.1.1.1.toArray] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood => hbad ?_
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold keyedDraw at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, cs, -, s, -, o, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  exact ⟨hk, hgood.1,
+    layer_zero_builds kem default macS kdfS streamS hvalid
+      ((propChOf d).c.req.back.drop (propChOf d).c.pos)
+      (List.length_pos_iff.2 ((propChOf d).c.req.back.drop_ne (propChOf d).c.pos.isLt)) _
+      (Or.inr ⟨_, rfl⟩) _ _ Array.size_replicate,
+    hgood.2⟩
+
 end SwapEvents
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
