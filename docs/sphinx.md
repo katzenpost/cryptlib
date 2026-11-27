@@ -353,6 +353,9 @@ statement about the KEM not failing, a layer being built, or a uniform block hav
 The events of the SLU← bound are being reduced to the KEM in `KEMSphinxSLUEvents.lean`. So
 far: a bad draw of world 0 has a seed that is not reliable (`prEvent_backBad0_le`), and a bad
 draw of world 1 has one on the path the honest relay's layer is on (`prEvent_backBad1_le`).
+The same for the sender's two keyed games: a bad draw has a seed that is not reliable, the
+sender's or one on the rest of the backward path (`prEvent_swapFreshBad_le`,
+`prEvent_swapReplyBad_le`).
 A forward layer builds when the sender's payload has the forward payload's length; the lemmas
 take that as a fact about the geometry (`hsurb`: room for a reply block). The other event terms
 of `backwardUnlinkable_le` are not reduced yet.
