@@ -503,6 +503,23 @@ replacement; with the hop's own keys it is the sender's keys (`hopKeysWith_hopKe
 self-test builds a packet from replaced keys and checks that the relays in front still forward
 it and the relay at the replaced hop rejects it (`runReplacedKeys`).
 
+The game is `keyGame` (`NIKESphinxGame.lean`), and `keyAdvantage` is the term the properties
+will carry. The adversary, with the honest relay's oracle, chooses a path and the relay's place
+on it; the challenger puts the relay's key there, draws the sender's secret, and hands over the
+sender's group element and every hop's keys. In one world the keys are the sender's. In the
+other the relay's four keys and the seed of its blinding factor are uniform, and the hops after
+it are derived from that factor. The relay answers the element that reaches its place with the
+keys handed over for it (`procImplK`), where the paper's relay refuses that element; the
+adversary holds those keys, so it could answer itself. That the two forms are equivalent is not
+proved in Lean, and neither is the paper's Theorem 3 (Gap Diffie-Hellman with random oracles
+gives the game): our keys come from a KDF, not a random oracle.
+
+A relay's processing now has a form that takes the hop's keys from a function of the group
+element (`unwrapNIKEWith`, `procWith`); the relay is that form on the keys it derives
+(`unwrapNIKE_eq_unwrapNIKEWith`, `unwrap_eq_procWith`). The self-test checks that a relay
+handed the replaced keys for the arriving element accepts the layer, and does not use them for
+another element.
+
 Steps, in order:
 
 - the game: a hop's derived keys, blinding factor included, replaced by uniform ones, with the

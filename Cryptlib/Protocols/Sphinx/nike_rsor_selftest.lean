@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Cryptlib.Protocols.Sphinx.Geometry
 import Cryptlib.Protocols.Sphinx.NIKESphinxRSOR
-import Cryptlib.Protocols.Sphinx.NIKESphinxHeaderFn
+import Cryptlib.Protocols.Sphinx.NIKESphinxGame
 import Cryptlib.Primitives.NIKE.Schemes
 
 /-!
@@ -228,9 +228,21 @@ def runReplacedKeys (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidForNIKE 
         | _ =>
           IO.eprintln s!"  runReplacedKeys: hop {i}, in front of the replaced one, does not forward"
           ok := false
-      else if i = j ∧ step.isSome then
-        IO.eprintln s!"  runReplacedKeys: hop {i} accepts a layer made with other keys"
-        ok := false
+      else if i = j then
+        if step.isSome then
+          IO.eprintln s!"  runReplacedKeys: hop {i} accepts a layer made with other keys"
+          ok := false
+        -- The game's relay, handed the replaced keys for the element that arrives, accepts it.
+        let pkt' := Cryptlib.Protocols.Sphinx.KEMSphinx.RSOR.join o
+        let ge := groupElem nike (RSOR.clientKey nike geom d) keys j
+        if (procWith nike wbCipher macS streamS geom (keysExcept nike kdfS sk ge t) pkt').isNone
+        then
+          IO.eprintln s!"  runReplacedKeys: hop {i} rejects the layer with the keys handed to it"
+          ok := false
+        if (procWith nike wbCipher macS streamS geom
+            (keysExcept nike kdfS sk (ge ++ ge) t) pkt').isSome then
+          IO.eprintln s!"  runReplacedKeys: hop {i} uses handed keys for another element"
+          ok := false
     pure ok
   else
     IO.eprintln "  runReplacedKeys: the path is not a route"
