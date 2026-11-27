@@ -589,6 +589,10 @@ A packet uses a hop's payload encryption once, on the block the hops after it le
 (`encTrace_encAt`, `nikePktFn_encAt`), as it uses the hop's tag once.
 A relay decrypts one block, the packet's payload (`unwrapNIKEDec_congr`, `procD_congr`), and a
 relay with a cipher is the relay that decrypts by the cipher (`procWith_eq_procD`).
+A relay that answers one element under one header only decrypts, under that header, the
+onion's payload with its payload key, and under any other refuses the element (`onlyAns_join`).
+Still to do for the payload step of world 0: the game's oracle in the payload game's form, and
+the equality of the two games.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two

@@ -876,4 +876,83 @@ theorem keyGame_false_sub_gameOnly_le
 
 end PropGame
 
+/-! ## A relay that answers one header -/
+
+section OneHeader
+
+variable (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+  (streamS : StreamCipher) (geom : Geometry)
+
+/-- The relay's answers when it is handed the keys `t` for the element `a` and answers that
+element under the header `Mb` with the tag `tag` only. -/
+def onlyAns (sk : nike.PrivateKey) (a : ByteArray) (t : HopKeys) (Mb : ByteArray)
+    (tag : Vector UInt8 macS.tagSize) (pkt : ByteArray) : ProcResult :=
+  if pkt.extract 2 (2 + nike.publicKeySize) = a then
+    if pkt.extract 0 ((2 + nike.publicKeySize + geom.routingInfoLength) + macS.tagSize) = Mb ++
+        Util.Bytes.ofVector tag then
+      procWith nike cipher (Primitives.MAC.MAC.const tag) streamS geom (fun _ => .ok t) pkt
+    else none
+  else procWith nike cipher macS streamS geom (relayKeys nike kdfS sk) pkt
+
+/-- The relay's answers when it refuses the element `a`. -/
+def noneAns (sk : nike.PrivateKey) (a : ByteArray) (pkt : ByteArray) : ProcResult :=
+  if pkt.extract 2 (2 + nike.publicKeySize) = a then none
+  else procWith nike cipher macS streamS geom (relayKeys nike kdfS sk) pkt
+
+/-- **What a relay that answers one header does with an onion.** Under that header it decrypts
+the onion's payload with its payload key and goes on from the decrypted block; under any other
+it refuses the element. -/
+theorem onlyAns_join (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength)
+    (sk : nike.PrivateKey) (a : ByteArray) (t : HopKeys) (Mb : ByteArray)
+    (tag : Vector UInt8 macS.tagSize) (Hv : Vector UInt8 geom.headerLength)
+    (hH : Util.Bytes.ofVector Hv = Mb ++ Util.Bytes.ofVector tag)
+    (hcar : (Util.Bytes.ofVector Hv).extract 2 (2 + nike.publicKeySize) = a)
+    (o : Onion geom) :
+    onlyAns nike cipher macS kdfS streamS geom sk a t Mb tag (join o)
+      = if o.1 = Hv then
+          procD nike (Primitives.MAC.MAC.const tag) streamS geom (L := (geom.payloadTagLength +
+              geom.forwardPayloadLength)) (fun _ => .ok t)
+            (fun _ _ => Util.Bytes.toVecN _ (cipher.decrypt t.payloadEncryption.toArray
+              (Util.Bytes.ofVector t.headerEncryptionIV) (Util.Bytes.ofVector o.2))) (join o)
+        else noneAns nike cipher macS kdfS streamS geom sk a (join o) := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have hoff : (2 + nike.publicKeySize + geom.routingInfoLength) + macS.tagSize = geom.headerLength
+      := by
+    rw [hhdr, hmactag]
+    rfl
+  have e1 : (join o).extract 0 geom.headerLength = Util.Bytes.ofVector o.1 := by
+    unfold join
+    simpa using Cryptlib.Util.Bytes.extract_append_left (Util.Bytes.ofVector o.1)
+      (Util.Bytes.ofVector o.2)
+  have e2 : (join o).extract geom.headerLength (join o).size = Util.Bytes.ofVector o.2 := by
+    unfold join
+    simpa using Cryptlib.Util.Bytes.extract_append_right (Util.Bytes.ofVector o.1)
+      (Util.Bytes.ofVector o.2)
+  have e3 : (join o).extract 2 (2 + nike.publicKeySize)
+      = (Util.Bytes.ofVector o.1).extract 2 (2 + nike.publicKeySize) := by
+    rw [← e1]
+    exact (KEMSphinx.extract_of_prefix_eq (n := geom.headerLength)
+      (by rw [ByteArray.extract_extract]; simp) 2 (2 + nike.publicKeySize)
+      (by rw [hhdr]; unfold Constants.adLength; omega)).symm
+  have hpoff : 2 + nike.publicKeySize + geom.routingInfoLength + macLength
+      = geom.headerLength := by
+    rw [hhdr]
+    rfl
+  unfold onlyAns noneAns
+  rw [hoff, e1, e3]
+  by_cases ho : o.1 = Hv
+  · rw [ite_eq_left ho, ho, hcar, ite_eq_left rfl, ite_eq_left hH]
+    rw [procWith_eq_procD nike cipher (Primitives.MAC.MAC.const tag) streamS geom (L :=
+        (geom.payloadTagLength + geom.forwardPayloadLength))
+      (fun _ => .ok t) (join o) (by rw [hpoff, e2, Util.Bytes.size_ofVector])]
+    refine procD_congr nike _ streamS geom _ _ _ (join o) fun k hk => ?_
+    obtain rfl : t = k := by injection hk
+    rw [hpoff, e2, Util.Bytes.toVecN_ofVector]
+  · rw [ite_eq_right ho]
+    have hne : Util.Bytes.ofVector o.1 ≠ Mb ++ Util.Bytes.ofVector tag := fun h =>
+      ho (by simpa using congrArg (Util.Bytes.toVecN geom.headerLength) (h.trans hH.symm))
+    rw [ite_eq_right hne]
+
+end OneHeader
+
 end Cryptlib.Protocols.Sphinx.NIKESphinx

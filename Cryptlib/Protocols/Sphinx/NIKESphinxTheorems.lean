@@ -1894,19 +1894,36 @@ def unwrapNIKEDec (nike : NIKE) (macS : MAC)
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
-/-- The relay decrypts one block: the packet's payload. -/
+/-- Two computations after the same lookup agree if they agree on what the lookup gives. -/
+theorem except_bind_congr {ε α β : Type} (E : Except ε α) (F F' : α → Except ε β)
+    (h : ∀ a, E = .ok a → F a = F' a) : (E >>= F) = (E >>= F') := by
+  cases E with
+  | error e => rfl
+  | ok a => exact h a rfl
+
+set_option maxHeartbeats 1000000 in
+/-- The relay decrypts one block: the packet's payload, with the keys of the packet's
+element. -/
 theorem unwrapNIKEDec_congr (nike : NIKE) (macS : MAC) (streamS : StreamCipher) (geom : Geometry)
     (keysOf : ByteArray → Except String HopKeys) (dec dec' : HopKeys → ByteArray → ByteArray)
     (hdec : ∀ k b, (dec k b).size = b.size) (hdec' : ∀ k b, (dec' k b).size = b.size)
     (pkt : ByteArray)
-    (h : ∀ k, dec k (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength + macLength)
-        pkt.size)
-      = dec' k (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength + macLength)
-        pkt.size)) :
+    (h : ∀ k, keysOf (pkt.extract 2 (2 + nike.publicKeySize)) = .ok k →
+      dec k (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength + macLength) pkt.size)
+        = dec' k (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength + macLength)
+          pkt.size)) :
     unwrapNIKEDec nike macS streamS geom keysOf dec hdec pkt
       = unwrapNIKEDec nike macS streamS geom keysOf dec' hdec' pkt := by
   unfold unwrapNIKEDec
-  simp only [h]
+  by_cases h1 : pkt.size < 2 + nike.publicKeySize + geom.routingInfoLength + macLength
+  · rw [dite_eq_left h1, dite_eq_left h1]
+  rw [dite_eq_right h1, dite_eq_right h1]
+  by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
+  · rw [ite_eq_left h2, ite_eq_left h2]
+    exact except_bind_congr _ _ _ fun a ha => by cases ha
+  rw [ite_eq_right h2, ite_eq_right h2]
+  exact except_bind_congr (keysOf (pkt.extract 2 (2 + nike.publicKeySize))) _ _
+    fun k hk => by simp only [h k hk]
 
 /-- `unwrapNIKE` with the hop's keys had from its group element by `keysOf`, in place of the
 relay's private key and the KDF. -/
