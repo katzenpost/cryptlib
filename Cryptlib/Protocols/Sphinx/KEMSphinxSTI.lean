@@ -2562,6 +2562,101 @@ theorem tailBack_cut_le {hon : Protocols.RSOR.Honest 𝒮}
             1) = Except.ok fwd)).symm.trans ?_
   simp only [map_bind, map_pure]
 
+/-! ### The two games from a uniform keystream -/
+
+omit [SampleableType kem.Plaintext] in
+/-- Drawing the challenger's randomness is drawing its forward draw, the reply's payload key
+and ID, and its backward draw. -/
+theorem evalDistEq_splitRand {δ : Type} (K : (RSOR.Randomness geom) → ProbComp δ) :
+    (do
+      let a ← $ᵗ (RSOR.Draw geom)
+      let x ← $ᵗ (Vector UInt8 64 × Vector UInt8 16)
+      let b ← $ᵗ (RSOR.Draw geom)
+      K (a, (b, x))) =ᵈ ($ᵗ (RSOR.Randomness geom) >>= K) := by
+  have hid : ∀ {α β : Type}, Function.Bijective (Function.uncurry fun (p : α) (q : β) => (p, q)) :=
+    fun {_ _} => Function.bijective_id
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun a =>
+    (OracleComp.EvalDistEq.bind_bind_swap _ _ _).trans
+      (evalDistEq_pair_of_bijective (γ := (RSOR.Draw geom × Vector UInt8 64 × Vector UInt8 16)) hid
+          fun rest => K (a, rest))) ?_
+  exact evalDistEq_pair_of_bijective (γ := (RSOR.Randomness geom)) hid K
+
+omit [SampleableType kem.Plaintext] in
+/-- The adversary's guess from the honest backward relay's MAC key and header keystream, after
+the keyed game's draws. -/
+def backRun (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → ProbComp (Protocols.RSOR.World 𝒮))
+    (Q : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → (q : RSOR.Request kem geom) × Fin q.back.hops.length) (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) (k : Key kem × kem.PrivateKey)
+    (cs : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.tailPair w₀
+        w₁) .back names k.1
+      × (A.State × Protocols.RSOR.Log 𝒮 × (Role → kem.PrivateKey)))
+    (s : Vector UInt8 32) (km : Vector UInt8 32) (u v : Block geom) (o : (RSOR.Randomness geom))
+    (U : ByteArray) : ProbComp Bool :=
+  (simulateQ (tailBackRelays kem cipher macS kdfS streamS geom hvalid hmactag h16 Q cs.1.c (fun h
+      => if h = .back then k.2 else cs.2.2.2 h)
+      (fun y => if y = u then default else v) o (encapOf kem k.1.1 s).1 km U)
+    (A.guess cs.2.1 (tailBackViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 Q cs.1.c o
+        (encapOf kem k.1.1 s).1 km
+      U).onion)).run' cs.2.2.1
+
+omit [SampleableType kem.Plaintext] in
+/-- **A world of that shape from a uniform keystream**, with the backward draw and the
+keystream drawn last. -/
+def backUGame (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → ProbComp (Protocols.RSOR.World 𝒮))
+    (Q : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → (q : RSOR.Request kem geom) × Fin q.back.hops.length) (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) : ProbComp Bool := do
+  let km ← $ᵗ (Vector UInt8 32)
+  let k ← keygen kem
+  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom k.2) ((backAdvK kem cipher macS
+      kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names A).pre k.1)
+  let s ← $ᵗ (Vector UInt8 32)
+  let u ← $ᵗ (Block geom)
+  let v ← $ᵗ (Block geom)
+  let a ← $ᵗ (RSOR.Draw geom)
+  let x ← $ᵗ (Vector UInt8 64 × Vector UInt8 16)
+  let b ← $ᵗ (RSOR.Draw geom)
+  let U ← $ᵗ (Keystream geom)
+  backRun kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names A k cs s km u v (a,
+      (b, x)) (ofVector U)
+
+omit [SampleableType kem.Plaintext] in
+set_option maxHeartbeats 4000000 in
+/-- The keystream generator's ideal experiment for a world of that shape is that game. -/
+theorem backStream_ideal_evalDistEq (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} →
+    Protocols.RSOR.TailChallenge hon
+      → ProbComp (Protocols.RSOR.World 𝒮))
+    (Q : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → (q : RSOR.Request kem geom) × Fin q.back.hops.length) (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) :
+    PRGScheme.prgIdealExperiment (backStreamAdvK kem cipher macS kdfS streamS geom hvalid hmactag
+        h16 w₀ w₁ Q names A)
+      =ᵈ backUGame kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names A := by
+  unfold PRGScheme.prgIdealExperiment backStreamAdvK propStreamAdv keyedDraw backUGame
+  simp only [bind_assoc, pure_bind]
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun km => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun k => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun cs => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun s => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun o =>
+    (OracleComp.EvalDistEq.bind_bind_swap _ _ _).trans
+      (EvalDistEq.bind_right _ fun u => OracleComp.EvalDistEq.bind_bind_swap _ _ _)) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun u => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun v => ?_
+  exact (evalDistEq_splitRand geom fun o => $ᵗ (Keystream geom) >>= fun U =>
+    backRun kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names A k cs s km u v o
+        (ofVector U)).symm
+
 end TailGame
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
