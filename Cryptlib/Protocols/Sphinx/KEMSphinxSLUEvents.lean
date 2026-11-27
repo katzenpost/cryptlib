@@ -314,6 +314,58 @@ theorem prEvent_not_swapReplyGood_le (names : Role → RSOR.Name) (A : (Protocol
       (Or.inr ⟨_, rfl⟩) _ _ Array.size_replicate,
     hgood.2⟩
 
+omit cipher macS kdfS streamS hvalid hmactag h16 in
+/-- A hop of a route has a ciphertext of the KEM's ciphertext length, whatever its seed: the
+encapsulation to its key does not fail. -/
+theorem kemHopCt_route_size (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem))
+    (last : List RoutingCommand) (seeds : Array (Vector UInt8 32)) (i : ℕ)
+    (hi : i < R.hops.length) :
+    (kemHopCt kem ((RSOR.path kem R last).extract i (RSOR.path kem R last).size) seeds 0).size
+      = kem.ciphertextSize := by
+  rw [path_extract_drop kem geom R last i (le_of_lt hi)]
+  unfold kemHopCt
+  rw [RSOR.path_getElem! kem (R.drop i) last 0 (by simp [Protocols.RSOR.Route.drop]; omega)]
+  obtain ⟨ct, ss, h⟩ := kemEncap_key kem ((R.drop i).hops[0]'(by
+    simp [Protocols.RSOR.Route.drop]; omega)).key (seeds[0]!)
+  rw [h]
+  exact kemEncap_size kem _ _ ct ss h
+
+set_option maxHeartbeats 2000000 in
+/-- **A draw of the last comparison is not good with the chance of one tag.** Its hops'
+ciphertexts have the right length and the fresh onion's payload fits, so what is left is that
+the ideal cipher's second block begins with the zero tag. -/
+theorem prEvent_not_swapFinalGood_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    Pr{let x ← (swapFinalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[¬
+        swapFinalGood kem cipher macS kdfS streamS geom hvalid hmactag h16 x]
+      ≤ (Fintype.card (Vector UInt8 geom.payloadTagLength) : ENNReal)⁻¹ := by
+  have hE : (swapFinalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+        (pure (((ofVector x.2.2.2.1).extract 0 geom.payloadTagLength).data.all (· == 0)) :
+          ProbComp Bool))
+      =ᵈ ($ᵗ (Block geom) >>= fun v =>
+        (pure (((ofVector v).extract 0 geom.payloadTagLength).data.all (· == 0)) :
+          ProbComp Bool)) := by
+    simp only [swapFinalDraw, bind_assoc, pure_bind]
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    exact EvalDistEq.bind_right _ fun v => EvalDistEq.trans
+      (OracleComp.EvalDistEq.bind_const _ _) (OracleComp.EvalDistEq.bind_const _ _)
+  have key := hE (fun b => b = true)
+  simp only [bind_pure_comp, prEvent_map] at key
+  have hz := key.trans (prEvent_zeroPrefix (a := geom.payloadTagLength)
+    (b := geom.forwardPayloadLength) rfl)
+  refine (prEvent_mono _ _ _ fun x h => ?_).trans (le_of_eq hz)
+  by_contra hzero
+  have hlen : ∀ i, i < ((propChOf x.2.1).c.req.back.drop (propChOf x.2.1).c.pos).hops.length - 1 →
+      i < ((propChOf x.2.1).c.req.back.drop (propChOf x.2.1).c.pos).hops.length :=
+    fun i hi => lt_of_lt_of_le hi (Nat.sub_le _ _)
+  exact h ⟨fun i hi => kemHopCt_route_size kem geom _ _ _ i (hlen i hi),
+    fun i hi => kemHopCt_route_size kem geom _ _ _ i (hlen i hi),
+    (RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm, hzero⟩
+
 end SwapEvents
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
