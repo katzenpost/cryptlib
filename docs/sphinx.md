@@ -610,9 +610,24 @@ that is not good. The honest relays' logs after the first phase are well-formed
 For the keystream step: a relay uses its header key and IV for one keystream, so with that
 keystream handed to it the relay does what it does with the stream cipher
 (`unwrapNIKEDec_stream`, `constStream`, `procD_stream`), and the onion reads the relay's
-header key and IV through its keystream only (`onion_streamKey`). The step itself is not done
-for world 0 yet: the adversary against the keystream generator and the equality of the two
-games are still to write.
+header key and IV through its keystream only (`onion_streamKey`). So the payload game of world
+0 with the ideal cipher is the real experiment of the keystream generator `keystreamPRG` for
+the adversary `forwardStreamAdv`, which plays world 0 from the keystream it is given
+(`strRun_eq`, `payExp_false_evalDistEq_prg`).
+
+**World 0 of TLU→ for NIKE Sphinx, so far.** Each line is a proved bound:
+
+- world 0 to the key game's real world: the chance the onion does not build
+  (`play_false_sub_keyGame_le`);
+- real keys to replaced keys: `keyAdvantage` of `forwardAdv` (`play_false_sub_ideal_le`);
+- any header to the challenge header only: a forgery against the MAC, and the chance that the
+  tagged bytes do not have a header's length (`forward_ideal_sub_only_le`);
+- from there to world 0 played from a uniform header keystream, an ideal payload cipher and one
+  header: the cipher's one-query advantage, the keystream generator's advantage, and the chance
+  of a draw that is not good (`forward_only_sub_stream_le`).
+
+These are not yet added up into one statement, and the events are not bounded: they should all
+be zero when the request's onion builds and its body has a payload's length.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two
