@@ -1044,7 +1044,7 @@ theorem forwardPay_run (names : Role → Name) (W : FwdWorld nike cipher macS kd
               geom hvalid hmactag h16 names W (iv, km, he, seed, D) default)) (payTag nike cipher
               macS kdfS streamS geom hvalid hmactag h16 names W (iv, km, he, seed, D)) := by
     funext pkt
-    unfold Relay.ansOf Relay.onlyT onlyAns payTag
+    unfold Relay.ansOf Relay.onlyT onlyAns onlyAnsH payTag
     rw [hmacEq]
     by_cases he : pkt.extract 2 (2 + nike.publicKeySize) = drawElem nike cipher macS kdfS streamS
         geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names

@@ -913,37 +913,40 @@ section OneHeader
 variable (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
   (streamS : StreamCipher) (geom : Geometry)
 
+/-- The relay's answers when it answers the element `a` under the header `Mb` with the tag
+`tag` only, by `hand`, and any other element with its own key. -/
+def onlyAnsH (sk : nike.PrivateKey) (a : ByteArray) (Mb : ByteArray)
+    (tag : Vector UInt8 macS.tagSize) (hand : ByteArray → ProcResult) (pkt : ByteArray) :
+    ProcResult :=
+  if pkt.extract 2 (2 + nike.publicKeySize) = a then
+    if pkt.extract 0 ((2 + nike.publicKeySize + geom.routingInfoLength) + macS.tagSize) = Mb ++
+        Util.Bytes.ofVector tag then hand pkt
+    else none
+  else procWith nike cipher macS streamS geom (relayKeys nike kdfS sk) pkt
+
 /-- The relay's answers when it is handed the keys `t` for the element `a` and answers that
 element under the header `Mb` with the tag `tag` only. -/
 def onlyAns (sk : nike.PrivateKey) (a : ByteArray) (t : HopKeys) (Mb : ByteArray)
-    (tag : Vector UInt8 macS.tagSize) (pkt : ByteArray) : ProcResult :=
-  if pkt.extract 2 (2 + nike.publicKeySize) = a then
-    if pkt.extract 0 ((2 + nike.publicKeySize + geom.routingInfoLength) + macS.tagSize) = Mb ++
-        Util.Bytes.ofVector tag then
-      procWith nike cipher (Primitives.MAC.MAC.const tag) streamS geom (fun _ => .ok t) pkt
-    else none
-  else procWith nike cipher macS streamS geom (relayKeys nike kdfS sk) pkt
+    (tag : Vector UInt8 macS.tagSize) : ByteArray → ProcResult :=
+  onlyAnsH nike cipher macS kdfS streamS geom sk a Mb tag
+    (procWith nike cipher (Primitives.MAC.MAC.const tag) streamS geom (fun _ => .ok t))
 
 /-- The relay's answers when it refuses the element `a`. -/
 def noneAns (sk : nike.PrivateKey) (a : ByteArray) (pkt : ByteArray) : ProcResult :=
   if pkt.extract 2 (2 + nike.publicKeySize) = a then none
   else procWith nike cipher macS streamS geom (relayKeys nike kdfS sk) pkt
 
-/-- **What a relay that answers one header does with an onion.** Under that header it decrypts
-the onion's payload with its payload key and goes on from the decrypted block; under any other
-it refuses the element. -/
-theorem onlyAns_join (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength)
-    (sk : nike.PrivateKey) (a : ByteArray) (t : HopKeys) (Mb : ByteArray)
-    (tag : Vector UInt8 macS.tagSize) (Hv : Vector UInt8 geom.headerLength)
+/-- **What a relay that answers one header does with an onion.** Under that header it answers by
+`hand`; under any other it refuses the element. -/
+theorem onlyAnsH_join (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength)
+    (sk : nike.PrivateKey) (a : ByteArray) (Mb : ByteArray)
+    (tag : Vector UInt8 macS.tagSize) (hand : ByteArray → ProcResult)
+    (Hv : Vector UInt8 geom.headerLength)
     (hH : Util.Bytes.ofVector Hv = Mb ++ Util.Bytes.ofVector tag)
     (hcar : (Util.Bytes.ofVector Hv).extract 2 (2 + nike.publicKeySize) = a)
     (o : Onion geom) :
-    onlyAns nike cipher macS kdfS streamS geom sk a t Mb tag (join o)
-      = if o.1 = Hv then
-          procD nike (Primitives.MAC.MAC.const tag) streamS geom (L := (geom.payloadTagLength +
-              geom.forwardPayloadLength)) (fun _ => .ok t)
-            (fun _ _ => Util.Bytes.toVecN _ (cipher.decrypt t.payloadEncryption.toArray
-              (Util.Bytes.ofVector t.headerEncryptionIV) (Util.Bytes.ofVector o.2))) (join o)
+    onlyAnsH nike cipher macS kdfS streamS geom sk a Mb tag hand (join o)
+      = if o.1 = Hv then hand (join o)
         else noneAns nike cipher macS kdfS streamS geom sk a (join o) := by
   obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
   have hoff : (2 + nike.publicKeySize + geom.routingInfoLength) + macS.tagSize = geom.headerLength
@@ -954,34 +957,45 @@ theorem onlyAns_join (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize =
     unfold join
     simpa using Cryptlib.Util.Bytes.extract_append_left (Util.Bytes.ofVector o.1)
       (Util.Bytes.ofVector o.2)
-  have e2 : (join o).extract geom.headerLength (join o).size = Util.Bytes.ofVector o.2 := by
-    unfold join
-    simpa using Cryptlib.Util.Bytes.extract_append_right (Util.Bytes.ofVector o.1)
-      (Util.Bytes.ofVector o.2)
   have e3 : (join o).extract 2 (2 + nike.publicKeySize)
       = (Util.Bytes.ofVector o.1).extract 2 (2 + nike.publicKeySize) := by
     rw [← e1]
     exact (KEMSphinx.extract_of_prefix_eq (n := geom.headerLength)
       (by rw [ByteArray.extract_extract]; simp) 2 (2 + nike.publicKeySize)
       (by rw [hhdr]; unfold Constants.adLength; omega)).symm
-  have hpoff : 2 + nike.publicKeySize + geom.routingInfoLength + macLength
-      = geom.headerLength := by
-    rw [hhdr]
-    rfl
-  unfold onlyAns noneAns
+  unfold onlyAnsH noneAns
   rw [hoff, e1, e3]
   by_cases ho : o.1 = Hv
   · rw [ite_eq_left ho, ho, hcar, ite_eq_left rfl, ite_eq_left hH]
-    rw [procWith_eq_procD nike cipher (Primitives.MAC.MAC.const tag) streamS geom (L :=
-        (geom.payloadTagLength + geom.forwardPayloadLength))
-      (fun _ => .ok t) (join o) (by rw [hpoff, e2, Util.Bytes.size_ofVector])]
-    refine procD_congr nike _ streamS geom _ _ _ (join o) fun k hk => ?_
-    obtain rfl : t = k := by injection hk
-    rw [hpoff, e2, Util.Bytes.toVecN_ofVector]
   · rw [ite_eq_right ho]
     have hne : Util.Bytes.ofVector o.1 ≠ Mb ++ Util.Bytes.ofVector tag := fun h =>
       ho (by simpa using congrArg (Util.Bytes.toVecN geom.headerLength) (h.trans hH.symm))
     rw [ite_eq_right hne]
+
+/-- **On an onion, a relay with a cipher decrypts the onion's payload** with its payload key
+and goes on from the decrypted block. -/
+theorem procWith_join (hvalid : geom.ValidForNIKE nike) (mac' : MAC) (t : HopKeys)
+    (o : Onion geom) :
+    procWith nike cipher mac' streamS geom (fun _ => .ok t) (join o)
+      = procD nike mac' streamS geom (L := (geom.payloadTagLength + geom.forwardPayloadLength))
+          (fun _ => .ok t)
+        (fun _ _ => Util.Bytes.toVecN _ (cipher.decrypt t.payloadEncryption.toArray
+          (Util.Bytes.ofVector t.headerEncryptionIV) (Util.Bytes.ofVector o.2))) (join o) := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have e2 : (join o).extract geom.headerLength (join o).size = Util.Bytes.ofVector o.2 := by
+    unfold join
+    simpa using Cryptlib.Util.Bytes.extract_append_right (Util.Bytes.ofVector o.1)
+      (Util.Bytes.ofVector o.2)
+  have hpoff : 2 + nike.publicKeySize + geom.routingInfoLength + macLength
+      = geom.headerLength := by
+    rw [hhdr]
+    rfl
+  rw [procWith_eq_procD nike cipher mac' streamS geom (L := (geom.payloadTagLength +
+      geom.forwardPayloadLength))
+    (fun _ => .ok t) (join o) (by rw [hpoff, e2, Util.Bytes.size_ofVector])]
+  refine procD_congr nike _ streamS geom _ _ _ (join o) fun k hk => ?_
+  obtain rfl : t = k := by injection hk
+  rw [hpoff, e2, Util.Bytes.toVecN_ofVector]
 
 end OneHeader
 
@@ -996,65 +1010,108 @@ variable (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
 
 local notation "𝒮" => sphinx nike cipher macS kdfS streamS geom hvalid hmactag h16
 
-/-- **The honest relays, one of them answering one header, decrypt one block under it.** The
-relays' oracle, with the relay `ρ` answering the element `a` under one header only, is the
-oracle in which `ρ` decrypts the payload under that header with its payload key and goes on
-from the decrypted block, and refuses the element under any other header. -/
-theorem oracle_onlyAns (ρ : Role) (sk : Role → nike.PrivateKey) (a : ByteArray) (t : HopKeys)
-    (Mb : ByteArray) (tag : Vector UInt8 macS.tagSize) (Hv : Vector UInt8 geom.headerLength)
+/-- **The honest relays, one of them answering one header, decrypt one block under it.** If
+under that header the relay's answer is `step` and `rep` on a decryption `dec` of the payload,
+the relays' oracle is the oracle in which `ρ` decrypts under that header and refuses the
+element under any other. -/
+theorem oracle_onlyAnsH (ρ : Role) (sk : Role → nike.PrivateKey) (a : ByteArray)
+    (Mb : ByteArray) (tag : Vector UInt8 macS.tagSize) (hand : ByteArray → ProcResult)
+    (Hv : Vector UInt8 geom.headerLength)
     (hH : Util.Bytes.ofVector Hv = Mb ++ Util.Bytes.ofVector tag)
     (hcar : (Util.Bytes.ofVector Hv).extract 2 (2 + nike.publicKeySize) = a)
+    (step : Onion geom → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength) → Option
+        (𝒮).Step)
+    (rep : Msg geom → Onion geom → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+        → Option (Name × Onion geom))
+    (dec : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength) → Vector UInt8
+        (geom.payloadTagLength + geom.forwardPayloadLength))
+    (hstep : ∀ o : Onion geom, o.1 = Hv → stepOf geom (hand (join o)) = step o (dec o.2))
+    (hrep : ∀ (msg : Msg geom) (o : Onion geom), o.1 = Hv →
+      replyOf cipher geom msg (hand (join o)) = rep msg o (dec o.2))
     (patch : Protocols.RSOR.Patch 𝒮) :
     Protocols.RSOR.oracle (S := 𝒮) (m := ProbComp)
-        (fun h o => pure (if h = ρ then stepOf geom (onlyAns nike cipher macS kdfS streamS geom (sk
-            ρ) a t Mb tag (join o))
+        (fun h o => pure (if h = ρ then stepOf geom (onlyAnsH nike cipher macS kdfS streamS geom
+            (sk ρ) a Mb tag hand (join o))
           else RSOR.proc nike cipher macS kdfS streamS geom (sk h) o))
-        (fun h msg o => pure (if h = ρ then replyOf cipher geom msg (onlyAns nike cipher macS kdfS
-            streamS geom (sk ρ) a t Mb tag (join o))
+        (fun h msg o => pure (if h = ρ then replyOf cipher geom msg (onlyAnsH nike cipher macS kdfS
+            streamS geom (sk ρ) a Mb tag hand (join o))
           else RSOR.reply nike cipher macS kdfS streamS geom (sk h) msg o))
         patch
-      = Protocols.RSOR.withDec (S := 𝒮) ρ Hv (fun o => o.2)
-        (fun o y => stepOf geom (procD nike (Primitives.MAC.MAC.const tag) streamS geom (fun _ =>
-            .ok t) (fun _ _ => y) (join o)))
-        (fun msg o y => replyOf cipher geom msg (procD nike (Primitives.MAC.MAC.const tag) streamS
-            geom (fun _ => .ok t) (fun _ _ => y) (join o)))
+      = Protocols.RSOR.withDec (S := 𝒮) ρ Hv (fun o => o.2) step rep
         (fun h o => if h = ρ then stepOf geom (noneAns nike cipher macS kdfS streamS geom (sk ρ) a
             (join o))
           else RSOR.proc nike cipher macS kdfS streamS geom (sk h) o)
         (fun h msg o => if h = ρ then replyOf cipher geom msg (noneAns nike cipher macS kdfS
             streamS geom (sk ρ) a (join o))
           else RSOR.reply nike cipher macS kdfS streamS geom (sk h) msg o)
-        (fun y => Util.Bytes.toVecN _ (cipher.decrypt t.payloadEncryption.toArray
-          (Util.Bytes.ofVector t.headerEncryptionIV) (Util.Bytes.ofVector y)))
-        patch := by
+        dec patch := by
   have e := fun (o : Onion geom) =>
-    onlyAns_join nike cipher macS kdfS streamS geom hvalid hmactag (sk ρ) a t Mb tag Hv hH hcar o
+    onlyAnsH_join nike cipher macS kdfS streamS geom hvalid hmactag (sk ρ) a Mb tag hand Hv hH
+      hcar o
   unfold Protocols.RSOR.withDec
   congr 1
   · funext h o
     refine congrArg pure ?_
     by_cases hr : h = ρ
     · by_cases ho : o.1 = Hv
-      · exact ((ite_eq_left hr).trans (congrArg (stepOf geom) ((e o).trans (ite_eq_left ho)))).trans
-          (ite_eq_left ⟨hr, ho⟩).symm
-      · exact ((ite_eq_left hr).trans (congrArg (stepOf geom) ((e o).trans (ite_eq_right
-          ho)))).trans
+      · exact ((ite_eq_left hr).trans ((congrArg (stepOf geom)
+          ((e o).trans (ite_eq_left ho))).trans (hstep o ho))).trans (ite_eq_left ⟨hr, ho⟩).symm
+      · exact ((ite_eq_left hr).trans (congrArg (stepOf geom)
+          ((e o).trans (ite_eq_right ho)))).trans
           ((ite_eq_right fun hc => ho hc.2).trans (ite_eq_left hr)).symm
-    · exact (ite_eq_right hr).trans ((ite_eq_right fun hc => hr hc.1).trans (ite_eq_right hr)).symm
+    · exact (ite_eq_right hr).trans
+        ((ite_eq_right fun hc => hr hc.1).trans (ite_eq_right hr)).symm
   · funext h msg o
     refine congrArg pure ?_
     by_cases hr : h = ρ
     · by_cases ho : o.1 = Hv
-      · exact ((ite_eq_left hr).trans (congrArg (replyOf cipher geom msg) ((e o).trans (ite_eq_left
-          ho)))).trans
+      · exact ((ite_eq_left hr).trans ((congrArg (replyOf cipher geom msg)
+          ((e o).trans (ite_eq_left ho))).trans (hrep msg o ho))).trans
           (ite_eq_left ⟨hr, ho⟩).symm
-      · exact ((ite_eq_left hr).trans (congrArg (replyOf cipher geom msg) ((e o).trans
-          (ite_eq_right ho)))).trans
+      · exact ((ite_eq_left hr).trans (congrArg (replyOf cipher geom msg)
+          ((e o).trans (ite_eq_right ho)))).trans
           ((ite_eq_right fun hc => ho hc.2).trans (ite_eq_left hr)).symm
-    · exact (ite_eq_right hr).trans ((ite_eq_right fun hc => hr hc.1).trans (ite_eq_right hr)).symm
+    · exact (ite_eq_right hr).trans
+        ((ite_eq_right fun hc => hr hc.1).trans (ite_eq_right hr)).symm
 
 /-- **The second phase against a relay that answers one header**, behind its oracle, is the
 second phase against the one-decryption oracle. -/
+theorem relayImpl_onlyAnsH_run (ρ : Role) (sk : Role → nike.PrivateKey) (a : ByteArray)
+    (Mb : ByteArray) (tag : Vector UInt8 macS.tagSize) (hand : ByteArray → ProcResult)
+    (Hv : Vector UInt8 geom.headerLength)
+    (hH : Util.Bytes.ofVector Hv = Mb ++ Util.Bytes.ofVector tag)
+    (hcar : (Util.Bytes.ofVector Hv).extract 2 (2 + nike.publicKeySize) = a)
+    (step : Onion geom → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength) → Option
+        (𝒮).Step)
+    (rep : Msg geom → Onion geom → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+        → Option (Name × Onion geom))
+    (dec : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength) → Vector UInt8
+        (geom.payloadTagLength + geom.forwardPayloadLength))
+    (hstep : ∀ o : Onion geom, o.1 = Hv → stepOf geom (hand (join o)) = step o (dec o.2))
+    (hrep : ∀ (msg : Msg geom) (o : Onion geom), o.1 = Hv →
+      replyOf cipher geom msg (hand (join o)) = rep msg o (dec o.2))
+    (patch : Protocols.RSOR.Patch 𝒮) {α : Type}
+    (oa : OracleComp (Protocols.RSOR.oracleSpec 𝒮) α) (log : Protocols.RSOR.Log 𝒮) :
+    simulateQ (relayImpl (onlyAnsH nike cipher macS kdfS streamS geom (sk ρ) a Mb tag hand))
+        ((simulateQ (viaOracle nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk patch)
+            oa).run' log)
+      = (simulateQ (Protocols.RSOR.withDec (S := 𝒮) ρ Hv (fun o => o.2) step rep
+          (fun h o => if h = ρ then stepOf geom (noneAns nike cipher macS kdfS streamS geom (sk ρ)
+              a (join o))
+            else RSOR.proc nike cipher macS kdfS streamS geom (sk h) o)
+          (fun h msg o => if h = ρ then replyOf cipher geom msg (noneAns nike cipher macS kdfS
+              streamS geom (sk ρ) a (join o))
+            else RSOR.reply nike cipher macS kdfS streamS geom (sk h) msg o)
+          dec patch) oa).run' log := by
+  rw [← oracle_onlyAnsH nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk a Mb tag hand Hv
+      hH hcar step rep dec hstep hrep patch]
+  simp only [StateT.run', simulateQ_map]
+  exact congrArg (fun x => (·.1) <$> x)
+    (viaOracle_relayImpl nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ (onlyAnsH nike
+        cipher macS kdfS streamS geom (sk ρ) a Mb tag hand) sk patch oa log)
+
+/-- The same for a relay with the cipher and handed keys: under the header it decrypts the
+payload with its payload key. -/
 theorem relayImpl_onlyAns_run (ρ : Role) (sk : Role → nike.PrivateKey) (a : ByteArray)
     (t : HopKeys) (Mb : ByteArray) (tag : Vector UInt8 macS.tagSize)
     (Hv : Vector UInt8 geom.headerLength)
@@ -1078,13 +1135,12 @@ theorem relayImpl_onlyAns_run (ρ : Role) (sk : Role → nike.PrivateKey) (a : B
             else RSOR.reply nike cipher macS kdfS streamS geom (sk h) msg o)
           (fun y => Util.Bytes.toVecN _ (cipher.decrypt t.payloadEncryption.toArray
             (Util.Bytes.ofVector t.headerEncryptionIV) (Util.Bytes.ofVector y)))
-          patch) oa).run' log := by
-  rw [← oracle_onlyAns nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk a t Mb tag Hv hH
-      hcar patch]
-  simp only [StateT.run', simulateQ_map]
-  exact congrArg (fun x => (·.1) <$> x)
-    (viaOracle_relayImpl nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ (onlyAns nike
-        cipher macS kdfS streamS geom (sk ρ) a t Mb tag) sk patch oa log)
+          patch) oa).run' log :=
+  relayImpl_onlyAnsH_run nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ sk a Mb tag _ Hv
+      hH hcar _ _ _
+    (fun o _ => congrArg (stepOf geom) (procWith_join nike cipher streamS geom hvalid _ t o))
+    (fun msg o _ => congrArg (replyOf cipher geom msg)
+      (procWith_join nike cipher streamS geom hvalid _ t o)) patch oa log
 
 end OneHeaderOracle
 

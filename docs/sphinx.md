@@ -590,13 +590,14 @@ A packet uses a hop's payload encryption once, on the block the hops after it le
 A relay decrypts one block, the packet's payload (`unwrapNIKEDec_congr`, `procD_congr`), and a
 relay with a cipher is the relay that decrypts by the cipher (`procWith_eq_procD`).
 A relay that answers one element under one header only decrypts, under that header, the
-onion's payload with its payload key, and under any other refuses the element (`onlyAns_join`).
+onion's payload with its payload key, and under any other refuses the element
+(`onlyAnsH_join`, `procWith_join`).
 The honest relays' oracle, with one relay answering one header, is the one-decryption oracle of
-the payload game (`oracle_onlyAns`). The onion uses the relay's payload key for one encryption,
+the payload game (`oracle_onlyAnsH`, for any answer under that header). The onion uses the relay's payload key for one encryption,
 of `onionBlock` (`onionOfTag_enc`), and reads that key nowhere else (`onion_payloadKey`); a
 relay handed its payload's decryption does not read it either (`procD_payloadKey`). The second
 phase against a relay that answers one header is the second phase against the one-decryption
-oracle (`relayImpl_onlyAns_run`), and the hops' keys with and without the relay's payload key
+oracle (`relayImpl_onlyAnsH_run`, `relayImpl_onlyAns_run`), and the hops' keys with and without the relay's payload key
 agree off the relay (`payKeys`). World 0 after its MAC step has a payload game, `forwardPay`,
 and draw by draw it is that game with the cipher (`forwardPay_run`), on draws where the bytes
 under the relay's tag have a header's length and carry the relay's element, and the block the
