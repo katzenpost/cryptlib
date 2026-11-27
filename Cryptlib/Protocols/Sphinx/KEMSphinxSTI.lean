@@ -2813,6 +2813,215 @@ theorem backUGame_cut_le (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Pro
     simp only [e, sub_self, abs_zero]
     exact ENNReal.toReal_nonneg
 
+/-! ### The second half, and STI↔ -/
+
+/-- **The cost of one side of the second half**: the bad draws, the replacement of the honest
+backward relay's keys, a MAC forgery, the one-block advantage against the payload cipher, the
+keystream generator's advantage, and the draws that are not good. -/
+noncomputable def backSideCost (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} →
+    Protocols.RSOR.TailChallenge hon
+      → ProbComp (Protocols.RSOR.World 𝒮))
+    (Q : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → (q : RSOR.Request kem geom) × Fin q.back.hops.length) (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) : ℝ :=
+  (Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.tailPair w₀ w₁) .back names _ ($ᵗ (RSOR.Randomness geom))
+      A)}[backBadK kem cipher macS kdfS streamS geom hvalid hmactag h16 Q d]).toReal
+    + (keyedCost cipher macS kdfS streamS geom (backAdvK kem cipher macS kdfS streamS geom hvalid
+        hmactag h16 w₀ w₁ Q names A)
+      + ((Pr{let x ← (Primitives.MAC.forgeExp macS (forgeAdv cipher macS kdfS streamS geom
+          (backAdvK kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names A)
+            (backM kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names)
+            (backVT kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names)))}[x =
+                true]).toReal
+          + (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (backAdvK kem cipher macS kdfS
+              streamS geom hvalid hmactag h16 w₀ w₁ Q names A))}[¬ backGoodK kem cipher macS kdfS
+              streamS geom hvalid hmactag h16 Q d]).toReal
+        + (|(Pr{let x ← (Primitives.WideBlockCipher.oneQueryExp cipher _
+              (backGameP kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names A).adv
+                  true)}[x = true]).toReal
+            - (Pr{let x ← (Primitives.WideBlockCipher.oneQueryExp cipher _
+              (backGameP kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names A).adv
+                  false)}[x = true]).toReal|
+          + |(Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+              (backStreamAdvK kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names
+                  A))}[x = true]).toReal
+            - (Pr{let x ← (PRGScheme.prgIdealExperiment
+              (backStreamAdvK kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names
+                  A))}[x = true]).toReal|
+          + (Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (backAdvK kem cipher macS kdfS
+              streamS geom hvalid hmactag h16 w₀ w₁ Q names A))}[¬ backGoodK kem cipher macS kdfS
+              streamS geom hvalid hmactag h16 Q d]).toReal)))
+
+set_option maxHeartbeats 4000000 in
+/-- **One side of the second half.** A game whose world is of that shape is, up to its cost,
+the game from a uniform keystream. -/
+theorem back_sub_uniform_le (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge
+    hon
+      → ProbComp (Protocols.RSOR.World 𝒮))
+    (Q : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → (q : RSOR.Request kem geom) × Fin q.back.hops.length)
+    (hQ : ∀ {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon),
+      (Q c).1.back.hops[(Q c).2] = hon .back) (b : Bool)
+    (hw : ∀ {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon),
+      (Protocols.RSOR.tailPair w₀ w₁).world c b = backWorld kem cipher macS kdfS streamS geom
+          hvalid hmactag h16 Q c)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) :
+    |(Pr{let x ← Protocols.RSOR.Property.play names A b}[x = true]).toReal
+      - (Pr{let x ← (backUGame kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names
+          A)}[x = true]).toReal|
+    ≤ backSideCost kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q names A := by
+  have h1 := back_sub_keyedReal_le kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q hQ
+      b hw names A
+  have h2 := keyedChain_le cipher macS kdfS streamS geom (backAdvK kem cipher macS kdfS streamS
+      geom hvalid hmactag h16 w₀ w₁ Q names A)
+  have h3 := back_keyedIdeal_sub_tagged_le kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀
+      w₁ Q hQ names A
+  have h4 := back_tagged_sub_stream_le kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q
+      hQ names A
+  rw [← (backStream_ideal_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ Q
+      names A).prEvent_eq (fun x => x = true)]
+  unfold backSideCost
+  exact (abs_sub_le _ _ _).trans (add_le_add h1 ((abs_sub_le _ _ _).trans (add_le_add h2
+    ((abs_sub_le _ _ _).trans (add_le_add h3 h4)))))
+
+/-- **The cost of the second half of STI↔**: one side for the cut backward path, the draws on
+which the reply's next layer cannot be built, and one side for the whole backward path. -/
+noncomputable def tailBackCost (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.tailPair (S := 𝒮) (tailMid kem cipher macS kdfS streamS geom hvalid
+        hmactag h16)
+      (fun c => (Protocols.RSOR.tailIndistinguishable (S := 𝒮)).world c true)).Adversary) : ℝ :=
+  backSideCost kem cipher macS kdfS streamS geom hvalid hmactag h16 (backWorld kem cipher macS kdfS
+      streamS geom hvalid hmactag h16 (midReq kem cipher macS kdfS streamS geom hvalid hmactag h16))
+      (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+          streamS geom hvalid hmactag h16)) (cutReq kem cipher macS kdfS streamS geom hvalid
+          hmactag h16) names
+      (Protocols.RSOR.tailPair.cast (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (midReq kem cipher macS kdfS streamS geom hvalid hmactag h16))
+      (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+          streamS geom hvalid hmactag h16)) A)
+    + ((Pr{let z ← (tailCutDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 (backWorld kem
+        cipher macS kdfS streamS geom hvalid hmactag h16 (midReq kem cipher macS kdfS streamS geom
+        hvalid hmactag h16))
+        (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS
+            kdfS streamS geom hvalid hmactag h16)) names
+        (Protocols.RSOR.tailPair.cast (backWorld kem cipher macS kdfS streamS geom hvalid hmactag
+            h16 (midReq kem cipher macS kdfS streamS geom hvalid hmactag h16))
+      (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+          streamS geom hvalid hmactag h16)) A))}[tailCutBad kem cipher macS kdfS streamS geom
+          hvalid hmactag h16 z]).toReal
+      + backSideCost kem cipher macS kdfS streamS geom hvalid hmactag h16 (backWorld kem cipher
+          macS kdfS streamS geom hvalid hmactag h16 (midReq kem cipher macS kdfS streamS geom
+          hvalid hmactag h16))
+        (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS
+            kdfS streamS geom hvalid hmactag h16)) (midReq kem cipher macS kdfS streamS geom hvalid
+            hmactag h16) names
+        (Protocols.RSOR.tailPair.cast (backWorld kem cipher macS kdfS streamS geom hvalid hmactag
+            h16 (midReq kem cipher macS kdfS streamS geom hvalid hmactag h16))
+      (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+          streamS geom hvalid hmactag h16)) A))
+
+set_option maxHeartbeats 8000000 in
+/-- **The second half of STI↔ for KEM Sphinx.** The world in the middle and world 1, which
+differ in the backward path the reply block is built over, are told apart with at most
+`tailBackCost`. -/
+theorem tailSecondHalf_le (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.tailPair (S := 𝒮) (tailMid kem cipher macS kdfS streamS geom hvalid
+        hmactag h16)
+      (fun c => (Protocols.RSOR.tailIndistinguishable (S := 𝒮)).world c true)).Adversary) :
+    ((Protocols.RSOR.tailPair (S := 𝒮) (tailMid kem cipher macS kdfS streamS geom hvalid hmactag
+        h16)
+      (fun c => (Protocols.RSOR.tailIndistinguishable (S := 𝒮)).world c true)).advantage names
+          A).toReal
+    ≤ tailBackCost kem cipher macS kdfS streamS geom hvalid hmactag h16 names A := by
+  have hp := fun b => (Protocols.RSOR.tailPair_play_congr (S := 𝒮) (tailMid kem cipher macS kdfS
+      streamS geom hvalid hmactag h16)
+    (fun c => (Protocols.RSOR.tailIndistinguishable (S := 𝒮)).world c true)
+    (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (midReq kem cipher macS kdfS
+        streamS geom hvalid hmactag h16)) (backWorld kem cipher macS kdfS streamS geom hvalid
+        hmactag h16 (cutReq kem cipher macS kdfS streamS geom hvalid hmactag h16))
+    (fun c => tailMid_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16 c)
+    (fun c => by rw [tailWorld_true kem cipher macS kdfS streamS geom hvalid hmactag h16 c]) names
+        A b).prEvent_eq (fun x => x = true)
+  have h0 := back_sub_uniform_le kem cipher macS kdfS streamS geom hvalid hmactag h16 (backWorld
+      kem cipher macS kdfS streamS geom hvalid hmactag h16 (midReq kem cipher macS kdfS streamS
+      geom hvalid hmactag h16))
+    (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+        streamS geom hvalid hmactag h16)) (midReq kem cipher macS kdfS streamS geom hvalid hmactag
+        h16) (fun c => c.backRelay) false (fun _ => rfl) names
+    (Protocols.RSOR.tailPair.cast (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (midReq kem cipher macS kdfS streamS geom hvalid hmactag h16))
+      (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+          streamS geom hvalid hmactag h16)) A)
+  have h1 := back_sub_uniform_le kem cipher macS kdfS streamS geom hvalid hmactag h16 (backWorld
+      kem cipher macS kdfS streamS geom hvalid hmactag h16 (midReq kem cipher macS kdfS streamS
+      geom hvalid hmactag h16))
+    (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+        streamS geom hvalid hmactag h16)) (cutReq kem cipher macS kdfS streamS geom hvalid hmactag
+        h16) (fun c => List.getElem_take.trans c.backRelay) true (fun _ => rfl) names
+    (Protocols.RSOR.tailPair.cast (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (midReq kem cipher macS kdfS streamS geom hvalid hmactag h16))
+      (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+          streamS geom hvalid hmactag h16)) A)
+  have h2 := backUGame_cut_le kem cipher macS kdfS streamS geom hvalid hmactag h16 (backWorld kem
+      cipher macS kdfS streamS geom hvalid hmactag h16 (midReq kem cipher macS kdfS streamS geom
+      hvalid hmactag h16))
+    (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+        streamS geom hvalid hmactag h16)) names
+    (Protocols.RSOR.tailPair.cast (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (midReq kem cipher macS kdfS streamS geom hvalid hmactag h16))
+      (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+          streamS geom hvalid hmactag h16)) A)
+  rw [abs_sub_comm] at h0 h2
+  rw [Protocols.RSOR.Property.advantage_toReal names A, hp true, hp false]
+  unfold tailBackCost
+  refine (abs_sub_le _ (Pr{let y ← (backUGame kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (midReq kem cipher macS kdfS
+      streamS geom hvalid hmactag h16))
+    (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+        streamS geom hvalid hmactag h16)) (cutReq kem cipher macS kdfS streamS geom hvalid hmactag
+        h16) names
+    (Protocols.RSOR.tailPair.cast (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (midReq kem cipher macS kdfS streamS geom hvalid hmactag h16))
+      (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+          streamS geom hvalid hmactag h16)) A))}[y = true]).toReal _).trans (add_le_add h1 ?_)
+  exact (abs_sub_le _ (Pr{let y ← (backUGame kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (midReq kem cipher macS kdfS
+      streamS geom hvalid hmactag h16))
+    (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+        streamS geom hvalid hmactag h16)) (midReq kem cipher macS kdfS streamS geom hvalid hmactag
+        h16) names
+    (Protocols.RSOR.tailPair.cast (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (midReq kem cipher macS kdfS streamS geom hvalid hmactag h16))
+      (backWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 (cutReq kem cipher macS kdfS
+          streamS geom hvalid hmactag h16)) A))}[y = true]).toReal _).trans (add_le_add h2 h0)
+
+/-- **STI↔ for KEM Sphinx.** The adversary tells the layer of its onion that leaves an honest
+relay from the first layer of an onion over the rest of the forward path and the backward path
+up to its honest relay with at most the cost of the two halves: the relay before the shown
+layer, and the honest relay on the backward path. -/
+theorem tailIndistinguishable_le (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.tailIndistinguishable (S := 𝒮)).Adversary) :
+    ((Protocols.RSOR.tailIndistinguishable (S := 𝒮)).advantage names A).toReal
+    ≤ tailBackCost kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (Protocols.RSOR.tailPair.cast (tailMid kem cipher macS kdfS streamS geom hvalid hmactag h16)
+          (fun c => (Protocols.RSOR.tailIndistinguishable (S := 𝒮)).world c true)
+              (Protocols.RSOR.tailPair.ofTail A))
+      + tailHalfCost kem cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (Protocols.RSOR.tailPair.cast (fun c => (Protocols.RSOR.tailIndistinguishable (S :=
+            𝒮)).world c false)
+          (tailMid kem cipher macS kdfS streamS geom hvalid hmactag h16)
+              (Protocols.RSOR.tailPair.ofTail A)) := by
+  refine (le_of_eq (congrArg ENNReal.toReal
+    (Protocols.RSOR.tailIndistinguishable_advantage_eq (S := 𝒮) names A))).trans ?_
+  exact (Protocols.RSOR.tailPair_advantage_le (S := 𝒮) (fun c =>
+      (Protocols.RSOR.tailIndistinguishable (S := 𝒮)).world c false)
+    (tailMid kem cipher macS kdfS streamS geom hvalid hmactag h16) (fun c =>
+        (Protocols.RSOR.tailIndistinguishable (S := 𝒮)).world c true) names
+        (Protocols.RSOR.tailPair.ofTail A)).trans
+    (add_le_add (tailSecondHalf_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names _)
+        (tailFirstHalf_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names _))
+
 end TailGame
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx

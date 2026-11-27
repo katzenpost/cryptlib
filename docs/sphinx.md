@@ -171,8 +171,8 @@ The zero-tag event is bounded: a draw of world 1 is not good with at most the ch
 layer cannot be built, plus one in the number of payload tags (`prEvent_not_finalGood_le`,
 from `prEvent_zeroPrefix`).
 
-Not proved yet: those two; the second half of STI↔ for KEM Sphinx; all three for NIKE Sphinx. SLU← for KEM Sphinx
-is below.
+Not proved yet: those two; all three for NIKE Sphinx. SLU← and STI↔ for KEM Sphinx are below,
+each with its own explicit events.
 
 ### SLU← (in progress)
 
@@ -349,7 +349,7 @@ The statement for SLU← is `backwardUnlinkable_le`, for `backwardWith freshSwap
 Not proved yet: bounds on the explicit events (bad draws, draws that are not good). Each is a
 statement about the KEM not failing, a layer being built, or a uniform block having a zero tag.
 
-## STI↔ for KEM Sphinx: the first half is proved
+## STI↔ for KEM Sphinx
 
 World 0 shows the layer of the adversary's onion at forward position `pos`; world 1 shows the
 first layer of an onion with the same message over the rest of the forward path and the
@@ -392,8 +392,35 @@ relay has a role already handled and world 0 otherwise. One step (`tailStep_le`)
 and KDF), a MAC forgery, and the keystream generator's advantage. `tailHalfCost` is four of
 them. The chance of a bad draw is not bounded yet.
 
-Still to do: the second half, at the honest relay on the backward path, and then one statement
-for `tailIndistinguishable`.
+The second half is `tailSecondHalf_le`: the middle world and world 1 are told apart with at most
+`tailBackCost`. Both worlds have one shape (`backWorld`): the first layer of a request, with
+the honest backward relay answering nothing to the reply's layer at its position. The request
+of the middle world has the whole backward path (`midReq`), that of world 1 the path cut at the
+relay (`cutReq`). For either request:
+
+- The world is the keyed game at the honest backward relay with the real keys, off the bad
+  draws (`back_sub_keyedReal_le`, `backBadK`).
+- The keys are replaced by uniform ones (`keyedChain_le`), and the relay answers its ciphertext
+  under the reply layer's own header only, for a MAC forgery and the draws that are not good
+  (`back_keyedIdeal_sub_tagged_le`, `backGoodK`).
+- The payload cipher and keystream steps take the game to a uniform keystream
+  (`back_tagged_sub_stream_le`, `backStream_ideal_evalDistEq`, `backUGame`).
+
+From a uniform keystream the two games are compared (`backUGame_cut_le`). With the seeds in
+front of the relay swapped and the keystream shifted (`shiftStream_path`, as in TLU→), the
+world and the relays of the whole path are those of the cut path (`tailBackViewU_shift`,
+`tailBack_relays_shift`). The relay's answer under its own header does not matter: the patch
+hides what it forwards, and it replies to neither header, one being of a hop in the middle of a
+path and the other ending a reply's path. The comparison needs the reply's next layer to be
+built; the draws where it cannot are `tailCutBad`. When the honest relay is the last backward
+hop the two requests are the same (`cutReq_eq_midReq`).
+
+`backSideCost` is one side: the bad draws, the replacement of the relay's keys, a MAC forgery,
+the one-block advantage against the payload cipher, the keystream generator's advantage, and
+the draws that are not good (twice). `tailBackCost` is two sides and `tailCutBad`.
+
+The statement is `tailIndistinguishable_le`: the advantage in STI↔ is at most `tailBackCost`
+plus `tailHalfCost`. None of the bad, not-good or cannot-build events is bounded yet.
 
 ## How the bounds are built
 
