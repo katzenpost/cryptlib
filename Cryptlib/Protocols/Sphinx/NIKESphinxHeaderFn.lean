@@ -128,10 +128,52 @@ theorem groupElem_hopKeysWith (nike : NIKE) (kdfS : KDF) (c : nike.PrivateKey)
   rw [← hopKeysWith_take nike kdfS c hops j t n hj]
   simp [hi]
 
+open Cryptlib.Primitives.KDF (KDF) in
+/-- Two replacements with the same blinding factor give the same keys off the replaced hop. -/
+theorem hopKeysWith_congr (nike : NIKE) (kdfS : KDF) (c : nike.PrivateKey)
+    (hops : Array PathHop) (j : ℕ) (t t' : HopKeys)
+    (ht : RSOR.factor nike t = RSOR.factor nike t') (n : ℕ) :
+    (hopKeysWith nike kdfS c hops j t n).map (RSOR.factor nike)
+        = (hopKeysWith nike kdfS c hops j t' n).map (RSOR.factor nike) ∧
+      ∀ i, i ≠ j → (hopKeysWith nike kdfS c hops j t n)[i]?
+        = (hopKeysWith nike kdfS c hops j t' n)[i]? := by
+  induction n with
+  | zero => exact ⟨rfl, fun _ _ => rfl⟩
+  | succ n ih =>
+    obtain ⟨ih1, ih2⟩ := ih
+    refine ⟨?_, fun i hi => ?_⟩
+    · rw [hopKeysWith, hopKeysWith, List.map_append, List.map_append, ih1]
+      congr 1
+      by_cases hn : n = j
+      · simp only [hn, ite_true, List.map_cons, List.map_nil, ht]
+      · simp only [hn, ite_false]
+    · rw [hopKeysWith, hopKeysWith, ih1]
+      by_cases hin : i < n
+      · rw [List.getElem?_append_left (by rw [hopKeysWith_length]; exact hin),
+          List.getElem?_append_left (by rw [hopKeysWith_length]; exact hin)]
+        exact ih2 i hi
+      · rw [List.getElem?_append_right (by rw [hopKeysWith_length]; omega),
+          List.getElem?_append_right (by rw [hopKeysWith_length]; omega), hopKeysWith_length,
+          hopKeysWith_length]
+        by_cases hin' : i = n
+        · subst hin'
+          simp only [hi, ite_false]
+        · rw [List.getElem?_eq_none (by simp; omega), List.getElem?_eq_none (by simp; omega)]
+
 /-- The group elements from the first: each blinded by the factor of the hop before. -/
 def blindElem (nike : NIKE) (a : ByteArray) (keys : Array HopKeys) : ℕ → ByteArray
   | 0 => a
   | i + 1 => nikeBlind nike (blindElem nike a keys i) (keys[i]!).blindingFactor
+
+/-- The elements from the first read the hops' blinding factors only. -/
+theorem blindElem_congr (nike : NIKE) (a : ByteArray) (K K' : Array HopKeys)
+    (h : ∀ n : ℕ, (K[n]!).blindingFactor = (K'[n]!).blindingFactor) (i : ℕ) :
+    blindElem nike a K i = blindElem nike a K' i := by
+  induction i with
+  | zero => rfl
+  | succ i ih =>
+    show nikeBlind nike (blindElem nike a K i) _ = nikeBlind nike (blindElem nike a K' i) _
+    rw [ih, h i]
 
 theorem groupElem_eq_blindElem (nike : NIKE) (c : nike.PrivateKey) (keys : Array HopKeys) (i : ℕ) :
     groupElem nike c keys i = blindElem nike (groupElem nike c keys 0) keys i := by
@@ -221,6 +263,77 @@ theorem nikePktFn_congr (ks ks' : ℕ → ByteArray) (tag tag' enc enc' : ℕ �
   unfold nikePktFn
   rw [nikeHdrTrace_congr geom ks ks' tag tag' ge ge' filler path
     (fun i hi => ⟨(h i hi).1, (h i hi).2.1, (h i hi).2.2.2⟩) _ le_rfl, hf, (h 0 hp).2.2.2]
+
+/-- The first `m` steps of `nikeHdrTrace` read the tagging functions of the last `m` hops
+only. -/
+theorem nikeHdrTrace_congr_tag (ks : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (m : ℕ)
+    (hm : m ≤ path.size) (h : ∀ i, path.size - m ≤ i → i < path.size → tag i = tag' i) :
+    nikeHdrTrace geom ks tag ge filler path m = nikeHdrTrace geom ks tag' ge filler path m := by
+  induction m with
+  | zero => rfl
+  | succ m ih =>
+    rw [nikeHdrTrace, nikeHdrTrace, ih (by omega) fun i hi hlt => h i (by omega) hlt,
+      h (path.size - 1 - m) (by omega) (by omega)]
+
+/-- The bytes hop `i`'s tag covers: its version bytes, group element, routing information and
+padding. Empty when the header does not build that far. -/
+def hdrMsg (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray)
+    (filler : ByteArray) (path : Array PathHop) (i : ℕ) : ByteArray :=
+  match nikeHdrTrace geom ks tag ge filler path (path.size - 1 - i) with
+  | none => .empty
+  | some s =>
+    match nikeFragment geom path s.2 i with
+    | .error _ => .empty
+    | .ok frag =>
+      v0AD ++ ge i ++ xorBytes (frag ++ s.1) ((ks i).extract 0
+          (geom.routingInfoLength + geom.perHopRoutingInfoLength
+            - (i + 1) * geom.perHopRoutingInfoLength))
+        ++ (if i > 0 then padAt geom ks (i - 1) else ByteArray.empty)
+
+/-- **The header uses a hop's tagging function once**, on `hdrMsg`: with hop `i`'s function
+replaced by the constant that returns its tag of those bytes, the header is the same. The bytes
+do not depend on hop `i`'s tagging function. -/
+theorem nikeHdrTrace_tagAt (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (i : ℕ) (hi : i < path.size)
+    (f : ByteArray → ByteArray) (m : ℕ) (hm : m ≤ path.size) :
+    nikeHdrTrace geom ks (Function.update tag i f) ge filler path m
+      = nikeHdrTrace geom ks (Function.update tag i fun _ =>
+          f (hdrMsg geom ks tag ge filler path i)) ge filler path m := by
+  induction m with
+  | zero => rfl
+  | succ m ih =>
+    rw [nikeHdrTrace, nikeHdrTrace, ih (by omega)]
+    by_cases hmi : path.size - 1 - m = i
+    · have hpre : nikeHdrTrace geom ks (Function.update tag i fun _ =>
+            f (hdrMsg geom ks tag ge filler path i)) ge filler path m
+          = nikeHdrTrace geom ks tag ge filler path (path.size - 1 - i) := by
+        have hmm : m = path.size - 1 - i := by omega
+        rw [← hmm]
+        exact nikeHdrTrace_congr_tag geom ks _ _ ge filler path m (by omega) fun n hn _ =>
+          Function.update_of_ne (by omega) _ _
+      rw [hmi, hpre]
+      unfold hdrMsg
+      cases nikeHdrTrace geom ks tag ge filler path (path.size - 1 - i) with
+      | none => rfl
+      | some s =>
+        dsimp only
+        cases nikeFragment geom path s.2 i with
+        | error e => rfl
+        | ok frag =>
+          dsimp only
+          rw [Function.update_self, Function.update_self]
+    · rw [Function.update_of_ne hmi, Function.update_of_ne hmi]
+
+/-- The packet uses a hop's tagging function once, on `hdrMsg`. -/
+theorem nikePktFn_tagAt (ks : ℕ → ByteArray) (tag enc : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (payload : ByteArray)
+    (i : ℕ) (hi : i < path.size) (f : ByteArray → ByteArray) :
+    nikePktFn geom ks (Function.update tag i f) enc ge filler path payload
+      = nikePktFn geom ks (Function.update tag i fun _ =>
+          f (hdrMsg geom ks tag ge filler path i)) enc ge filler path payload := by
+  unfold nikePktFn
+  rw [nikeHdrTrace_tagAt geom ks tag ge filler path i hi f _ le_rfl]
 
 end HeaderFn
 

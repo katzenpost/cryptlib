@@ -567,7 +567,10 @@ element of its place by the replaced keys and any other with its own key
 honest relay's MAC key for one tag only, the relay may answer the element of its place under
 the challenge header only, at the cost of a forgery against the MAC and the chance of a draw
 that is not good (`keyGame_false_sub_gameOnly_le`). A property has to say how its view is built
-from the one tag; that is not done for TLU→ yet. KEM Sphinx still has its own copy of the step
+from the one tag. For that: a header uses a hop's tagging function once, on the bytes `hdrMsg`,
+which do not depend on that function (`nikeHdrTrace_tagAt`, `nikePktFn_tagAt`), and two
+replacements with the same blinding factor give the same keys off the replaced hop
+(`hopKeysWith_congr`). Putting these together for the onion of TLU→ is not done yet. KEM Sphinx still has its own copy of the step
 (`KEMSphinxKeyedMac`).
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
