@@ -134,6 +134,92 @@ theorem nextOfStream_congr (q : RSOR.Request nike geom) (r : RSOR.Randomness nik
   unfold nextOfStream
   rw [hks, htag, hge, hh, henc, hbf]
 
+set_option maxHeartbeats 1000000 in
+/-- **The layer after hop `j`, in closed form**: the header of layer `j + 1` of the header
+function with hop `j`'s keystream `U`, and the block the hops after `j + 1` left. Of the hops
+in front it reads the padding only. -/
+theorem nextOfStream_layerHdr (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom)
+    (a : ByteArray) (K : List HopKeys) (j : ℕ) (U : ByteArray)
+    (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength)
+    (hj : j + 1 < (RSOR.path nike q.fwd [.recipient q.receiver]).size) (hjk : j < K.length) (hU :
+        U.size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (ha : a.size = nike.publicKeySize) :
+    nextOfStream nike cipher macS kdfS streamS geom q r a K j U
+      = if (RSOR.body nike macS kdfS streamS geom q r).size = geom.forwardPayloadLength then
+          match nikeHdrTrace geom (Function.update (keysKs geom streamS K.toArray) j U) (keysTag
+              macS K.toArray) (blindElem nike a K.toArray) (RSOR.filler nike geom (RSOR.path nike
+              q.fwd [.recipient q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver])
+              (RSOR.path nike q.fwd [.recipient q.receiver]).size with
+          | some _ => split geom (layerHdr geom (Function.update (keysKs geom streamS K.toArray) j
+              U) (keysTag macS K.toArray) (blindElem nike a K.toArray) (RSOR.filler nike geom
+              (RSOR.path nike q.fwd [.recipient q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient
+              q.receiver]) (j + 1)
+            ++ encTrace (keysEnc cipher K.toArray) (RSOR.path nike q.fwd [.recipient
+                q.receiver]).size ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++
+                (RSOR.body nike macS kdfS streamS geom q r)) ((RSOR.path nike q.fwd [.recipient
+                q.receiver]).size - (j + 1)))
+          | none => default
+        else default := by
+  obtain ⟨hnnh, hper, hrouting, -⟩ := id hvalid
+  have hsz := RSOR.path_size nike q.fwd [.recipient q.receiver]
+  have hn : (RSOR.path nike q.fwd [.recipient q.receiver]).size ≤ geom.nrHops := by
+    rw [hsz]
+    exact q.fwd.length_le
+  have hmul : (geom.nrHops - (RSOR.path nike q.fwd [.recipient q.receiver]).size) *
+      geom.perHopRoutingInfoLength
+      ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
+    exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+  have hfill : (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient q.receiver]) r.1).size =
+      (geom.nrHops - (RSOR.path nike q.fwd [.recipient q.receiver]).size) *
+      geom.perHopRoutingInfoLength := by
+    unfold RSOR.filler
+    rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+    omega
+  have hks : ∀ k, ((Function.update (keysKs geom streamS K.toArray) j U) k).size =
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength) := fun k => by
+    by_cases hk : k = j
+    · rw [hk, Function.update_self]
+      exact hU
+    · rw [Function.update_of_ne hk]
+      exact streamS.keystream_size _ _ _
+  have htag : ∀ (m : ℕ) (x : ByteArray), (keysTag macS K.toArray m x).size = macLength :=
+    fun m x => (Util.Bytes.size_ofVector _).trans hmactag
+  have hcmd : ∀ i, i + 1 < (RSOR.path nike q.fwd [.recipient q.receiver]).size → (RSOR.path nike
+      q.fwd [.recipient q.receiver])[i]!.commands = [] := fun i hi => by
+    rw [RSOR.path_getElem! nike _ _ i (by omega)]
+    exact ite_eq_right (by omega)
+  unfold nextOfStream
+  by_cases hb : (RSOR.body nike macS kdfS streamS geom q r).size = geom.forwardPayloadLength
+  · rw [ite_eq_left hb, ite_eq_left hb]
+    cases hs : nikeHdrTrace geom (Function.update (keysKs geom streamS K.toArray) j U) (keysTag
+        macS K.toArray) (blindElem nike a K.toArray) (RSOR.filler nike geom (RSOR.path nike q.fwd
+        [.recipient q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver]) (RSOR.path
+        nike q.fwd [.recipient q.receiver]).size with
+    | none => rfl
+    | some s =>
+      dsimp only
+      have hpe := hdrPeels_layerHdr nike geom streamS K (Function.update (keysKs geom streamS
+          K.toArray) j U) (keysTag macS K.toArray)
+        (blindElem nike a K.toArray) (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient
+            q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver]) hnnh (by omega)
+            hrouting hn hfill hks htag ha
+        hcmd (by rw [hs]; rfl) j (by omega) (le_of_lt hjk)
+        (fun i hi => (Function.update_of_ne (by omega) _ _).symm) (fun i hi => rfl)
+      have hst := peelHdr_layerHdr nike geom (Function.update (keysKs geom streamS K.toArray) j U)
+          (keysTag macS K.toArray)
+        (blindElem nike a K.toArray) (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient
+            q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver])
+            (K.toArray[j]!).blindingFactor j hj hnnh
+        (by omega) hrouting hn hfill hks htag hpe.2 rfl (hcmd j hj)
+        (nikeHdrTrace_isSome_of_le geom _ _ _ _ _ ((RSOR.path nike q.fwd [.recipient
+            q.receiver]).size - j) j
+          (by rw [show (RSOR.path nike q.fwd [.recipient q.receiver]).size - j + j = (RSOR.path
+              nike q.fwd [.recipient q.receiver]).size by omega, hs]; rfl))
+      rw [Function.update_self] at hst
+      rw [layerHdr_zero geom _ _ _ _ _ s (by omega) hs, hpe.1, hst]
+  · rw [ite_eq_right hb, ite_eq_right hb]
+
 end NextLayer
 
 section ForwardNext

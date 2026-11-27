@@ -12,7 +12,7 @@ open Cryptlib.Protocols.Sphinx.Types
 open Cryptlib.Protocols.Sphinx.Commands
 open Cryptlib.Protocols.Sphinx.Constants
 open Cryptlib.Protocols.Sphinx.Common
-open Cryptlib.Protocols.Sphinx.KEMSphinx (keysEnc keysKs)
+open Cryptlib.Protocols.Sphinx.KEMSphinx (keysEnc keysKs padAt)
 open Cryptlib.Primitives.WideBlockCipher (WideBlockCipher)
 open Cryptlib.Primitives.StreamCipher (StreamCipher)
 open Cryptlib.Primitives.NIKE.NIKE (NIKE)
@@ -162,6 +162,77 @@ theorem peels_append (ks : List HopKeys) (n : ℕ) (init H : ByteArray)
 
 end Peel
 
+/-! ## One peel undoes one step of the header -/
+
+section PeelStep
+
+variable (nike : NIKE) (geom : Geometry)
+
+/-- **A relay's peel of a header undoes the sender's step for that hop.** The header holds the
+hop's fragment `F` and the next layer's routing information `B`, masked by the head of the
+hop's keystream `U`, then the padding `Pd` of the hops in front. Peeled, it is the next
+element, `B` with the next padding, and the tag the fragment names. -/
+theorem peelHdr_step (U bf a F B Pd g : ByteArray) (h : ℕ)
+    (hU : U.size = h + Pd.size + geom.perHopRoutingInfoLength) (hFB : F.size + B.size = h)
+    (hF : F.size = geom.perHopRoutingInfoLength) (hR : h + Pd.size = geom.routingInfoLength)
+    (ha : a.size = nike.publicKeySize) :
+    peelHdr nike geom U bf (v0AD ++ a ++ (xorBytes (F ++ B) (U.extract 0 h) ++ Pd) ++ g)
+      = v0AD ++ nikeBlind nike a bf
+        ++ (B ++ (xorBytes ((U.extract h U.size).extract 0 Pd.size) Pd
+          ++ (U.extract h U.size).extract Pd.size (U.extract h U.size).size))
+        ++ ofVector (match parseAll F with
+          | .ok cmds => ((cmds.findSome? RSOR.nextHop).map (·.2)).getD default
+          | .error _ => (default : Vector UInt8 32)) := by
+  have hv : v0AD.size = 2 := rfl
+  have hM : (xorBytes (F ++ B) (U.extract 0 h) ++ Pd).size = geom.routingInfoLength := by
+    rw [ByteArray.size_append, size_xorBytes, ByteArray.size_append]
+    omega
+  have hva : (v0AD ++ a).size = 2 + nike.publicKeySize := by
+    rw [ByteArray.size_append, hv, ha]
+  have e_a : (v0AD ++ a ++ (xorBytes (F ++ B) (U.extract 0 h) ++ Pd) ++ g).extract 2
+      (2 + nike.publicKeySize) = a := by
+    rw [Util.Bytes.extract_append_of_le _ g (by rw [ByteArray.size_append, hva]; omega),
+      Util.Bytes.extract_append_of_le _ _ (by rw [hva])]
+    have := Util.Bytes.extract_append_right v0AD a
+    rwa [hv, ha] at this
+  have e_r : (v0AD ++ a ++ (xorBytes (F ++ B) (U.extract 0 h) ++ Pd) ++ g).extract
+      (2 + nike.publicKeySize) (2 + nike.publicKeySize + geom.routingInfoLength)
+      = xorBytes (F ++ B) (U.extract 0 h) ++ Pd := by
+    rw [Util.Bytes.extract_append_of_le _ g (by rw [ByteArray.size_append, hva, hM])]
+    have := Util.Bytes.extract_append_right (v0AD ++ a)
+      (xorBytes (F ++ B) (U.extract 0 h) ++ Pd)
+    rwa [hva, hM] at this
+  obtain ⟨c1, c2⟩ := cascading_xor_step U F B Pd h geom.perHopRoutingInfoLength hU hFB
+  have hz : (⟨Array.replicate geom.perHopRoutingInfoLength (0 : UInt8)⟩ : ByteArray).size
+      = geom.perHopRoutingInfoLength := Array.size_replicate
+  have hbs : (xorBytes (xorBytes (F ++ B) (U.extract 0 h) ++ Pd
+      ++ (⟨Array.replicate geom.perHopRoutingInfoLength 0⟩ : ByteArray)) U).size
+      = h + Pd.size + geom.perHopRoutingInfoLength := by
+    rw [size_xorBytes, ByteArray.size_append, hM, hz]
+    omega
+  have hb : xorBytes (xorBytes (F ++ B) (U.extract 0 h) ++ Pd
+        ++ (⟨Array.replicate geom.perHopRoutingInfoLength 0⟩ : ByteArray)) U
+      = (F ++ B) ++ (xorBytes ((U.extract h U.size).extract 0 Pd.size) Pd
+        ++ (U.extract h U.size).extract Pd.size (U.extract h U.size).size) := by
+    have := Util.Bytes.append_extract (xorBytes (xorBytes (F ++ B) (U.extract 0 h) ++ Pd
+      ++ (⟨Array.replicate geom.perHopRoutingInfoLength 0⟩ : ByteArray)) U) h
+      (by rw [hbs]; omega)
+    rw [hbs, c1, c2] at this
+    exact this.symm
+  have e1 : ∀ X : ByteArray, ((F ++ B) ++ X).extract 0 geom.perHopRoutingInfoLength = F :=
+    fun X => by
+      rw [Util.Bytes.extract_append_of_le _ X (by rw [ByteArray.size_append]; omega), ← hF]
+      exact Util.Bytes.extract_append_left F B
+  have e2 : ∀ X : ByteArray, ((F ++ B) ++ X).extract geom.perHopRoutingInfoLength
+      ((F ++ B) ++ X).size = B ++ X := fun X => by
+    rw [ByteArray.append_assoc, ByteArray.size_append, ← hF]
+    exact Util.Bytes.extract_append_right F (B ++ X)
+  unfold peelHdr
+  dsimp only
+  rw [e_a, e_r, hb, e1, e2]
+
+end PeelStep
+
 /-! ## The length of a header -/
 
 section HeaderSize
@@ -227,5 +298,271 @@ theorem nikeHdrTrace_size (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → 
         omega
 
 end HeaderSize
+
+/-! ## A layer's header, and the next -/
+
+section Layer
+
+variable (nike : NIKE) (geom : Geometry)
+
+omit nike in
+/-- The padding after hop `m` has `m + 1` hops' length. -/
+theorem padAt_size (ks : ℕ → ByteArray) (hks : ∀ k, (ks k).size = (geom.routingInfoLength +
+    geom.perHopRoutingInfoLength)) (m : ℕ)
+    (hm : (m + 1) * geom.perHopRoutingInfoLength ≤ (geom.routingInfoLength +
+        geom.perHopRoutingInfoLength)) : (padAt geom ks m).size = (m + 1) *
+        geom.perHopRoutingInfoLength := by
+  induction m with
+  | zero =>
+    rw [padAt, ByteArray.size_extract, hks]
+    omega
+  | succ m ih =>
+    have e : (m + 1 + 1) * geom.perHopRoutingInfoLength
+        = (m + 1) * geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength :=
+      Nat.succ_mul (m + 1) geom.perHopRoutingInfoLength
+    have ih := ih (by omega)
+    rw [padAt]
+    simp only [ByteArray.size_append, size_xorBytes, ByteArray.size_extract, ih, hks]
+    omega
+
+omit nike in
+/-- The padding after hop `i` is the tail of its keystream, the padding of the hops in front
+folded into its head. -/
+theorem padAt_step (ks : ℕ → ByteArray) (hks : ∀ k, (ks k).size = (geom.routingInfoLength +
+    geom.perHopRoutingInfoLength)) (i : ℕ) :
+    padAt geom ks i
+      = xorBytes (((ks i).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i +
+          1) * geom.perHopRoutingInfoLength) (ks i).size).extract 0
+          (if i > 0 then padAt geom ks (i - 1) else ByteArray.empty).size)
+          (if i > 0 then padAt geom ks (i - 1) else ByteArray.empty)
+        ++ ((ks i).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+            geom.perHopRoutingInfoLength) (ks i).size).extract
+          (if i > 0 then padAt geom ks (i - 1) else ByteArray.empty).size
+          ((ks i).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+              geom.perHopRoutingInfoLength) (ks i).size).size := by
+  cases i with
+  | zero =>
+    rw [ite_eq_right (lt_irrefl 0), hks]
+    have h0 : ∀ E : ByteArray, xorBytes (E.extract 0 ByteArray.empty.size) ByteArray.empty
+        = ByteArray.empty := fun E => by
+      apply ByteArray.ext
+      simp [xorBytes]
+    have h1 : ∀ E : ByteArray, E.extract ByteArray.empty.size E.size = E := fun E => by
+      have := Util.Bytes.extract_append_left E ByteArray.empty
+      rwa [ByteArray.append_empty] at this
+    rw [h0, h1, ByteArray.empty_append]
+    rfl
+  | succ i =>
+    rw [ite_eq_left (Nat.succ_pos i), hks]
+    rfl
+
+omit nike in
+/-- A hop before the last, with no commands of its own, names the next hop and its tag. -/
+theorem nikeFragment_parse (path : Array PathHop) (mac : ByteArray) (i : ℕ)
+    (hi : i + 1 < path.size) (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength) (hcmd : path[i]!.commands = [])
+        (F : ByteArray)
+    (h : nikeFragment geom path mac i = .ok F) :
+    parseAll F = .ok [RoutingCommand.nextNodeHop path[i + 1]!.id (toVec32 mac)] := by
+  unfold nikeFragment at h
+  have hb : (i == path.size - 1) = false := beq_eq_false_iff_ne.mpr (by omega)
+  rw [hcmd, hb] at h
+  simp only [Bool.false_eq_true, ↓reduceIte] at h
+  obtain ⟨f0, hf0, h⟩ := Except.eq_ok_of_bind_eq_ok h
+  obtain rfl := Except.ok.inj h
+  have hsz := commandsToBytes_size_le hf0
+  have hc := RoutingCommand.nextNodeHop_toBytes_size path[i + 1]!.id (toVec32 mac)
+  have hcb := commandsToBytes_append_singleton (budget := geom.perHopRoutingInfoLength) hf0
+    (RoutingCommand.nextNodeHop path[i + 1]!.id (toVec32 mac)) (by omega)
+  exact parseAll_commandsToBytes geom.perHopRoutingInfoLength geom.perHopRoutingInfoLength _ (fun c
+      hc => by
+    simp only [List.mem_singleton] at hc
+    rw [hc]
+    intro hcon
+    injection hcon) _ hcb (by rw [ByteArray.size_append]; omega)
+
+/-- The header of layer `i`: the bytes its tag covers, then the tag. -/
+def layerHdr (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray)
+    (filler : ByteArray) (path : Array PathHop) (i : ℕ) : ByteArray :=
+  hdrMsg geom ks tag ge filler path i ++ tag i (hdrMsg geom ks tag ge filler path i)
+
+private theorem peel_arith (N n i p R : ℕ) (hR : R = p * N) (hn : n ≤ N) (hi : i + 1 < n) :
+    R + p - (i + 1) * p = p + (p + (N - n + (n - 1 - (i + 1))) * p)
+      ∧ R + p - (i + 1) * p + i * p = R := by
+  obtain ⟨k, rfl⟩ : ∃ k, N = i + 2 + k := ⟨N - (i + 2), by omega⟩
+  have e : i + 2 + k - n + (n - 1 - (i + 1)) = k := by omega
+  subst hR
+  rw [e]
+  have h1 : p * (i + 2 + k) = i * p + 2 * p + k * p := by ring
+  have h2 : (i + 1) * p = i * p + p := by ring
+  omega
+
+set_option maxHeartbeats 1000000 in
+/-- **Peeling the header of a layer gives the header of the next**, for any keystreams, tags
+and elements: the hop's keystream, and the element blinded to the next. -/
+theorem peelHdr_layerHdr (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (bf : ByteArray) (i : ℕ)
+    (hi : i + 1 < path.size) (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength) (hrouting :
+        geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hn : path.size ≤ geom.nrHops)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength) (hks : ∀ k,
+        (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (htag : ∀ m x, (tag m x).size = macLength) (hge : (ge i).size = nike.publicKeySize)
+    (hblind : nikeBlind nike (ge i) bf = ge (i + 1)) (hcmd : path[i]!.commands = [])
+    (hT : (nikeHdrTrace geom ks tag ge filler path (path.size - i)).isSome) :
+    peelHdr nike geom (ks i) bf (layerHdr geom ks tag ge filler path i)
+      = layerHdr geom ks tag ge filler path (i + 1) := by
+  have ei : path.size - 1 - (path.size - 1 - i) = i := by omega
+  have ei2 : path.size - 1 - (path.size - 1 - (i + 1)) = i + 1 := by omega
+  have hpad : (if i + 1 > 0 then padAt geom ks (i + 1 - 1) else ByteArray.empty)
+      = padAt geom ks i := ite_eq_left (Nat.succ_pos i)
+  rw [show path.size - i = (path.size - 1 - i) + 1 by omega, nikeHdrTrace] at hT
+  cases h1 : nikeHdrTrace geom ks tag ge filler path (path.size - 1 - i) with
+  | none => rw [h1] at hT; cases hT
+  | some s1 =>
+    rw [h1, ei] at hT
+    dsimp only at hT
+    cases hf : nikeFragment geom path s1.2 i with
+    | error e => rw [hf] at hT; cases hT
+    | ok F =>
+      have h1' := h1
+      rw [show path.size - 1 - i = (path.size - 1 - (i + 1)) + 1 by omega, nikeHdrTrace] at h1
+      cases h2 : nikeHdrTrace geom ks tag ge filler path (path.size - 1 - (i + 1)) with
+      | none => rw [h2] at h1; cases h1
+      | some s2 =>
+        rw [h2, ei2] at h1
+        dsimp only at h1
+        cases hf2 : nikeFragment geom path s2.2 (i + 1) with
+        | error e => rw [hf2] at h1; cases h1
+        | ok F2 =>
+          rw [hf2, hpad] at h1
+          obtain rfl := Option.some.inj h1
+          dsimp only at hf
+          have hm1 : hdrMsg geom ks tag ge filler path (i + 1)
+              = v0AD ++ ge (i + 1) ++ xorBytes (F2 ++ s2.1) ((ks (i + 1)).extract 0
+                ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1 + 1) *
+                    geom.perHopRoutingInfoLength)) ++ padAt geom ks i := by
+            unfold hdrMsg
+            rw [h2]
+            dsimp only
+            rw [hf2]
+            dsimp only
+            rw [hpad]
+          have hm0 : hdrMsg geom ks tag ge filler path i
+              = v0AD ++ ge i ++ xorBytes (F ++ xorBytes (F2 ++ s2.1) ((ks (i + 1)).extract 0
+                  ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1 + 1) *
+                      geom.perHopRoutingInfoLength))) ((ks i).extract 0 ((geom.routingInfoLength +
+                      geom.perHopRoutingInfoLength) - (i + 1) * geom.perHopRoutingInfoLength))
+                ++ (if i > 0 then padAt geom ks (i - 1) else ByteArray.empty) := by
+            unfold hdrMsg
+            rw [h1']
+            dsimp only
+            rw [hf]
+          obtain ⟨a1, a2⟩ := peel_arith geom.nrHops path.size i geom.perHopRoutingInfoLength
+              geom.routingInfoLength
+            hrouting hn hi
+          have hs2 := (nikeHdrTrace_size geom ks tag ge filler path hnnh hle hfill htag _ s2
+            h2).1
+          have hF := nikeFragment_size geom path _ i hnnh hle F hf
+          have hF2 := nikeFragment_size geom path _ (i + 1) hnnh hle F2 hf2
+          have hPd : (if i > 0 then padAt geom ks (i - 1) else ByteArray.empty).size
+              = i * geom.perHopRoutingInfoLength := by
+            cases i with
+            | zero => rw [ite_eq_right (lt_irrefl 0), Nat.zero_mul]; rfl
+            | succ i =>
+              rw [ite_eq_left (Nat.succ_pos i)]
+              exact padAt_size geom ks hks i (by omega)
+          have hmac : (match parseAll F with
+              | .ok cmds => ((cmds.findSome? RSOR.nextHop).map (·.2)).getD default
+              | .error _ => (default : Vector UInt8 32))
+              = toVec32 (tag (i + 1) (hdrMsg geom ks tag ge filler path (i + 1))) := by
+            rw [nikeFragment_parse geom path _ i hi hnnh hle hcmd F hf, hm1]
+            rfl
+          unfold layerHdr
+          rw [hm0, @ByteArray.append_assoc (v0AD ++ ge i) _
+              (if i > 0 then padAt geom ks (i - 1) else ByteArray.empty),
+            peelHdr_step nike geom (ks i) bf (ge i) F _ _ _ ((geom.routingInfoLength +
+                geom.perHopRoutingInfoLength) - (i + 1) * geom.perHopRoutingInfoLength)
+              (by rw [hks, hPd]; omega)
+              (by rw [hF, size_xorBytes, ByteArray.size_append, hF2, hs2]; omega) hF
+              (by rw [hPd]; omega) hge,
+            hblind, hmac, ofVector_toVec32 _ (htag _ _), ← padAt_step geom ks hks i, hm1,
+            ← ByteArray.append_assoc]
+
+omit nike in
+/-- A header that builds, builds up to every step. -/
+theorem nikeHdrTrace_isSome_of_le (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (m k : ℕ)
+    (h : (nikeHdrTrace geom ks tag ge filler path (m + k)).isSome) : (nikeHdrTrace geom ks tag ge
+        filler path m).isSome := by
+  induction k with
+  | zero => exact h
+  | succ k ih =>
+    refine ih ?_
+    rw [show m + (k + 1) = (m + k) + 1 from rfl, nikeHdrTrace] at h
+    cases h0 : nikeHdrTrace geom ks tag ge filler path (m + k) with
+    | none => rw [h0] at h; cases h
+    | some s => rfl
+
+omit nike in
+/-- The header of a packet is the header of its first layer. -/
+theorem layerHdr_zero (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (s : ByteArray × ByteArray)
+    (hpos : 0 < path.size) (h : nikeHdrTrace geom ks tag ge filler path path.size = some s) :
+    v0AD ++ ge 0 ++ s.1 ++ s.2 = layerHdr geom ks tag ge filler path 0 := by
+  have e0 : path.size - 1 - (path.size - 1 - 0) = 0 := by omega
+  have h' : nikeHdrTrace geom ks tag ge filler path ((path.size - 1 - 0) + 1) = some s := by
+    rwa [show (path.size - 1 - 0) + 1 = path.size by omega]
+  rw [nikeHdrTrace] at h'
+  cases h1 : nikeHdrTrace geom ks tag ge filler path (path.size - 1 - 0) with
+  | none => rw [h1] at h'; cases h'
+  | some s1 =>
+    rw [h1, e0] at h'
+    dsimp only at h'
+    cases hf : nikeFragment geom path s1.2 0 with
+    | error e => rw [hf] at h'; cases h'
+    | ok F =>
+      rw [hf] at h'
+      obtain rfl := Option.some.inj h'
+      unfold layerHdr hdrMsg
+      rw [h1]
+      dsimp only
+      rw [hf]
+      dsimp only
+      rw [ite_eq_right (lt_irrefl 0), ByteArray.append_empty]
+
+/-- **The header after the first `j` hops peeled it is the header of layer `j`**, when those
+hops' keystreams and blinding factors are the keys'. -/
+theorem hdrPeels_layerHdr (streamS : StreamCipher) (K : List HopKeys) (ks : ℕ → ByteArray)
+    (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray) (filler : ByteArray)
+    (path : Array PathHop) (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength) (hrouting :
+        geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hn : path.size ≤ geom.nrHops)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength) (hks : ∀ k,
+        (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (htag : ∀ m x, (tag m x).size = macLength) (hge0 : (ge 0).size = nike.publicKeySize)
+    (hcmd : ∀ i, i + 1 < path.size → path[i]!.commands = [])
+    (hT : (nikeHdrTrace geom ks tag ge filler path path.size).isSome) (j : ℕ) (hj : j < path.size)
+        (hjk : j ≤ K.length)
+    (hksK : ∀ i < j, keysKs geom streamS K.toArray i = ks i)
+    (hgeK : ∀ i < j, nikeBlind nike (ge i) (K.toArray[i]!).blindingFactor = ge (i + 1)) :
+    hdrPeels nike streamS geom K j (layerHdr geom ks tag ge filler path 0)
+        = layerHdr geom ks tag ge filler path j
+      ∧ (ge j).size = nike.publicKeySize := by
+  induction j with
+  | zero => exact ⟨rfl, hge0⟩
+  | succ j ih =>
+    obtain ⟨ihp, ihs⟩ := ih (by omega) (by omega) (fun i hi => hksK i (by omega))
+      (fun i hi => hgeK i (by omega))
+    refine ⟨?_, by rw [← hgeK j (Nat.lt_succ_self j), size_nikeBlind]; exact ihs⟩
+    rw [hdrPeels_succ nike streamS geom K j _ hjk, ihp, hksK j (Nat.lt_succ_self j)]
+    exact peelHdr_layerHdr nike geom ks tag ge filler path _ j hj hnnh hle hrouting hn hfill hks
+      htag ihs (hgeK j (Nat.lt_succ_self j)) (hcmd j hj)
+      (nikeHdrTrace_isSome_of_le geom ks tag ge filler path (path.size - j) j
+        (by rwa [show path.size - j + j = path.size by omega]))
+
+end Layer
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx

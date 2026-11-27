@@ -671,9 +671,32 @@ steps (`NIKESphinxTLUNext.lean`):
    a hop reads that hop's header key and IV through its keystream only and does not read its
    payload key (`onionOfKeys_succ`, `nextOfStream`, `nextOfStream_congr`).
 
-Not proved yet for TLU→ of NIKE Sphinx: the last comparison of the two worlds. The
-last comparison has to match the original's later layers, which are derived from the replaced
-blinding factor, in both worlds. SLU← and STI↔ are not started for NIKE Sphinx.
+**The last comparison of the two worlds is not proved.** After the steps above, world 0 is
+played from a uniform keystream for the relay's hop of the original onion, and world 1 from
+one for the replacement and one for the original's next layer. The plan, and what is proved
+for it:
+
+1. A peeled header in closed form, for any keys. Proved (`NIKESphinxPeel.lean`): one peel
+   undoes the sender's step for that hop (`peelHdr_step`, from `cascading_xor_step`); the
+   padding after a hop is the tail of its keystream with the padding in front folded in
+   (`padAt_step`, `padAt_size`); a hop before the last names the next hop and its tag
+   (`nikeFragment_parse`). So peeling the header of a layer gives the header of the next
+   (`layerHdr`, `peelHdr_layerHdr`, `hdrPeels_layerHdr`), and the original's next layer is the
+   header of layer `j + 1` of the header function with the relay's keystream put in, with the
+   block the later hops left (`nextOfStream_layerHdr`). Of the hops in front it reads their
+   padding only.
+2. The relay's answer in world 0 in the same closed form. Not proved.
+3. The padding of the hops in front is absorbed by the tail of the uniform keystream, and the
+   relay's header on a path that goes on becomes its header on a path that ends at it by
+   xoring a fixed mask into the keystream's head. Not proved. The byte lemmas for this exist
+   in `KEMSphinxPad.lean` and `KEMSphinxTLUFinal.lean` and do not depend on the KEM; they are
+   to be shared, not copied.
+4. The later hops' keys and elements come from the sender's secret and the replaced blinding
+   factor, in both worlds, but world 1 uses an independent secret for the original. That the
+   two are distributed alike is a property of the NIKE (blinding by a uniform factor), to be
+   stated as a game whose advantage the bound carries. Not stated yet.
+
+SLU← and STI↔ are not started for NIKE Sphinx.
 
 ## How the bounds are built
 
