@@ -776,6 +776,49 @@ theorem nikePktFn_front (ks ks' : ℕ → ByteArray) (tag tag' enc enc' : ℕ �
   exact congrArg (fun P => (nikeHdrTrace geom ks' tag' ge' filler' path' path'.size).map
     fun s => v0AD ++ ge' 0 ++ s.1 ++ s.2 ++ P) hE
 
+omit nike in
+/-- **The header's state after hop `i`'s step**: the hop's fragment and the routing information
+behind it, masked by the head of the hop's keystream, and the hop's tag on `hdrMsg`. -/
+theorem nikeHdrTrace_at (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (i : ℕ)
+    (hi : i < path.size) :
+    nikeHdrTrace geom ks tag ge filler path (path.size - i)
+      = match nikeHdrTrace geom ks tag ge filler path (path.size - 1 - i) with
+        | none => none
+        | some s =>
+          match nikeFragment geom path s.2 i with
+          | .error _ => none
+          | .ok F => some (xorBytes (F ++ s.1) ((ks i).extract 0 ((geom.routingInfoLength +
+              geom.perHopRoutingInfoLength) - (i + 1) * geom.perHopRoutingInfoLength)),
+            tag i (hdrMsg geom ks tag ge filler path i)) := by
+  rw [show path.size - i = (path.size - 1 - i) + 1 by omega, nikeHdrTrace,
+    show path.size - 1 - (path.size - 1 - i) = i by omega]
+  unfold hdrMsg
+  cases nikeHdrTrace geom ks tag ge filler path (path.size - 1 - i) with
+  | none => rfl
+  | some s =>
+    dsimp only
+    cases nikeFragment geom path s.2 i with
+    | error e => rfl
+    | ok F => rfl
+
+omit nike in
+/-- The bytes under the tag of the last hop: its fragment and the filler, masked. -/
+theorem hdrMsg_last (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (i : ℕ)
+    (hi : i + 1 = path.size) (F : ByteArray)
+    (hF : nikeFragment geom path ByteArray.empty i = .ok F) :
+    hdrMsg geom ks tag ge filler path i
+      = v0AD ++ ge i
+        ++ xorBytes (F ++ (if geom.nrHops > path.size then filler else ByteArray.empty))
+          ((ks i).extract 0 ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+              geom.perHopRoutingInfoLength))
+        ++ (if i > 0 then padAt geom ks (i - 1) else ByteArray.empty) := by
+  unfold hdrMsg
+  rw [show path.size - 1 - i = 0 by omega, nikeHdrTrace]
+  dsimp only
+  rw [hF]
+
 end Layer
 
 /-! ## What a relay forwards -/

@@ -716,6 +716,20 @@ for it:
      (blinding by a uniform factor), to be stated as a game on the NIKE whose advantage the
      bound carries. Not stated yet.
    - World 1 after its hidden-layer steps is the same game under a relabelling of its draws.
+   How the pieces fit, for whoever continues this:
+   - Both final games are `strRunP`: world 0 on the original with the empty patch, world 1 on
+     the replacement with `patchWith` around the original's next layer. World 1 reaches that
+     form by undoing the refusal of step 3 after step 4 (`Relay.gameHand_sub_le` again, one
+     more chance-of-sending term) and then `nextPost_real`.
+   - The oracle of `strRunP` is `Protocols.RSOR.oracle` with pure answers, so two runs are
+     compared answer by answer with `oracle_patch_congr`, after the random payload of
+     `patchWith` is drawn first (`patchWith_draw`, `patchDrawn`) and identified with the ideal
+     cipher's other block.
+   - The onion shown is compared with `nikePktFn_front`; its hypothesis at the relay's hop
+     comes from `nikeHdrTrace_at`, `hdrMsg_struct` (original) and `hdrMsg_last`
+     (replacement), with the keystream's head shifted by `xorBytes_shift`.
+   - The relabelling of the two uniform keystreams of world 1 into the one of world 0 is
+     `evalDistEq_headTail` (in `KEMSphinxTLUFinal.lean`, independent of the KEM).
    Both cases are needed: the relay before the end of the original's path, and the relay as
    its exit, where it delivers and replies. A changed payload under the challenge header is
    answered with a random payload in world 1 and with the ideal cipher's other block in world
