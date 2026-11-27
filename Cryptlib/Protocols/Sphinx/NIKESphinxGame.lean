@@ -366,6 +366,28 @@ theorem layer_zero_pktFn (hops : Array PathHop) (d : RSOR.Draw nike geom)
     rw [(hchain n (by omega)).2.2]
     rfl
 
+/-- The sender's keys for the first `i` hops are the first `i` of its keys. -/
+theorem hopKeys_take (c : nike.PrivateKey) (hops : Array PathHop) (i n : ℕ) (h : i ≤ n) :
+    (RSOR.hopKeys nike kdfS c hops n).take i = RSOR.hopKeys nike kdfS c hops i := by
+  rw [hopKeys_eq_map, hopKeys_eq_map, ← List.map_take, List.take_range, Nat.min_eq_left h]
+
+/-- A packet after the first `i` relays, each with its keys from the list `ks`, forwarded it. -/
+def peels (ks : List HopKeys) (i : ℕ) (pkt : ByteArray) : ByteArray :=
+  (ks.take i).foldl (fun p k => RSOR.peel nike cipher streamS geom k p) pkt
+
+/-- **A later layer of a sender's packet is its first layer, peeled** by the keys of the hops
+in front. -/
+theorem layer_peels (hops : Array PathHop) (d : RSOR.Draw nike geom) (payload : ByteArray)
+    (i n : ℕ) (h : i ≤ n) :
+    RSOR.layer nike cipher macS kdfS streamS geom hops d payload i
+      = (RSOR.layer nike cipher macS kdfS streamS geom hops d payload 0).map
+        (peels nike cipher streamS geom
+          (RSOR.hopKeys nike kdfS (RSOR.clientKey nike geom d) hops n) i) := by
+  unfold RSOR.layer peels
+  rw [hopKeys_take nike kdfS _ hops i n h]
+  cases newNIKEPacket nike cipher macS kdfS streamS geom (ofVector d.1)
+    (RSOR.filler nike geom hops d) hops payload <;> rfl
+
 /-- **With the sender's keys, the relay handed the keys of its place is the relay.** -/
 theorem keysExcept_hopKeys (c sk : nike.PrivateKey) (hops : Array PathHop) (n j : ℕ)
     (hj : j < n)

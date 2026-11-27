@@ -629,6 +629,15 @@ the adversary `forwardStreamAdv`, which plays world 0 from the keystream it is g
 Added up, this is `forward_world0_le`. The events are not bounded: they should all be zero
 when the request's onion builds and its body has a payload's length.
 
+**World 1 is not done.** There the relay answers the replacement onion with what the original
+would have produced, so two onions meet the honest relay: the replacement, recognised by its
+layer at the relay, and the original, whose next layer and reply the relay hands out. Each
+needs its own key replacement and its own MAC, payload and keystream steps; the KEM proof
+calls the second the hidden layer. So far there is only the common ground: a later layer of a
+sender's packet is its first layer peeled by the keys of the hops in front (`layer_peels`,
+`peels`). The definitions of world 0 above are written for the adversary's own request and an
+empty patch; they have to be restated for any request and patch before world 1 can use them.
+
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two
 worlds.
