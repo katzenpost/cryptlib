@@ -4,6 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Cryptlib.Protocols.Sphinx.KEMSphinxSLURelay
+import Cryptlib.Protocols.Sphinx.KEMSphinxBuilds
 
 namespace Cryptlib.Protocols.RSOR
 
@@ -2973,18 +2974,6 @@ theorem tailIndistinguishable_le (names : Role → RSOR.Name)
 /-! ### The bad draws of the first half, on the KEM alone -/
 
 omit cipher macS kdfS streamS geom hvalid hmactag h16 [SampleableType kem.Plaintext] in
-/-- **An encapsulation to a relay's key does not fail**: a relay's key is a derived one. -/
-theorem kemEncap_key (k : Key kem) (s : Vector UInt8 32) :
-    ∃ ct ss, kemEncap kem (ofVector (kem.encodePublicKey k.1)) s = .ok (ct, ss) := by
-  obtain ⟨sk, hk⟩ := k.2
-  obtain ⟨c, p, s', h⟩ := kem.encap_derived sk (kem.stateFromSeed s)
-  unfold kemEncap
-  rw [Cryptlib.Protocols.Sphinx.Common.toVecN_ofVector, kem.decode_encode_pub, hk]
-  dsimp only
-  rw [h]
-  exact ⟨_, _, rfl⟩
-
-omit cipher macS kdfS streamS geom hvalid hmactag h16 [SampleableType kem.Plaintext] in
 /-- **The chance that a uniform seed is not reliable** for the KEM: zero for a KEM that is
 perfectly correct. -/
 noncomputable def seedFailure : ENNReal :=
@@ -3025,6 +3014,37 @@ theorem prEvent_hybBad_eq (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Pr
     obtain ⟨k, hk, k₁, -, k₂, -, out, -, o, -, s, -, rfl⟩ := hd
     exact RSOR.key_of_keygen kem k.1 k.2 hk
   exact not_congr ⟨fun h => h.2.1, fun h => ⟨hk, h, kemEncap_key kem d.k.1 d.s⟩⟩
+
+/-! ### The draws of the second half that are not good, on the KEM alone -/
+
+omit [SampleableType kem.Plaintext] in
+set_option maxHeartbeats 2000000 in
+/-- **A draw of the second half that is not good has a seed that is not reliable**: the honest
+backward relay's, or one of a hop in front of it. The relay's key pair is a key pair, and the
+reply's first layer builds. -/
+theorem prEvent_not_backGoodK_le (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} →
+    Protocols.RSOR.TailChallenge hon
+      → ProbComp (Protocols.RSOR.World 𝒮))
+    (Q : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → (q : RSOR.Request kem geom) × Fin q.back.hops.length) (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) :
+    Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (backAdvK kem cipher macS kdfS streamS geom
+        hvalid hmactag h16 w₀ w₁ Q names A))}[¬ backGoodK kem cipher macS kdfS streamS geom hvalid
+        hmactag h16 Q d]
+      ≤ Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (backAdvK kem cipher macS kdfS streamS
+          geom hvalid hmactag h16 w₀ w₁ Q names A))}[¬ (kem.Reliable (kem.stateFromSeed d.s)
+        ∧ ∀ m, m < (Q (propChOf d).c).2.val
+          → kem.Reliable (kem.stateFromSeed (propOthOf d).2.1.1.toArray[m]!))] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood => hbad ?_
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold keyedDraw at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, cs, -, s, -, o, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  exact ⟨hk, hgood.1,
+    layer_zero_builds kem default macS kdfS streamS hvalid (Q (propChOf d).c).1.back
+      (Nat.zero_lt_of_lt (Q (propChOf d).c).2.isLt) _ (Or.inr ⟨_, rfl⟩) _ _ Array.size_replicate,
+    hgood.2⟩
 
 end TailGame
 

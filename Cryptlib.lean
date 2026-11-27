@@ -89,6 +89,7 @@ import Cryptlib.Protocols.Sphinx.NIKESphinxTheorems
 import Cryptlib.Protocols.Sphinx.KEMSphinxTheorems
 import Cryptlib.Protocols.Sphinx.KEMSphinxTail
 import Cryptlib.Protocols.Sphinx.KEMSphinxHeaderFn
+import Cryptlib.Protocols.Sphinx.KEMSphinxBuilds
 import Cryptlib.Protocols.Sphinx.KEMSphinxTailIndist
 import Cryptlib.Protocols.Sphinx.KEMSphinxTailGame
 import Cryptlib.Protocols.Sphinx.KEMSphinxTailOracle

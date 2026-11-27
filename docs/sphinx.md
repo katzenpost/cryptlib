@@ -165,7 +165,8 @@ of events on draws, not yet bounded by numbers:
 
 - that a KEM ciphertext is hard to guess is not a law of the KEM type yet, so `nextHidden`
   has no bound;
-- the chance that a layer does not build is the chance of a KEM failure, not proved.
+- the chance that a layer does not build is not reduced to the KEM here yet; a first layer
+  always builds (`layer_zero_builds`), so this is about seeds that are not reliable.
 
 The zero-tag event is bounded: a draw of world 1 is not good with at most the chance that a
 layer cannot be built, plus one in the number of payload tags (`prEvent_not_finalGood_le`,
@@ -422,8 +423,19 @@ the one-block advantage against the payload cipher, the keystream generator's ad
 the draws that are not good (twice). `tailBackCost` is two sides and `tailCutBad`.
 
 The statement is `tailIndistinguishable_le`: the advantage in STI↔ is at most `tailBackCost`
-plus `tailHalfCost`. Of its events only the first half's bad draws are reduced to the KEM
-(`seedFailure`); the second half's bad, not-good and cannot-build events read a whole path.
+plus `tailHalfCost`. Its events, as far as they are reduced to the KEM:
+
+- the first half's bad draws are exactly a seed that is not reliable (`seedFailure`,
+  `prEvent_hybBad_eq`);
+- a draw of the second half that is not good has a seed that is not reliable, the honest
+  backward relay's or one of a hop in front of it (`prEvent_not_backGoodK_le`);
+- the second half's bad draws and the draws where the reply's next layer cannot be built are
+  not reduced yet.
+
+The first layer over a route always builds (`layer_zero_builds`, in `KEMSphinxBuilds.lean`): a
+packet fails to build on a wrong size, a failed encapsulation, or commands that do not fit a
+hop, and a route of the scheme has none of these. So "a layer does not build" is not an event
+of its own for a first layer; what is left is seeds that are not reliable.
 
 ## How the bounds are built
 
