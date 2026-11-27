@@ -390,9 +390,10 @@ relay has a role already handled and world 0 otherwise. One step (`tailStep_le`)
 
 `tailStepCost` is one side of a step: the bad draws, the replacement of the relay's keys (KEM
 and KDF), a MAC forgery, and the keystream generator's advantage. `tailHalfCost` is four of
-them. The chance of a bad draw is `encapFailure`, the chance that an encapsulation to a freshly
-generated key fails or uses a seed that is not reliable (`prEvent_hybBad_eq`): a quantity on the
-KEM alone, with no number behind it yet.
+them. The chance of a bad draw is `seedFailure`, the chance that a uniform seed is not reliable
+for the KEM (`prEvent_hybBad_eq`): a quantity on the KEM alone, zero for a KEM that is perfectly
+correct. An encapsulation to a relay's key does not fail (`kemEncap_key`), by the KEM type's law
+`encap_derived`, which every KEM here proves without an axiom.
 
 The second half is `tailSecondHalf_le`: the middle world and world 1 are told apart with at most
 `tailBackCost`. Both worlds have one shape (`backWorld`): the first layer of a request, with
@@ -423,7 +424,7 @@ the draws that are not good (twice). `tailBackCost` is two sides and `tailCutBad
 
 The statement is `tailIndistinguishable_le`: the advantage in STI↔ is at most `tailBackCost`
 plus `tailHalfCost`. Of its events only the first half's bad draws are reduced to the KEM
-(`encapFailure`); the second half's bad, not-good and cannot-build events read a whole path.
+(`seedFailure`); the second half's bad, not-good and cannot-build events read a whole path.
 
 ## How the bounds are built
 

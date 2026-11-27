@@ -324,6 +324,18 @@ def encapAllM : (ks : List KEM) → CombinedPublicKey ks →
       let (cs, comps) ← liftTail (encapAllM ks pks)
       pure ((c, cs), (ofVector (k.encodePlaintext p), ofVector (k.encodeCiphertext c)) :: comps)
 
+/-- Encapsulation to derived public keys does not fail on the tail. -/
+theorem encapAllM_derived : (ks : List KEM) → (sks : CombinedPrivateKey ks) →
+    (s : CombinedState ks) → ∃ r s', encapAllM ks (derivePublicKeyN ks sks) s = .ok r s'
+  | [], _, s => ⟨_, s, rfl⟩
+  | k :: ks, (sk, sks), (s, rest) => by
+    obtain ⟨c, p, s', h⟩ := k.encap_derived sk s
+    obtain ⟨r, rest', hr⟩ := encapAllM_derived ks sks rest
+    refine ⟨((c, r.1), (ofVector (k.encodePlaintext p), ofVector (k.encodeCiphertext c)) :: r.2),
+      (s', rest'), ?_⟩
+    simp only [encapAllM, derivePublicKeyN, bind, EStateM.bind, liftHead, liftTail, h, hr]
+    rfl
+
 def decapAllM : (ks : List KEM) → CombinedPrivateKey ks → CombinedCiphertext ks →
     EStateM KEMError (CombinedState ks) (List (ByteArray × ByteArray))
   | [], _, _ => pure []
@@ -517,6 +529,14 @@ def combineKEM (k₀ : KEM) (ks : List KEM) : KEM where
   derivePublicKey := fun (sk0, sks) => (k₀.derivePublicKey sk0, derivePublicKeyN ks sks)
 
   Reliable := fun (s0, ss) => k₀.Reliable s0 ∧ ReliableN ks ss
+
+  encap_derived := fun (sk0, sks) (s, rest) => by
+    obtain ⟨c, p, s', h⟩ := k₀.encap_derived sk0 s
+    obtain ⟨r, rest', hr⟩ := encapAllM_derived ks sks rest
+    refine ⟨(c, r.1), splitPRF F (ofVector (k₀.encodePlaintext p),
+      ofVector (k₀.encodeCiphertext c)) r.2, (s', rest'), ?_⟩
+    simp only [encapM, bind, EStateM.bind, liftHead, liftTail, h, hr]
+    rfl
 
   honestRoundTrip := fun (sk0, sks) =>
     combinedRoundTrip F k₀ ks (k₀.derivePublicKey sk0) (derivePublicKeyN ks sks) sk0 sks

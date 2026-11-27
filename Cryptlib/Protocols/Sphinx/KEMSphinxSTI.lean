@@ -3025,21 +3025,27 @@ theorem tailIndistinguishable_le (names : Role → RSOR.Name)
 /-! ### The bad draws of the first half, on the KEM alone -/
 
 omit cipher macS kdfS streamS geom hvalid hmactag h16 [SampleableType kem.Plaintext] in
-/-- **The chance that an encapsulation to a freshly generated key fails**: the seed is not
-reliable, or the encapsulation returns an error. -/
-noncomputable def encapFailure : ENNReal :=
-  Pr{let p ← (do
-      let k ← keygen kem
-      let s ← $ᵗ (Vector UInt8 32)
-      return (k, s))}[(fun p : (Key kem × kem.PrivateKey) × Vector UInt8 32 =>
-      ¬ (kem.Reliable (kem.stateFromSeed p.2)
-        ∧ ∃ ct ss, kemEncap kem (ofVector (kem.encodePublicKey p.1.1.1)) p.2 = Except.ok (ct, ss)))
-            p]
+/-- **An encapsulation to a relay's key does not fail**: a relay's key is a derived one. -/
+theorem kemEncap_key (k : Key kem) (s : Vector UInt8 32) :
+    ∃ ct ss, kemEncap kem (ofVector (kem.encodePublicKey k.1)) s = .ok (ct, ss) := by
+  obtain ⟨sk, hk⟩ := k.2
+  obtain ⟨c, p, s', h⟩ := kem.encap_derived sk (kem.stateFromSeed s)
+  unfold kemEncap
+  rw [Cryptlib.Protocols.Sphinx.Common.toVecN_ofVector, kem.decode_encode_pub, hk]
+  dsimp only
+  rw [h]
+  exact ⟨_, _, rfl⟩
+
+omit cipher macS kdfS streamS geom hvalid hmactag h16 [SampleableType kem.Plaintext] in
+/-- **The chance that a uniform seed is not reliable** for the KEM: zero for a KEM that is
+perfectly correct. -/
+noncomputable def seedFailure : ENNReal :=
+  Pr{let s ← $ᵗ (Vector UInt8 32)}[¬ kem.Reliable (kem.stateFromSeed s)]
 
 omit [SampleableType kem.Plaintext] in
 set_option maxHeartbeats 2000000 in
-/-- **A bad draw of a step of the first half is a failed encapsulation to the honest relay.**
-The event reads the relay's key pair and the seed of its layer only. -/
+/-- **A bad draw of a step of the first half is a seed that is not reliable.** The relay's key
+pair is a key pair, and an encapsulation to it does not fail. -/
 theorem prEvent_hybBad_eq (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge
     hon
       → ProbComp (Protocols.RSOR.World 𝒮)) (ρ : Role) (names : Role → RSOR.Name)
@@ -3047,37 +3053,30 @@ theorem prEvent_hybBad_eq (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Pr
     Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
         (Protocols.RSOR.tailPair w₀ w₁) ρ names _ (hybDraw geom)
         A)}[hybBad kem cipher macS kdfS streamS geom hvalid hmactag h16 d]
-      = encapFailure kem := by
+      = seedFailure kem := by
   have hmap : (fun d : PropDraw kem cipher macS kdfS streamS geom hvalid hmactag h16
-      (Protocols.RSOR.tailPair w₀ w₁) ρ names (RSOR.Randomness geom × RSOR.Draw geom) A => (d.k,
-      d.s))
+      (Protocols.RSOR.tailPair w₀ w₁) ρ names (RSOR.Randomness geom × RSOR.Draw geom) A => d.s)
         <$> propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
             (Protocols.RSOR.tailPair w₀ w₁) ρ names _ (hybDraw geom) A
-      =ᵈ (do
-        let k ← keygen kem
-        let s ← $ᵗ (Vector UInt8 32)
-        return (k, s)) := by
+      =ᵈ $ᵗ (Vector UInt8 32) := by
     unfold propDrawOf
-    simp only [map_bind, map_pure]
-    refine EvalDistEq.bind_right _ fun k => ?_
-    refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k₁ => EvalDistEq.bind_right _ fun k₂ =>
+    simp only [map_bind, map_pure, bind_pure]
+    refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+      EvalDistEq.bind_right _ fun k₂ => EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _)
+        (OracleComp.EvalDistEq.bind_const _ _)) ?_
+    refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k =>
       EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _)
         (OracleComp.EvalDistEq.bind_const _ _)) ?_
-    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
     exact OracleComp.EvalDistEq.bind_const _ _
-  unfold encapFailure
-  rw [← hmap.prEvent_eq (fun p : (Key kem × kem.PrivateKey) × Vector UInt8 32 =>
-      ¬ (kem.Reliable (kem.stateFromSeed p.2)
-        ∧ ∃ ct ss, kemEncap kem (ofVector (kem.encodePublicKey p.1.1.1)) p.2 = Except.ok (ct,
-            ss))), prEvent_map]
+  unfold seedFailure
+  rw [← hmap.prEvent_eq (fun s => ¬ kem.Reliable (kem.stateFromSeed s)), prEvent_map]
   refine prEvent_congr_of_support _ _ _ fun d hd => ?_
   have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
     unfold propDrawOf at hd
     simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
     obtain ⟨k, hk, k₁, -, k₂, -, out, -, o, -, s, -, rfl⟩ := hd
     exact RSOR.key_of_keygen kem k.1 k.2 hk
-  unfold hybBad
-  simp only [hk, true_and]
+  exact not_congr ⟨fun h => h.2.1, fun h => ⟨hk, h, kemEncap_key kem d.k.1 d.s⟩⟩
 
 end TailGame
 

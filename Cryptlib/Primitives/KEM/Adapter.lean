@@ -107,14 +107,22 @@ theorem roundTrip (sk : nike.PrivateKey) :
       ∀ t, ∃ t', decapM F nike sk c t = .ok k t' := by
   rintro ⟨i, str⟩ - c k s' hEnc t
   simp only [encapM, nextSeed, bind, EStateM.bind, pure, EStateM.pure,
-             dif_pos (nike.derive_safe sk)] at hEnc
+             dite_eq_left (nike.derive_safe sk)] at hEnc
   injection hEnc with hval _
   injection hval with hc hk
   subst hc; subst hk
-  simp only [decapM, dif_pos (nike.derive_safe _)]
+  simp only [decapM, dite_eq_left (nike.derive_safe _)]
   refine ⟨t, ?_⟩
   simp only [pure, EStateM.pure]
   rw [nike.commutes sk (nike.privateKeyFromSeed (str i))]
+
+/-- Encapsulation to a derived public key does not fail: a derived key is safe. -/
+theorem encap_derived (sk : nike.PrivateKey) (s : St) :
+    ∃ c k s', encapM F nike (nike.derivePublicKey sk) s = .ok (c, k) s' := by
+  obtain ⟨i, str⟩ := s
+  simp only [encapM, nextSeed, bind, EStateM.bind, pure, EStateM.pure,
+    dite_eq_left (nike.derive_safe sk)]
+  exact ⟨_, _, _, rfl⟩
 
 def kemOfNike : KEM where
   State        := St
@@ -146,6 +154,7 @@ def kemOfNike : KEM where
   stateFromSeed := fun seed => initWith (fun _ => seed)
   derivePublicKey := nike.derivePublicKey
   honestRoundTrip := roundTrip F nike
+  encap_derived := encap_derived F nike
   decodePrivateKey_total := nike.decodePrivateKey_total
 
   -- Inhabitance only: a degenerate constant stream. Honest runs start from `initWith`.
