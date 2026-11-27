@@ -4,6 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLU
+import Cryptlib.Protocols.Sphinx.NIKESphinxPeel
 
 namespace Cryptlib.Protocols.Sphinx.NIKESphinx
 
@@ -12,7 +13,8 @@ open Cryptlib.Protocols.Sphinx.Geometry (Geometry)
 open Cryptlib.Protocols.Sphinx.Types
 open Cryptlib.Protocols.Sphinx.Commands
 open Cryptlib.Protocols.Sphinx.Constants
-open Cryptlib.Protocols.Sphinx.KEMSphinx (procSpec ProcResult relayImpl)
+open Cryptlib.Protocols.Sphinx.KEMSphinx (procSpec ProcResult relayImpl keysKs keysTag keysEnc)
+open Cryptlib.Protocols.Sphinx.Common (v0AD)
 open Cryptlib.Protocols.Sphinx.KEMSphinx.RSOR (Name Msg Onion split join stepOf replyOf)
 open Cryptlib.Primitives.WideBlockCipher (WideBlockCipher)
 open Cryptlib.Primitives.MAC (MAC)
@@ -27,6 +29,112 @@ In world 1 the honest relay answers the replacement with the layer the adversary
 onion has after the relay. That layer is built with the keys of the original's own layer at the
 relay, which the adversary is never shown. Here world 1, after the relay's keys for the
 replacement were replaced, is written as the key game for the original onion. -/
+
+section NextLayer
+
+variable (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+  (streamS : StreamCipher) (geom : Geometry)
+
+/-- The layer after hop `j` of `q`'s onion, with hop `j`'s header keystream given. Of hop `j`'s
+keys it reads the MAC key and the blinding factor. -/
+def nextOfStream (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
+    (ks : List HopKeys) (j : ℕ) (U : ByteArray) : Onion geom :=
+  if (RSOR.body nike macS kdfS streamS geom q r).size = geom.forwardPayloadLength then
+    match nikeHdrTrace geom (Function.update (keysKs geom streamS ks.toArray) j U)
+        (keysTag macS ks.toArray) (blindElem nike a ks.toArray)
+        (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient q.receiver]) r.1) (RSOR.path nike
+            q.fwd [.recipient q.receiver]) (RSOR.path nike q.fwd [.recipient q.receiver]).size with
+    | some s => split geom (peelHdr nike geom U (ks.toArray[j]!).blindingFactor
+        (hdrPeels nike streamS geom ks j (v0AD ++ blindElem nike a ks.toArray 0 ++ s.1 ++ s.2))
+      ++ encTrace (keysEnc cipher ks.toArray) (RSOR.path nike q.fwd [.recipient q.receiver]).size
+        ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ (RSOR.body nike macS kdfS
+            streamS geom q r)) ((RSOR.path nike q.fwd [.recipient q.receiver]).size - (j + 1)))
+    | none => default
+  else default
+
+/-- **The layer after hop `j` reads hop `j`'s header key and IV through its keystream only, and
+does not read its payload key**: the hop's decryption undoes its encryption. This holds when
+the header has a header's length. -/
+theorem onionOfKeys_succ (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom)
+    (a : ByteArray) (ks : List HopKeys) (j : ℕ) (hjp : j < (RSOR.path nike q.fwd [.recipient
+        q.receiver]).size) (hjk : j < ks.length)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (hgood : ∀ s, nikeHdrTrace geom (keysKs geom streamS ks.toArray) (keysTag macS ks.toArray)
+        (blindElem nike a ks.toArray) (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient
+            q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver]) (RSOR.path nike q.fwd
+            [.recipient q.receiver]).size = some s →
+      (v0AD ++ blindElem nike a ks.toArray 0 ++ s.1 ++ s.2).size = 2 + nike.publicKeySize +
+          geom.routingInfoLength + macLength) :
+    onionOfKeys nike cipher macS kdfS streamS geom (j + 1) q r a ks
+      = nextOfStream nike cipher macS kdfS streamS geom q r a ks j
+        (keysKs geom streamS ks.toArray j) := by
+  unfold onionOfKeys nextOfStream nikePktFn
+  rw [Function.update_eq_self]
+  by_cases hb : (RSOR.body nike macS kdfS streamS geom q r).size = geom.forwardPayloadLength
+  · rw [ite_eq_left hb, ite_eq_left hb]
+    generalize hs : nikeHdrTrace geom (keysKs geom streamS ks.toArray) (keysTag macS ks.toArray)
+      (blindElem nike a ks.toArray) (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient
+          q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver]) (RSOR.path nike q.fwd
+          [.recipient q.receiver]).size = o at hgood
+    cases o with
+    | none => rfl
+    | some s =>
+      have hz : (⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray).size
+          = geom.payloadTagLength := Array.size_replicate
+      have hp := (peels_append nike cipher streamS geom ks (RSOR.path nike q.fwd [.recipient
+          q.receiver]).size
+        ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ (RSOR.body nike macS kdfS
+            streamS geom q r)) _ (hgood s rfl)
+        (by rw [ByteArray.size_append, hb, hz]; exact h16) (j + 1) hjp hjk).2
+      rw [hdrPeels_succ nike streamS geom ks j _ hjk] at hp
+      exact congrArg (split geom) hp
+  · rw [ite_eq_right hb, ite_eq_right hb]
+
+/-- `nextOfStream` reads the hops' keys off hop `j`, and of hop `j`'s its MAC key and blinding
+factor. -/
+theorem nextOfStream_congr (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom)
+    (a : ByteArray) (ks ks' : List HopKeys) (j : ℕ) (U : ByteArray) (hjp : j < (RSOR.path nike
+        q.fwd [.recipient q.receiver]).size)
+    (hne : ∀ i, i ≠ j → ks.toArray[i]! = ks'.toArray[i]!)
+    (hmac : (ks.toArray[j]!).headerMAC = (ks'.toArray[j]!).headerMAC)
+    (hbf : (ks.toArray[j]!).blindingFactor = (ks'.toArray[j]!).blindingFactor)
+    (htake : ks.take j = ks'.take j) :
+    nextOfStream nike cipher macS kdfS streamS geom q r a ks j U
+      = nextOfStream nike cipher macS kdfS streamS geom q r a ks' j U := by
+  have hks : Function.update (keysKs geom streamS ks.toArray) j U
+      = Function.update (keysKs geom streamS ks'.toArray) j U := by
+    funext i
+    by_cases hi : i = j
+    · rw [hi, Function.update_self, Function.update_self]
+    · rw [Function.update_of_ne hi, Function.update_of_ne hi]
+      unfold keysKs
+      rw [hne i hi]
+  have htag : keysTag macS ks.toArray = keysTag macS ks'.toArray := by
+    funext i
+    unfold keysTag
+    by_cases hi : i = j
+    · rw [hi, hmac]
+    · rw [hne i hi]
+  have hge : blindElem nike a ks.toArray = blindElem nike a ks'.toArray := by
+    funext i
+    refine blindElem_congr nike a _ _ (fun m => ?_) i
+    by_cases hm : m = j
+    · rw [hm, hbf]
+    · rw [hne m hm]
+  have hh : hdrPeels nike streamS geom ks j = hdrPeels nike streamS geom ks' j := by
+    funext H
+    unfold hdrPeels
+    rw [htake]
+  have henc := encTrace_congr (keysEnc cipher ks.toArray) (keysEnc cipher ks'.toArray)
+    (RSOR.path nike q.fwd [.recipient q.receiver]).size ((⟨Array.replicate geom.payloadTagLength 0⟩
+        : ByteArray) ++ (RSOR.body nike macS kdfS streamS geom q r)) ((RSOR.path nike q.fwd
+        [.recipient q.receiver]).size - (j + 1)) (by omega) fun i hi _ => by
+      unfold keysEnc
+      rw [hne i (by omega)]
+  unfold nextOfStream
+  rw [hks, htag, hge, hh, henc, hbf]
+
+end NextLayer
 
 section ForwardNext
 

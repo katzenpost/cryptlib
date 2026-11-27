@@ -658,8 +658,14 @@ steps (`NIKESphinxTLUNext.lean`):
    `RelayMac.lean`), and the key game's other world for `nextAdv` is such a relay game
    (`keyGame_false_nextAdv`, `nextGame`). The chance is carried, not bounded.
 4. Replace the keystream through which the next layer reads the replaced header key and IV.
-   Not proved. It needs the payload of a peeled packet: the relay's decryption undoes the
-   sender's encryption, so the replaced payload key and IV drop out.
+   The game step is not proved. Proved for it (`NIKESphinxPeel.lean`): a relay's `peel` on a
+   header and a payload is the header from its keystream and blinding factor, and the payload
+   decrypted (`peel_append`, `peelHdr`); so a layer of a packet is its header peeled and the
+   block the hops after it left, each hop's decryption undoing its encryption
+   (`peels_append`). Hence the layer after a hop reads that hop's header key and IV through
+   its keystream only and does not read its payload key (`onionOfKeys_succ`, `nextOfStream`,
+   `nextOfStream_congr`), when the packet's header has a header's length. That length is not
+   proved; it is a condition of the lemma.
 
 Not proved yet for TLU→ of NIKE Sphinx: step 4, and the last comparison of the two worlds. The
 last comparison has to match the original's later layers, which are derived from the replaced
