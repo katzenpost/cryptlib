@@ -630,30 +630,40 @@ the adversary `forwardStreamAdv`, which plays world 0 from the keystream it is g
 Added up, this is `forward_world0_le`. The events are not bounded: they should all be zero
 when the request's onion builds and its body has a payload's length.
 
-**World 1 is not done.** There the relay answers the replacement onion with what the original
-would have produced, so two onions meet the honest relay: the replacement, recognised by its
-layer at the relay, and the original, whose next layer and reply the relay hands out. Each
-needs its own key replacement and its own MAC, payload and keystream steps; the KEM proof
-calls the second the hidden layer. So far there is only the common ground: a later layer of a
-sender's packet is its first layer peeled by the keys of the hops in front (`layer_peels`,
-`peels`), and the onion functions and their lemmas take a layer index, so they serve the layer
-at the relay as well as the first (world 0 uses layer 0). The definitions of world 0 above are
-written for the adversary's own request and an
-empty patch; they have to be restated for any request and patch before world 1 can use them.
+**The steps after the key replacement are stated for any world** (`FwdWorld`: the request
+shown, its randomness, the relay's patch and the path whose keys are replaced). World 0 is
+`fwd0`, the adversary's own request and no patch. World 1 is `fwd1`: the replacement that ends
+at the honest relay, and the relay patched around the replacement's layer there. The chain
+above holds for either (`forward_chain_le`), so world 1 has its first chain down to its draws
+too (`play_true_evalDistEq`, `play_true_sub_keyGame_le` with the event `shortBad`,
+`forward_world1_le`).
 
-Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
-MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two
-worlds.
+**World 1's hidden layer.** In world 1 the relay answers the replacement with what the
+original would have produced, so the patch still holds the original's next layer and reply,
+built from the original's own keys. The KEM proof calls this the hidden layer. It takes four
+steps (`NIKESphinxTLUNext.lean`):
 
-Steps, in order:
+1. World 1 after its first chain is the key game's real world for an adversary on the original
+   onion, `nextAdv`, which builds the original's next layer from the keys the game hands it.
+   Proved (`prgIdeal_fwd1_sub_keyGame_le`), off the draws where the bytes under the relay's tag
+   do not carry the replacement's element or the original onion cannot be built (`nextBad`).
+   Its parts: the adversary's second phase on a draw (`nextPost_real`), the patch built from
+   the handed keys on the original's own keys (`patchWith_real`), and the two games over the
+   same draws (`keyGame_true_nextAdv`, `prgIdeal_fwd1_evalDistEq`).
+2. Replace the relay's keys for the original. This costs `keyAdvantage` of `nextAdv`, by
+   definition.
+3. The relay refuses the original's element, which the adversary is never shown. Proved
+   (`keyGame_false_nextAdv_sub_le`): it costs the chance that the adversary sends a packet
+   carrying that element. The bound is stated for any relay (`Relay.gameHand_sub_le` in
+   `RelayMac.lean`), and the key game's other world for `nextAdv` is such a relay game
+   (`keyGame_false_nextAdv`, `nextGame`). The chance is carried, not bounded.
+4. Replace the keystream through which the next layer reads the replaced header key and IV.
+   Not proved. It needs the payload of a peeled packet: the relay's decryption undoes the
+   sender's encryption, so the replaced payload key and IV drop out.
 
-- the game: a hop's derived keys, blinding factor included, replaced by uniform ones, with the
-  later hops derived from the replacement (`HopKeys` already holds the blinding factor);
-- a packet's layers as a function of the first group element and the hops' keys, so a world
-  can be built from what the game hands out;
-- TLU→: the world as that game with the real keys, then the MAC, payload cipher and keystream
-  steps, then the comparison of the original's path with the path cut at the honest relay;
-- SLU← and STI↔ on the same lines.
+Not proved yet for TLU→ of NIKE Sphinx: step 4, and the last comparison of the two worlds. The
+last comparison has to match the original's later layers, which are derived from the replaced
+blinding factor, in both worlds. SLU← and STI↔ are not started for NIKE Sphinx.
 
 ## How the bounds are built
 
