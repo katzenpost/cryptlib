@@ -723,8 +723,7 @@ for it:
      answers that header from its tag and keystream (`hdrRelay`), is that form on the next
      layer's header (`hdrRelay_eq_fwdRelay`). World 1's relay with its patch, the random
      payload drawn first, is that form on the original's next layer
-     (`hdrRelay_patchDrawn_eq`), when it would not reply to the replacement. World 1's relay
-     behind its two filters is one relay answering by cases (`first_viaOracle_run`). These
+     (`hdrRelay_patchDrawn_eq`), when it would not reply to the replacement. These
      use `split_append` of `KEMSphinxTLUFinal.lean`, which this file now imports.
      Applied to world 0: a world after its payload step is a game against `hdrRelay`
      (`strRunP_eq`, `strGuess`), and world 0 on a draw, before the end of the path, is the
@@ -737,8 +736,14 @@ for it:
      (`finOwnRun`, by `nextPostN_real`, which is `nextPost_real` for any next layer). The cost
      is the chance that the adversary sends a packet carrying the original's element, and the
      chance of a draw on which the bytes under the relay's tag do not carry the replacement's
-     element (`finCar`). Both are carried, not bounded. `finOwnRun` is not yet brought to
-     `fwdRelay`.
+     element (`finCar`). Both are carried, not bounded. On a draw, before the end of the
+     path, `finOwnRun` is the game that draws the random payload first and plays against
+     `fwdRelay` on the header of the original's next layer (`finOwnRun_evalDistEq`, from
+     `hdrRelay_patchWith_run` and `layerHdr_succ_size`), when the replacement's layer at the
+     relay has the header the relay answers and the relay would not reply to it. Those two
+     conditions are not proved yet. So both worlds are games against `fwdRelay` before the end
+     of the path; what is left is to compare what the two relays forward (the blinding game
+     and the relabelling of the keystreams), and the end of the path.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).
