@@ -349,7 +349,7 @@ The statement for SLU← is `backwardUnlinkable_le`, for `backwardWith freshSwap
 Not proved yet: bounds on the explicit events (bad draws, draws that are not good). Each is a
 statement about the KEM not failing, a layer being built, or a uniform block having a zero tag.
 
-## STI↔ for KEM Sphinx: not started, the plan
+## STI↔ for KEM Sphinx: started, the plan
 
 World 0 shows the layer of the adversary's onion at forward position `pos`; world 1 shows the
 first layer of an onion with the same message over the rest of the forward path and the
@@ -363,6 +363,25 @@ backward path up to its honest relay. Two honest relays hide the difference.
   header, built over the whole backward path in world 0 and over the path cut at the honest
   relay in world 1. The two headers differ in what that relay reads, and it answers nothing to
   the reply's layer in either world. This is the keyed game at that relay, as in TLU→.
+
+In Lean so far (`KEMSphinxSTI.lean`, `KEMSphinxTLUNext.lean`):
+
+- The triangle through a world in the middle (`tailIndistinguishable_advantage_le`), and that
+  world for KEM Sphinx (`tailMid`, `tailMidWorld`): the first layer over the rest of the forward
+  path with a forward draw of its own, around the adversary's payload.
+- A forward layer from a position on is a layer over the rest of the path (`layer_drop`).
+- For any keyed game that reads the node's keys through their header keystream only, and never
+  shows a tag under its MAC key: the node may reject the challenge ciphertext for a MAC forgery
+  (`keyedIdeal_sub_reject_le`), then the keystream step (`keyedReject_eq_prg`), together
+  `keyedReal_sub_uniform_le`. The TLU→ lemmas for the original's hidden layer are corollaries.
+
+Still to do for the first relay. The challenge lets the relay before the shown layer be either
+honest role (`.relay` or `.back`), and the keyed game fixes the role before the adversary
+chooses. So the step is done once per role, through a hybrid that shows the middle world when
+that relay has a role already handled and world 0 otherwise. For each role: both worlds as the
+keyed game with the real keys off the bad draws (`tailSeed` puts the relay's seed on its own),
+then the two games from a uniform keystream compared by `layerPast_drop` and
+`fillerAtF_target`, as on the backward path of SLU←.
 
 ## How the bounds are built
 
