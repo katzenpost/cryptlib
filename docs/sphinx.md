@@ -726,6 +726,12 @@ for it:
      (`hdrRelay_patchDrawn_eq`), when it would not reply to the replacement. World 1's relay
      behind its two filters is one relay answering by cases (`first_viaOracle_run`). These
      use `split_append` of `KEMSphinxTLUFinal.lean`, which this file now imports.
+     Applied to world 0: a world after its payload step is a game against `hdrRelay`
+     (`strRunP_eq`, `strGuess`), and world 0 on a draw, before the end of the path, is the
+     game against `fwdRelay` on the next layer's header of the adversary's onion
+     (`hdrRelay_onion`, `strRun_fwd0_eq`), when the header builds up to the relay's layer and
+     the bytes under its tag have their length. World 1 is not yet in this form, and the end
+     of the path is not treated.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).
