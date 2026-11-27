@@ -152,6 +152,30 @@ theorem procD_payloadKey {L : ℕ} (t : HopKeys) (kp : Vector UInt8 48)
   unfold procD unwrapNIKEDec
   rfl
 
+/-- **A relay handed its payload's decryption uses its header key and IV for one keystream.**
+With that keystream given, it does not read them. -/
+theorem procD_stream {L : ℕ} (t : HopKeys) (he : Vector UInt8 32) (iv : Vector UInt8 16)
+    (D : Vector UInt8 L → Vector UInt8 L) (pkt : ByteArray) :
+    procD nike macS streamS geom (fun _ => .ok t) (fun _ => D) pkt
+      = procD nike macS (constStream (streamS.keystream (ofVector t.headerEncryption)
+          (ofVector t.headerEncryptionIV) (geom.routingInfoLength + geom.perHopRoutingInfoLength)))
+              geom
+        (fun _ => .ok { t with headerEncryption := he, headerEncryptionIV := iv })
+        (fun _ => D) pkt := by
+  have h : procD nike macS (constStream (streamS.keystream (ofVector t.headerEncryption)
+        (ofVector t.headerEncryptionIV) (geom.routingInfoLength + geom.perHopRoutingInfoLength)))
+            geom (fun _ => .ok t) (fun _ => D) pkt
+      = procD nike macS (constStream (streamS.keystream (ofVector t.headerEncryption)
+          (ofVector t.headerEncryptionIV) (geom.routingInfoLength + geom.perHopRoutingInfoLength)))
+              geom
+        (fun _ => .ok { t with headerEncryption := he, headerEncryptionIV := iv })
+        (fun _ => D) pkt := by
+    unfold procD unwrapNIKEDec
+    rfl
+  rw [← h]
+  unfold procD
+  rw [unwrapNIKEDec_stream]
+
 /-- **A relay with a cipher is a relay that decrypts by the cipher**, on a packet whose payload
 has `L` bytes. -/
 theorem procWith_eq_procD {L : ℕ} (keysOf : ByteArray → Except String HopKeys) (pkt : ByteArray)

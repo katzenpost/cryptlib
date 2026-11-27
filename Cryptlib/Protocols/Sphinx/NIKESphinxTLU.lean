@@ -277,6 +277,83 @@ theorem onion_payloadKey (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nik
   · unfold onionBlock
     exact encTrace_congr _ _ _ _ _ (by omega) fun i hi _ => hencne i (by omega)
 
+/-- The first layer of `q`'s onion, with hop `j`'s header keystream, tag and encryption of the
+payload given. -/
+def onionOfStream (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
+    (ks : List HopKeys) (j : ℕ) (U tag e : ByteArray) : Onion geom :=
+  match nikePktFn geom (Function.update (keysKs geom streamS ks.toArray) j U)
+      (Function.update (keysTag macS ks.toArray) j fun _ => tag)
+      (Function.update (keysEnc cipher ks.toArray) j fun _ => e) (blindElem nike a ks.toArray)
+      (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient q.receiver]) r.1) (RSOR.path nike
+          q.fwd [.recipient q.receiver])
+      (RSOR.body nike macS kdfS streamS geom q r) with
+  | some pkt => split geom pkt
+  | none => default
+
+/-- The bytes of `q`'s onion that hop `j`'s tag covers, with its header keystream given. -/
+def onionMsgStream (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
+    (ks : List HopKeys) (j : ℕ) (U : ByteArray) : ByteArray :=
+  hdrMsg geom (Function.update (keysKs geom streamS ks.toArray) j U) (keysTag macS ks.toArray)
+    (blindElem nike a ks.toArray) (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient
+        q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver]) j
+
+/-- **The onion reads hop `j`'s header key and IV through its keystream only.** Two key lists
+that agree but for those give the same onion, tagged bytes and block, once the keystream is
+handed over. -/
+theorem onion_streamKey (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike geom)
+    (a : ByteArray) (ks ks' : List HopKeys) (j : ℕ) (tag e : ByteArray) (hjp : j < (RSOR.path nike
+        q.fwd [.recipient q.receiver]).size)
+    (hne : ∀ i, i ≠ j → ks.toArray[i]! = ks'.toArray[i]!)
+    (hj : ks.toArray[j]! = { ks'.toArray[j]! with
+      headerEncryption := (ks.toArray[j]!).headerEncryption
+      headerEncryptionIV := (ks.toArray[j]!).headerEncryptionIV }) :
+    onionOfEnc nike cipher macS kdfS streamS geom q rnd a ks j tag e
+        = onionOfStream nike cipher macS kdfS streamS geom q rnd a ks' j
+          (keysKs geom streamS ks.toArray j) tag e ∧
+      onionMsg nike macS streamS geom q rnd a ks j
+        = onionMsgStream nike macS streamS geom q rnd a ks' j (keysKs geom streamS ks.toArray j) ∧
+      onionBlock nike cipher macS kdfS streamS geom q rnd ks j
+        = onionBlock nike cipher macS kdfS streamS geom q rnd ks' j := by
+  have hks : keysKs geom streamS ks.toArray
+      = Function.update (keysKs geom streamS ks'.toArray) j (keysKs geom streamS ks.toArray j) := by
+    funext i
+    by_cases hi : i = j
+    · rw [hi, Function.update_self]
+    · rw [Function.update_of_ne hi]
+      unfold keysKs
+      rw [hne i hi]
+  have htag : keysTag macS ks.toArray = keysTag macS ks'.toArray := by
+    funext i
+    unfold keysTag
+    by_cases hi : i = j
+    · rw [hi, hj]
+    · rw [hne i hi]
+  have hge : blindElem nike a ks.toArray = blindElem nike a ks'.toArray := by
+    funext i
+    refine blindElem_congr nike a _ _ (fun m => ?_) i
+    by_cases hm : m = j
+    · rw [hm, hj]
+    · rw [hne m hm]
+  have hencne : ∀ i, i ≠ j → keysEnc cipher ks.toArray i = keysEnc cipher ks'.toArray i :=
+    fun i hi => by unfold keysEnc; rw [hne i hi]
+  refine ⟨?_, ?_, ?_⟩
+  · have hu : Function.update (keysEnc cipher ks.toArray) j (fun _ => e)
+        = Function.update (keysEnc cipher ks'.toArray) j (fun _ => e) := by
+      funext i
+      by_cases hi : i = j
+      · rw [hi, Function.update_self, Function.update_self]
+      · rw [Function.update_of_ne hi, Function.update_of_ne hi, hencne i hi]
+    unfold onionOfEnc onionOfStream
+    rw [hu, htag, hge]
+    rw [hks]
+    simp only [Function.update_self]
+  · unfold onionMsg onionMsgStream
+    rw [htag, hge]
+    rw [hks]
+    simp only [Function.update_self]
+  · unfold onionBlock
+    exact encTrace_congr _ _ _ _ _ (by omega) fun i hi _ => hencne i (by omega)
+
 end Onion
 
 section Forward

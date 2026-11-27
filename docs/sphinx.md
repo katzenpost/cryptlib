@@ -609,7 +609,10 @@ that is not good. The honest relays' logs after the first phase are well-formed
 
 For the keystream step: a relay uses its header key and IV for one keystream, so with that
 keystream handed to it the relay does what it does with the stream cipher
-(`unwrapNIKEDec_stream`, `constStream`). The step itself is not done for world 0 yet.
+(`unwrapNIKEDec_stream`, `constStream`, `procD_stream`), and the onion reads the relay's
+header key and IV through its keystream only (`onion_streamKey`). The step itself is not done
+for world 0 yet: the adversary against the keystream generator and the equality of the two
+games are still to write.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two
