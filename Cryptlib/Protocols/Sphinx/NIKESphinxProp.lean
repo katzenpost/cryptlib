@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Cryptlib.Protocols.Sphinx.NIKESphinxGame
 import Cryptlib.Protocols.Sphinx.RelayMac
+import Cryptlib.Protocols.RSORPayload
 
 namespace Cryptlib.Protocols.Sphinx.NIKESphinx
 
@@ -954,5 +955,75 @@ theorem onlyAns_join (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize =
     rw [ite_eq_right hne]
 
 end OneHeader
+
+/-! ## The oracle of a relay that answers one header -/
+
+section OneHeaderOracle
+
+variable (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+  (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
+  (hmactag : macS.tagSize = macLength)
+  (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+
+local notation "𝒮" => sphinx nike cipher macS kdfS streamS geom hvalid hmactag h16
+
+/-- **The honest relays, one of them answering one header, decrypt one block under it.** The
+relays' oracle, with the relay `ρ` answering the element `a` under one header only, is the
+oracle in which `ρ` decrypts the payload under that header with its payload key and goes on
+from the decrypted block, and refuses the element under any other header. -/
+theorem oracle_onlyAns (ρ : Role) (sk : Role → nike.PrivateKey) (a : ByteArray) (t : HopKeys)
+    (Mb : ByteArray) (tag : Vector UInt8 macS.tagSize) (Hv : Vector UInt8 geom.headerLength)
+    (hH : Util.Bytes.ofVector Hv = Mb ++ Util.Bytes.ofVector tag)
+    (hcar : (Util.Bytes.ofVector Hv).extract 2 (2 + nike.publicKeySize) = a)
+    (patch : Protocols.RSOR.Patch 𝒮) :
+    Protocols.RSOR.oracle (S := 𝒮) (m := ProbComp)
+        (fun h o => pure (if h = ρ then stepOf geom (onlyAns nike cipher macS kdfS streamS geom (sk
+            ρ) a t Mb tag (join o))
+          else RSOR.proc nike cipher macS kdfS streamS geom (sk h) o))
+        (fun h msg o => pure (if h = ρ then replyOf cipher geom msg (onlyAns nike cipher macS kdfS
+            streamS geom (sk ρ) a t Mb tag (join o))
+          else RSOR.reply nike cipher macS kdfS streamS geom (sk h) msg o))
+        patch
+      = Protocols.RSOR.withDec (S := 𝒮) ρ Hv (fun o => o.2)
+        (fun o y => stepOf geom (procD nike (Primitives.MAC.MAC.const tag) streamS geom (fun _ =>
+            .ok t) (fun _ _ => y) (join o)))
+        (fun msg o y => replyOf cipher geom msg (procD nike (Primitives.MAC.MAC.const tag) streamS
+            geom (fun _ => .ok t) (fun _ _ => y) (join o)))
+        (fun h o => if h = ρ then stepOf geom (noneAns nike cipher macS kdfS streamS geom (sk ρ) a
+            (join o))
+          else RSOR.proc nike cipher macS kdfS streamS geom (sk h) o)
+        (fun h msg o => if h = ρ then replyOf cipher geom msg (noneAns nike cipher macS kdfS
+            streamS geom (sk ρ) a (join o))
+          else RSOR.reply nike cipher macS kdfS streamS geom (sk h) msg o)
+        (fun y => Util.Bytes.toVecN _ (cipher.decrypt t.payloadEncryption.toArray
+          (Util.Bytes.ofVector t.headerEncryptionIV) (Util.Bytes.ofVector y)))
+        patch := by
+  have e := fun (o : Onion geom) =>
+    onlyAns_join nike cipher macS kdfS streamS geom hvalid hmactag (sk ρ) a t Mb tag Hv hH hcar o
+  unfold Protocols.RSOR.withDec
+  congr 1
+  · funext h o
+    refine congrArg pure ?_
+    by_cases hr : h = ρ
+    · by_cases ho : o.1 = Hv
+      · exact ((ite_eq_left hr).trans (congrArg (stepOf geom) ((e o).trans (ite_eq_left ho)))).trans
+          (ite_eq_left ⟨hr, ho⟩).symm
+      · exact ((ite_eq_left hr).trans (congrArg (stepOf geom) ((e o).trans (ite_eq_right
+          ho)))).trans
+          ((ite_eq_right fun hc => ho hc.2).trans (ite_eq_left hr)).symm
+    · exact (ite_eq_right hr).trans ((ite_eq_right fun hc => hr hc.1).trans (ite_eq_right hr)).symm
+  · funext h msg o
+    refine congrArg pure ?_
+    by_cases hr : h = ρ
+    · by_cases ho : o.1 = Hv
+      · exact ((ite_eq_left hr).trans (congrArg (replyOf cipher geom msg) ((e o).trans (ite_eq_left
+          ho)))).trans
+          (ite_eq_left ⟨hr, ho⟩).symm
+      · exact ((ite_eq_left hr).trans (congrArg (replyOf cipher geom msg) ((e o).trans
+          (ite_eq_right ho)))).trans
+          ((ite_eq_right fun hc => ho hc.2).trans (ite_eq_left hr)).symm
+    · exact (ite_eq_right hr).trans ((ite_eq_right fun hc => hr hc.1).trans (ite_eq_right hr)).symm
+
+end OneHeaderOracle
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
