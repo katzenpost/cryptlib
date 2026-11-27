@@ -179,6 +179,17 @@ theorem layer_zero_builds (hvalid : geom.ValidForKEM kem)
     Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind]
   exact ⟨_, rfl⟩
 
+variable {geom} in
+/-- **Reliable seeds are all a route needs to build.** -/
+theorem builds_of_reliable (hvalid : geom.ValidForKEM kem)
+    (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (RSOR.Key kem)) (last : List RoutingCommand)
+    (hlast : (∃ r, last = [.recipient r]) ∨ ∃ id, last = [.surbReply id])
+    (d : RSOR.Draw geom) (payload : ByteArray) (hp : payload.size = geom.forwardPayloadLength)
+    (hrel : ∀ i < R.hops.length, kem.Reliable (kem.stateFromSeed d.1.toArray[i]!)) :
+    RSOR.Builds kem cipher macS kdfS streamS geom R last d payload :=
+  ⟨hrel, fun h => layer_zero_builds kem cipher macS kdfS streamS hvalid R h last hlast d payload
+    hp⟩
+
 end Builds
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx

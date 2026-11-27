@@ -429,8 +429,11 @@ plus `tailHalfCost`. Its events, as far as they are reduced to the KEM:
   `prEvent_hybBad_eq`);
 - a draw of the second half that is not good has a seed that is not reliable, the honest
   backward relay's or one of a hop in front of it (`prEvent_not_backGoodK_le`);
-- the second half's bad draws and the draws where the reply's next layer cannot be built are
-  not reduced yet.
+- a bad draw of the second half has a seed on the backward path that is not reliable
+  (`prEvent_backBadK_le`): with reliable seeds every layer builds (`builds_of_reliable`,
+  `Builds.layer`);
+- the draws where the reply's next layer cannot be built from a uniform keystream
+  (`tailCutBad`) are not reduced yet.
 
 The first layer over a route always builds (`layer_zero_builds`, in `KEMSphinxBuilds.lean`): a
 packet fails to build on a wrong size, a failed encapsulation, or commands that do not fit a

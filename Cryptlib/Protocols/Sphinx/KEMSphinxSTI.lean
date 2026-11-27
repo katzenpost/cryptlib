@@ -3046,6 +3046,43 @@ theorem prEvent_not_backGoodK_le (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮}
       (Nat.zero_lt_of_lt (Q (propChOf d).c).2.isLt) _ (Or.inr ⟨_, rfl⟩) _ _ Array.size_replicate,
     hgood.2⟩
 
+omit [SampleableType kem.Plaintext] in
+set_option maxHeartbeats 2000000 in
+/-- **A bad draw of the second half has a seed on the backward path that is not reliable.**
+With reliable seeds the reply's layers build, and the relay's key pair is a key pair. -/
+theorem prEvent_backBadK_le (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge
+    hon
+      → ProbComp (Protocols.RSOR.World 𝒮))
+    (Q : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → (q : RSOR.Request kem geom) × Fin q.back.hops.length) (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) :
+    Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.tailPair w₀ w₁) .back names _ ($ᵗ (RSOR.Randomness geom))
+        A)}[backBadK kem cipher macS kdfS streamS geom hvalid hmactag h16 Q d]
+      ≤ Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.tailPair w₀ w₁) .back names _ ($ᵗ (RSOR.Randomness geom))
+        A)}[¬ (kem.Reliable (kem.stateFromSeed d.s)
+          ∧ ∀ i, i < (Q d.c).1.back.hops.length → kem.Reliable (kem.stateFromSeed
+            (setSeedBack geom d.o (Q d.c).2 d.s).2.1.1.toArray[i]!))] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood => hbad ?_
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold propDrawOf at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, k₁, -, k₂, -, out, -, o, -, s, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  have hb := builds_of_reliable kem cipher macS kdfS streamS hvalid (Q d.c).1.back [.surbReply
+      d.o.2.2.2]
+    (Or.inr ⟨_, rfl⟩) (setSeedBack geom d.o (Q d.c).2 d.s).2.1 (⟨Array.replicate
+        geom.forwardPayloadLength 0⟩ : ByteArray) Array.size_replicate
+    hgood.2
+  exact ⟨hk, hgood.1,
+    hb.2 (Nat.zero_lt_of_lt (Q d.c).2.isLt),
+    RSOR.Builds.layer kem cipher macS kdfS streamS geom hvalid hmactag h16 (Q d.c).1.back
+        [.surbReply d.o.2.2.2]
+      (fun c hc => by rw [List.mem_singleton.1 hc]; simp)
+      (fun c hc => by rw [List.mem_singleton.1 hc]; simp)
+      _ _ hb (Q d.c).2 (Q d.c).2.isLt⟩
+
 end TailGame
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
