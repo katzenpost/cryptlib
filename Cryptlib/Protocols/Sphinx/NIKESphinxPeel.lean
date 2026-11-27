@@ -503,7 +503,9 @@ theorem hdrMsg_struct (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → Byte
           geom.perHopRoutingInfoLength) + (if i > 0 then padAt geom ks (i - 1) else
           ByteArray.empty).size = geom.routingInfoLength
       ∧ parseAll F = .ok [RoutingCommand.nextNodeHop path[i + 1]!.id
-        (toVec32 (tag (i + 1) (hdrMsg geom ks tag ge filler path (i + 1))))] := by
+        (toVec32 (tag (i + 1) (hdrMsg geom ks tag ge filler path (i + 1))))]
+      ∧ nikeFragment geom path (tag (i + 1) (hdrMsg geom ks tag ge filler path (i + 1))) i
+        = .ok F := by
   have ei : path.size - 1 - (path.size - 1 - i) = i := by omega
   have ei2 : path.size - 1 - (path.size - 1 - (i + 1)) = i + 1 := by omega
   have hpad : (if i + 1 > 0 then padAt geom ks (i + 1 - 1) else ByteArray.empty)
@@ -567,8 +569,10 @@ theorem hdrMsg_struct (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → Byte
               exact padAt_size geom ks hks i (by omega)
           refine ⟨F, _, hm0, hm1, hF,
             by rw [hF, size_xorBytes, ByteArray.size_append, hF2, hs2]; omega,
-            by rw [hks, hPd]; omega, by rw [hPd]; omega, ?_⟩
-          rw [nikeFragment_parse geom path _ i hi hnnh hle hcmd F hf, hm1]
+            by rw [hks, hPd]; omega, by rw [hPd]; omega, ?_, ?_⟩
+          · rw [nikeFragment_parse geom path _ i hi hnnh hle hcmd F hf, hm1]
+          · rw [hm1]
+            exact hf
 
 /-- **Peeling the header of a layer gives the header of the next**, for any keystreams, tags
 and elements: the hop's keystream, and the element blinded to the next. -/
@@ -585,7 +589,7 @@ theorem peelHdr_layerHdr (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → B
     (hT : (nikeHdrTrace geom ks tag ge filler path (path.size - i)).isSome) :
     peelHdr nike geom (ks i) bf (layerHdr geom ks tag ge filler path i)
       = layerHdr geom ks tag ge filler path (i + 1) := by
-  obtain ⟨F, B, hm0, hm1, hF, hFB, hU, hR, hp⟩ := hdrMsg_struct geom ks tag ge filler path i hi
+  obtain ⟨F, B, hm0, hm1, hF, hFB, hU, hR, hp, -⟩ := hdrMsg_struct geom ks tag ge filler path i hi
     hnnh hle hrouting hn hfill hks htag hcmd hT
   have hmac : (match parseAll F with
       | .ok cmds => ((cmds.findSome? RSOR.nextHop).map (·.2)).getD default
@@ -1082,7 +1086,7 @@ theorem procD_layerHdr {L : ℕ} (t : HopKeys) (D : HopKeys → Vector UInt8 L �
             filler path (i + 1))))],
         some (layerHdr geom ks tag ge filler path (i + 1)
           ++ ofVector (D t (Util.Bytes.toVecN L P)))) := by
-  obtain ⟨F, B, hm0, hm1, hF, hFB, hU, hR, hp⟩ := hdrMsg_struct geom ks tag ge filler path i hi
+  obtain ⟨F, B, hm0, hm1, hF, hFB, hU, hR, hp, -⟩ := hdrMsg_struct geom ks tag ge filler path i hi
     hnnh hle hrouting hn hfill hks htag hcmd hT
   obtain ⟨b0, b1, -, -, b4, b5, b6⟩ := peel_bytes nike geom (ks i) (ge i) F B (if i > 0 then padAt
       geom ks (i - 1) else ByteArray.empty)

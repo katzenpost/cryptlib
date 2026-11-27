@@ -341,6 +341,49 @@ theorem replyOf_layerHdr (cipher : WideBlockCipher) (m : Msg geom) {n : ℕ} (T 
 
 end Step
 
+/-! ## The keys of a path cut at a hop -/
+
+section Cut
+
+variable (nike : NIKE) (kdfS : KDF)
+
+/-- The first keys of a longer list of hops' keys are the keys of the first hops. -/
+theorem hopKeysWith_take_le (c : nike.PrivateKey) (hops : Array PathHop) (j : ℕ) (t : HopKeys)
+    (m n : ℕ) (h : m ≤ n) :
+    (hopKeysWith nike kdfS c hops j t n).take m = hopKeysWith nike kdfS c hops j t m := by
+  induction n with
+  | zero =>
+    obtain rfl : m = 0 := by omega
+    rfl
+  | succ n ih =>
+    by_cases hm : m ≤ n
+    · rw [hopKeysWith, List.take_append_of_le_length (by rw [hopKeysWith_length]; exact hm)]
+      exact ih hm
+    · obtain rfl : m = n + 1 := by omega
+      exact List.take_of_length_le (by rw [hopKeysWith_length])
+
+/-- The keys of the first `n` hops read those hops' public keys only. -/
+theorem hopKeysWith_congr_hops (c : nike.PrivateKey) (hops hops' : Array PathHop) (j : ℕ)
+    (t : HopKeys) (n : ℕ) (h : ∀ i < n, hops[i]!.publicKey = hops'[i]!.publicKey) :
+    hopKeysWith nike kdfS c hops j t n = hopKeysWith nike kdfS c hops' j t n := by
+  induction n with
+  | zero => rfl
+  | succ n ih =>
+    rw [hopKeysWith, hopKeysWith, ih fun i hi => h i (by omega), h n (Nat.lt_succ_self n)]
+
+/-- **The keys of a path cut after hop `n - 1` are the first `n` keys of the whole path's**,
+entry by entry. -/
+theorem hopKeysWith_cut (c : nike.PrivateKey) (hops hops' : Array PathHop) (j : ℕ) (t : HopKeys)
+    (n n' : ℕ) (hn : n ≤ n') (h : ∀ i < n, hops[i]!.publicKey = hops'[i]!.publicKey) (i : ℕ)
+    (hi : i < n) :
+    (hopKeysWith nike kdfS c hops j t n).toArray[i]!
+      = (hopKeysWith nike kdfS c hops' j t n').toArray[i]! := by
+  refine toArray_getElem!_congr _ _ i ?_
+  rw [hopKeysWith_congr_hops nike kdfS c hops hops' j t n h,
+    ← hopKeysWith_take_le nike kdfS c hops' j t n n' hn, List.getElem?_take, ite_eq_left hi]
+
+end Cut
+
 /-! ## The blinding game
 
 The hops after the honest relay get their keys from the sender's secret and the relay's

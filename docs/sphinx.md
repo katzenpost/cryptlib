@@ -738,6 +738,9 @@ for it:
      compared answer by answer with `oracle_patch_congr`, after the random payload of
      `patchWith` is drawn first (`patchWith_draw`, `patchDrawn`) and identified with the ideal
      cipher's other block.
+   - The replacement's path is the original's cut after the relay, so its hops' keys are the
+     first keys of the original's (`hopKeysWith_cut`, `hopKeysWith_take_le`,
+     `hopKeysWith_congr_hops`).
    - The onion shown is compared with `nikePktFn_front`; its hypothesis at the relay's hop
      comes from `nikeHdrTrace_at`, `hdrMsg_struct` (original) and `hdrMsg_last`
      (replacement), with the keystream's head shifted by `xorBytes_shift`.
