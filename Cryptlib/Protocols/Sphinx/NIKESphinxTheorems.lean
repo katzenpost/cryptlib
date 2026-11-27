@@ -1925,6 +1925,61 @@ theorem unwrapNIKEDec_congr (nike : NIKE) (macS : MAC) (streamS : StreamCipher) 
   exact except_bind_congr (keysOf (pkt.extract 2 (2 + nike.publicKeySize))) _ _
     fun k hk => by simp only [h k hk]
 
+/-- The "stream cipher" that returns the bytes `ks` whatever the key and IV: the relay runs with
+its header keystream given. For another length it pads or cuts them. -/
+def constStream (ks : ByteArray) : StreamCipher where
+  keySize := 32
+  ivSize := 16
+  keystream _ _ len := (ks ++ ⟨Array.replicate len 0⟩).extract 0 len
+  keystream_size _ _ len := by
+    have h : (⟨Array.replicate len (0 : UInt8)⟩ : ByteArray).size = len := Array.size_replicate
+    rw [ByteArray.size_extract, ByteArray.size_append, h]
+    omega
+
+set_option maxHeartbeats 1000000 in
+/-- **A relay uses its header key and IV for one keystream.** With that keystream given, the
+relay with the keys `t` does what it does with the stream cipher. -/
+theorem unwrapNIKEDec_stream (nike : NIKE) (macS : MAC) (streamS : StreamCipher)
+    (geom : Geometry) (t : HopKeys) (dec : HopKeys → ByteArray → ByteArray)
+    (hdec : ∀ k b, (dec k b).size = b.size) (pkt : ByteArray) :
+    unwrapNIKEDec nike macS streamS geom (fun _ => .ok t) dec hdec pkt
+      = unwrapNIKEDec nike macS (constStream (streamS.keystream (ofVector t.headerEncryption)
+          (ofVector t.headerEncryptionIV) (geom.routingInfoLength + geom.perHopRoutingInfoLength)))
+              geom (fun _ => .ok t) dec hdec pkt := by
+  unfold unwrapNIKEDec
+  by_cases h1 : pkt.size < 2 + nike.publicKeySize + geom.routingInfoLength + macLength
+  · rw [dite_eq_left h1, dite_eq_left h1]
+  rw [dite_eq_right h1, dite_eq_right h1]
+  by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
+  · rw [ite_eq_left h2, ite_eq_left h2]
+    exact except_bind_congr _ _ _ fun a ha => by cases ha
+  rw [ite_eq_right h2, ite_eq_right h2]
+  have hsz : (pkt.extract (2 + nike.publicKeySize)
+        (2 + nike.publicKeySize + geom.routingInfoLength)
+      ++ (⟨Array.replicate geom.perHopRoutingInfoLength 0⟩ : ByteArray)).size =
+          (geom.routingInfoLength + geom.perHopRoutingInfoLength) := by
+    have h : (⟨Array.replicate geom.perHopRoutingInfoLength (0 : UInt8)⟩ : ByteArray).size
+        = geom.perHopRoutingInfoLength := Array.size_replicate
+    rw [ByteArray.size_append, ByteArray.size_extract, h]
+    omega
+  have hks : (constStream (streamS.keystream (ofVector t.headerEncryption)
+        (ofVector t.headerEncryptionIV) (geom.routingInfoLength +
+            geom.perHopRoutingInfoLength))).keystream (ofVector t.headerEncryption)
+        (ofVector t.headerEncryptionIV)
+        (pkt.extract (2 + nike.publicKeySize) (2 + nike.publicKeySize + geom.routingInfoLength)
+          ++ (⟨Array.replicate geom.perHopRoutingInfoLength 0⟩ : ByteArray)).size
+      = streamS.keystream (ofVector t.headerEncryption) (ofVector t.headerEncryptionIV)
+        (pkt.extract (2 + nike.publicKeySize) (2 + nike.publicKeySize + geom.routingInfoLength)
+          ++ (⟨Array.replicate geom.perHopRoutingInfoLength 0⟩ : ByteArray)).size := by
+    rw [hsz]
+    have h := Util.Bytes.extract_append_left (streamS.keystream (ofVector t.headerEncryption)
+      (ofVector t.headerEncryptionIV) (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+          (⟨Array.replicate (geom.routingInfoLength + geom.perHopRoutingInfoLength) 0⟩ : ByteArray)
+    rwa [streamS.keystream_size] at h
+  refine except_bind_congr (Except.ok t) _ _ fun k hk => ?_
+  obtain rfl : t = k := by injection hk
+  simp only [hks]
+
 /-- `unwrapNIKE` with the hop's keys had from its group element by `keysOf`, in place of the
 relay's private key and the KDF. -/
 def unwrapNIKEWith (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)

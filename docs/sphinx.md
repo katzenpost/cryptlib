@@ -607,6 +607,10 @@ advantage of `forwardPay`'s adversary against the payload cipher, and the chance
 that is not good. The honest relays' logs after the first phase are well-formed
 (`propDraw_log_wf`), which the cipher game needs.
 
+For the keystream step: a relay uses its header key and IV for one keystream, so with that
+keystream handed to it the relay does what it does with the stream cipher
+(`unwrapNIKEDec_stream`, `constStream`). The step itself is not done for world 0 yet.
+
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two
 worlds.
