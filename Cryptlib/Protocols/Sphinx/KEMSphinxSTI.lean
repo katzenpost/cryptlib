@@ -945,6 +945,159 @@ theorem evalDistEq_tailViewU {δ : Type} (dn : Role → Bool) (ρ : Role)
     exact tailViewU_shift kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ c k hk d dS _ b
         _ (Util.Bytes.size_ofVector U) hd hρ
 
+/-- The keyed game's adversary for one step of the hybrid. -/
+noncomputable def tailKeyed (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge
+    hon
+      → ProbComp (Protocols.RSOR.World 𝒮)) (ρ : Role) (dn : Role → Bool)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) :=
+  propAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.tailPair w₀ w₁) ρ
+      names _ (hybDraw geom)
+    (fun ch o _ t => tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ ch.c o
+        (ksOf streamS geom t)) A
+
+/-- **The game from a uniform keystream**: the adversary's guess for the hybrid world with the
+roles `dn'` handled, with the honest relay `ρ` rejecting the hidden ciphertext. -/
+noncomputable def tailUGame (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge
+    hon
+      → ProbComp (Protocols.RSOR.World 𝒮)) (ρ : Role) (dn dn' : Role → Bool)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) : ProbComp Bool := do
+  let k ← keygen kem
+  let cs ← simulateQ (procImpl kem cipher macS kdfS streamS geom k.2) ((tailKeyed kem cipher macS
+      kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn names A).pre k.1)
+  let s' ← $ᵗ (Vector UInt8 32)
+  let o ← hybDraw geom
+  simulateQ (procImplF kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s').1 (fun _ =>
+      none))
+    ((tailKeyed kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn names A).post cs.2
+        (tailHybWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 dn' cs.1.c o.1 o.2))
+
+omit [SampleableType kem.Plaintext] in
+set_option maxHeartbeats 2000000 in
+/-- The keystream generator's ideal experiment for one step of the hybrid is the game from a
+uniform keystream with the role `ρ` handled too. -/
+theorem tailUniform_evalDistEq (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} →
+    Protocols.RSOR.TailChallenge hon
+      → ProbComp (Protocols.RSOR.World 𝒮)) (ρ : Role) (dn : Role → Bool)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) :
+    PRGScheme.prgIdealExperiment (rejectStreamAdv kem cipher macS kdfS streamS geom (tailKeyed kem
+        cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn names A)
+        (fun ch o _ U => tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ ch.c o
+            U) (fun _ _ _ out => out))
+      =ᵈ tailUGame kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn (fun x => dn x
+          || x == ρ) names A := by
+  unfold PRGScheme.prgIdealExperiment rejectStreamAdv tailUGame
+  simp only [id_map']
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun k => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun cs => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun s' => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact evalDistEq_tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ cs.1.c fun w
+      =>
+    simulateQ (procImplF kem cipher macS kdfS streamS geom k.2 (encapOf kem k.1.1 s').1 (fun _ =>
+        none))
+      ((tailKeyed kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn names A).post
+          cs.2 w)
+
+omit [SampleableType kem.Plaintext] in
+/-- The game from a uniform keystream does not read the keyed view. -/
+theorem tailUGame_view (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → ProbComp (Protocols.RSOR.World 𝒮)) (ρ : Role) (dn₁ dn₂ dn' : Role → Bool)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) :
+    tailUGame kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn₁ dn' names A =
+        tailUGame kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn₂ dn' names A := by
+  unfold tailUGame tailKeyed propAdvOf
+  rfl
+
+/-- **The cost of one side of a step of the hybrid**: the bad draws, the replacement of the
+relay's keys, a MAC forgery, and the keystream generator's advantage. -/
+noncomputable def tailStepCost (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} →
+    Protocols.RSOR.TailChallenge hon
+      → ProbComp (Protocols.RSOR.World 𝒮)) (ρ : Role) (dn : Role → Bool)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) : ℝ :=
+  (Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.tailPair w₀ w₁) ρ names _ (hybDraw geom)
+      A)}[hybBad kem cipher macS kdfS streamS geom hvalid hmactag h16 d]).toReal
+    + (keyedCost cipher macS kdfS streamS geom (tailKeyed kem cipher macS kdfS streamS geom hvalid
+        hmactag h16 w₀ w₁ ρ dn names A)
+      + (Pr{let x ← (Primitives.MAC.forgeExp macS (forgeAdv cipher macS kdfS streamS geom
+          (tailKeyed kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn names A)
+          (fun _ _ _ _ => nextM0 kem geom)
+          (fun ch o _ rest _ => tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ
+              ch.c o
+            (ksOf streamS geom (withMAC rest default)))))}[x = true]).toReal
+      + |(Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+          (rejectStreamAdv kem cipher macS kdfS streamS geom (tailKeyed kem cipher macS kdfS
+              streamS geom hvalid hmactag h16 w₀ w₁ ρ dn names A)
+            (fun ch o _ U => tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ
+                ch.c o U) (fun _ _ _ out => out)))}[x = true]).toReal
+        - (Pr{let x ← (PRGScheme.prgIdealExperiment
+          (rejectStreamAdv kem cipher macS kdfS streamS geom (tailKeyed kem cipher macS kdfS
+              streamS geom hvalid hmactag h16 w₀ w₁ ρ dn names A)
+            (fun ch o _ U => tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ
+                ch.c o U) (fun _ _ _ out => out)))}[x = true]).toReal|)
+
+set_option maxHeartbeats 2000000 in
+/-- **One side of a step of the hybrid.** A game whose world is the hybrid with the roles `dn`
+handled is, up to the step's cost, the game from a uniform keystream with `ρ` handled too. -/
+theorem tail_sub_uniform_le (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge
+    hon
+      → ProbComp (Protocols.RSOR.World 𝒮)) (ρ : Role) (dn : Role → Bool) (b : Bool)
+    (hw : ∀ {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon),
+      (Protocols.RSOR.tailPair w₀ w₁).world c b = tailHyb kem cipher macS kdfS streamS geom hvalid
+          hmactag h16 dn c)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) :
+    |(Pr{let x ← Protocols.RSOR.Property.play names A b}[x = true]).toReal
+      - (Pr{let x ← (tailUGame kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn (fun
+          x => dn x || x == ρ) names
+          A)}[x = true]).toReal|
+    ≤ tailStepCost kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn names A := by
+  have h1 := tail_sub_keyedReal_le kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn
+      b hw names A
+  have h2 := keyedReal_sub_uniform_le kem cipher macS kdfS streamS geom hmactag (tailKeyed kem
+      cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn names A)
+    (fun ch o _ U => tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ ch.c o U)
+        (fun _ _ _ out => out)
+    (fun _ _ _ _ => rfl) (fun _ _ _ _ => rfl)
+  rw [← (tailUniform_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn
+      names A).prEvent_eq (fun x => x = true)]
+  unfold tailStepCost
+  unfold tailKeyed at h2 ⊢
+  exact (abs_sub_le _ _ _).trans (add_le_add h1 h2)
+
+set_option maxHeartbeats 2000000 in
+/-- **One step of the hybrid.** Handling the role `ρ` too changes the adversary's guess by at
+most the step's cost on each side. -/
+theorem tailStep_le (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → ProbComp (Protocols.RSOR.World 𝒮)) (ρ : Role) (dn : Role → Bool)
+    (hw0 : ∀ {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon),
+      w₀ c = tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 dn c)
+    (hw1 : ∀ {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon),
+      w₁ c = tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => dn x || x == ρ)
+          c)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) :
+    ((Protocols.RSOR.tailPair w₀ w₁).advantage names A).toReal
+    ≤ tailStepCost kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn names A
+      + tailStepCost kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ (fun x => dn x ||
+          x == ρ) names A := by
+  have h0 := tail_sub_uniform_le kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn
+      false (fun c => hw0 c) names A
+  have h1 := tail_sub_uniform_le kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ (fun
+      x => dn x || x == ρ) true (fun c => hw1 c) names A
+  have hdn : (fun x => (dn x || x == ρ) || x == ρ) = (fun x => dn x || x == ρ) :=
+    funext fun x => by rw [Bool.or_assoc, Bool.or_self]
+  rw [hdn, tailUGame_view kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ (fun x => dn
+      x || x == ρ) dn (fun x => dn x || x == ρ) names A] at h1
+  rw [abs_sub_comm] at h0
+  rw [Protocols.RSOR.Property.advantage_toReal names A]
+  refine (abs_sub_le _ (Pr{let x ← (tailUGame kem cipher macS kdfS streamS geom hvalid hmactag h16
+      w₀ w₁ ρ dn (fun x => dn x || x == ρ) names
+    A)}[x = true]).toReal _).trans ?_
+  rw [add_comm]
+  exact add_le_add h0 h1
+
 end TailGame
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
