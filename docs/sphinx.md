@@ -541,6 +541,12 @@ against the honest relays on the world built from the sender's own keys
 (`keyGame_true_propAdvOf`). What is left for TLU→ is to give the worlds of that game as such
 views, and then the steps on the replaced keys: MAC, keystream, payload cipher.
 
+For TLU→ so far (`NIKESphinxTLU.lean`): the first layer of a request's onion as a view of the
+forward path's first group element and its hops' keys (`onionOfKeys`), which on the sender's
+own keys is the sender's onion when that onion builds (`onionOfKeys_real`). A game of a
+property may be played with the honest relay's key pair drawn first (`play_evalDistEq_honAt`).
+Not yet proved: that world 0 of TLU→ is the key game's real world for this view.
+
 Steps, in order:
 
 - the game: a hop's derived keys, blinding factor included, replaced by uniform ones, with the

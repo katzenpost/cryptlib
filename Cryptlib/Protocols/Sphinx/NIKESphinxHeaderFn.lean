@@ -59,6 +59,19 @@ theorem hopKeysWith_hopKey (nike : NIKE) (kdfS : KDF) (c : nike.PrivateKey)
     · simp only [h, ite_false]
       rfl
 
+/-- The group elements from the first: each blinded by the factor of the hop before. -/
+def blindElem (nike : NIKE) (a : ByteArray) (keys : Array HopKeys) : ℕ → ByteArray
+  | 0 => a
+  | i + 1 => nikeBlind nike (blindElem nike a keys i) (keys[i]!).blindingFactor
+
+theorem groupElem_eq_blindElem (nike : NIKE) (c : nike.PrivateKey) (keys : Array HopKeys) (i : ℕ) :
+    groupElem nike c keys i = blindElem nike (groupElem nike c keys 0) keys i := by
+  induction i with
+  | zero => rfl
+  | succ i ih =>
+    show nikeBlind nike (groupElem nike c keys i) _ = nikeBlind nike _ _
+    rw [ih]
+
 section HeaderFn
 
 variable (geom : Geometry)

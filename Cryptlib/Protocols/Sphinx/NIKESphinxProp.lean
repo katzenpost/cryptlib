@@ -326,6 +326,60 @@ theorem keyGame_true_propAdvOf
       simp [Array.getElem_modify]
   · rfl
 
+/-- **The game with the relay `ρ`'s key pair drawn first.** A world of `P` is the game played
+from the honest relays `honAt`, with `ρ`'s key pair drawn before the other two. -/
+theorem play_evalDistEq_honAt (A : P.Adversary) (b : Bool) :
+    Protocols.RSOR.Property.play names A b
+      =ᵈ (do
+        let k ← RSOR.keygen nike
+        let k₁ ← RSOR.keygen nike
+        let k₂ ← RSOR.keygen nike
+        Protocols.RSOR.Property.playFrom
+          (honAt nike cipher macS kdfS streamS geom hvalid hmactag h16 ρ names k.1 (keysOf nike ρ k₁
+              k₂))
+          (fun h => if h = ρ then k.2 else (keysOf nike ρ k₁ k₂ h).2) A b) := by
+  have hsk : ∀ (hon : Protocols.RSOR.Honest 𝒮) (sk sk' : Role → nike.PrivateKey), sk = sk' →
+      Protocols.RSOR.Property.playFrom hon sk A b
+        =ᵈ Protocols.RSOR.Property.playFrom hon sk' A b := fun _ _ _ h => h ▸ EvalDistEq.rfl
+  unfold Protocols.RSOR.Property.play
+  cases ρ with
+  | relay =>
+    refine EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+      EvalDistEq.bind_right _ fun k₂ => ?_
+    have h1 : Protocols.RSOR.Property.honestOf (S := 𝒮) names k k₁ k₂
+        = honAt nike cipher macS kdfS streamS geom hvalid hmactag h16 .relay names k.1 (keysOf nike
+            .relay k₁ k₂) := by
+      funext h
+      cases h <;> rfl
+    rw [h1]
+    exact hsk _ _ _ (funext fun h => by cases h <;> rfl)
+  | back =>
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+    refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ =>
+      OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+    refine EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+      EvalDistEq.bind_right _ fun k₂ => ?_
+    have h1 : Protocols.RSOR.Property.honestOf (S := 𝒮) names k₂ k k₁
+        = honAt nike cipher macS kdfS streamS geom hvalid hmactag h16 .back names k.1 (keysOf nike
+            .back k₁ k₂) := by
+      funext h
+      cases h <;> rfl
+    rw [h1]
+    exact hsk _ _ _ (funext fun h => by cases h <;> rfl)
+  | sender =>
+    refine EvalDistEq.trans (EvalDistEq.bind_right _ fun _ =>
+      OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+    refine EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+      EvalDistEq.bind_right _ fun k₂ => ?_
+    have h1 : Protocols.RSOR.Property.honestOf (S := 𝒮) names k₁ k₂ k
+        = honAt nike cipher macS kdfS streamS geom hvalid hmactag h16 .sender names k.1 (keysOf nike
+            .sender k₁ k₂) := by
+      funext h
+      cases h <;> rfl
+    rw [h1]
+    exact hsk _ _ _ (funext fun h => by cases h <;> rfl)
+
 end PropGame
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
