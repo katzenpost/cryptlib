@@ -108,6 +108,89 @@ theorem hopKeys_eq_map (c : nike.PrivateKey) (hops : Array PathHop) (n : ℕ) :
   | zero => rfl
   | succ n ih => rw [RSOR.hopKeys_succ, ih, List.range_succ, List.map_append]; rfl
 
+open Cryptlib.Primitives.NIKE.NIKE (telescopeElem) in
+/-- The blinded element depends on the sender's private key through its public key, and on the
+factors in front. -/
+theorem telescopeElem_congr (c c' : nike.PrivateKey) (f f' : ℕ → nike.PrivateKey) (i : ℕ)
+    (hc : nike.derivePublicKey c = nike.derivePublicKey c') (hf : ∀ n < i, f n = f' n) :
+    telescopeElem nike c f i = telescopeElem nike c' f' i := by
+  induction i with
+  | zero => exact Subtype.ext hc
+  | succ i ih =>
+    apply Subtype.ext
+    show nike.reinterpret (nike.groupAction (f i) (telescopeElem nike c f i))
+      = nike.reinterpret (nike.groupAction (f' i) (telescopeElem nike c' f' i))
+    rw [ih fun n hn => hf n (by omega), hf i (by omega)]
+
+open Cryptlib.Protocols.Sphinx.KEMSphinx (keysKs keysTag keysEnc) in
+/-- **A sender's packet is `nikePktFn` on the sender's hop keys** and the elements they blind. -/
+theorem layer_zero_pktFn (hops : Array PathHop) (d : RSOR.Draw nike geom)
+    (payload pkt : ByteArray)
+    (h0 : RSOR.layer nike cipher macS kdfS streamS geom hops d payload 0 = .ok pkt)
+    (hkeys : ∀ j < hops.size, ∃ sk,
+      hops[j]!.publicKey = ofVector (nike.encodePublicKey (nike.derivePublicKey sk))) :
+    nikePktFn geom
+        (keysKs geom streamS (RSOR.hopKeys nike kdfS (RSOR.clientKey nike geom d) hops
+          hops.size).toArray)
+        (keysTag macS (RSOR.hopKeys nike kdfS (RSOR.clientKey nike geom d) hops hops.size).toArray)
+        (keysEnc cipher (RSOR.hopKeys nike kdfS (RSOR.clientKey nike geom d) hops
+          hops.size).toArray)
+        (groupElem nike (RSOR.clientKey nike geom d)
+          (RSOR.hopKeys nike kdfS (RSOR.clientKey nike geom d) hops hops.size).toArray)
+        (RSOR.filler nike geom hops d) hops payload = some pkt := by
+  choose! tsk htsk using hkeys
+  have hnk : newNIKEPacket nike cipher macS kdfS streamS geom (ofVector d.1)
+      (RSOR.filler nike geom hops d) hops payload = .ok pkt := by
+    obtain ⟨p, hp, hpp⟩ :=
+      (RSOR.layer_ok nike cipher macS kdfS streamS geom hops d payload 0 pkt).1 h0
+    rw [hp]
+    exact congrArg Except.ok hpp
+  obtain ⟨clientSk, f, ge, keys, hgs, hks, hself, hchain, hfn⟩ :=
+    newNIKEPacket_pktFn nike macS kdfS streamS geom cipher _ _ hops payload pkt hnk tsk
+      (fun i hi => htsk i hi)
+  have hcpub : nike.derivePublicKey clientSk
+      = nike.derivePublicKey (RSOR.clientKey nike geom d) := by
+    obtain ⟨c0, hc0⟩ := nike.decodePrivateKey_total d.1
+    have hck : RSOR.clientKey nike geom d = c0 := by
+      unfold RSOR.clientKey
+      rw [hc0]
+      rfl
+    unfold nikeSelfPublicKeyBytes at hself
+    rw [Common.toVecN_ofVector, hc0] at hself
+    have := congrArg (fun b => nike.decodePublicKey (Common.toVecN nike.publicKeySize b)) hself
+    simp only [Common.toVecN_ofVector, nike.decode_encode_pub, Option.some.injEq] at this
+    rw [hck]
+    exact this.symm
+  obtain ⟨-, hK⟩ := RSOR.hopKey_eq nike kdfS (RSOR.clientKey nike geom d) hops keys tsk f
+    hops.size (fun i hi => htsk i hi) (fun j hj => ⟨by
+      rw [(hchain j hj).2.1, RSOR.telescopeSecret_congr nike _ _ _ f hcpub j], (hchain j hj).2.2⟩)
+  have hget : ∀ i < hops.size,
+      (RSOR.hopKeys nike kdfS (RSOR.clientKey nike geom d) hops hops.size).toArray[i]!
+        = keys[i]! := fun i hi => by
+    rw [hopKeys_eq_map, ← hK i hi]
+    simp [hi]
+  have hpos : 0 < hops.size := by
+    obtain ⟨-, hdr, sprp, -, hcreate, -⟩ :=
+      newNIKEPacket_unfold nike cipher macS kdfS streamS geom _ _ hops payload pkt hnk
+    have := (createHeader_unfold nike macS kdfS streamS geom _ _ hops hdr sprp hcreate tsk
+      (fun i hi => htsk i hi)).1
+    omega
+  rw [← hfn]
+  refine nikePktFn_congr geom _ _ _ _ _ _ _ _ _ _ _ hpos fun i hi => ⟨?_, ?_, ?_, ?_⟩
+  · simp only [keysKs, hget i hi]
+  · funext m
+    simp only [keysTag, hget i hi]
+  · funext b
+    simp only [keysEnc, hget i hi]
+  · rw [groupElem_eq, (hchain i hi).1]
+    congr 2
+    refine congrArg Subtype.val (telescopeElem_congr nike _ _ _ _ i hcpub.symm fun n hn => ?_)
+    show RSOR.factor nike _ = f n
+    rw [hget n (by omega)]
+    unfold RSOR.factor
+    rw [(hchain n (by omega)).2.2]
+    rfl
+
 /-- **With the sender's keys, the relay handed the keys of its place is the relay.** -/
 theorem keysExcept_hopKeys (c sk : nike.PrivateKey) (hops : Array PathHop) (n j : ℕ)
     (hj : j < n)

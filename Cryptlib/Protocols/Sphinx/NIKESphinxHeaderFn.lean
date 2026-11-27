@@ -107,6 +107,39 @@ def nikePktFn (ks : ℕ → ByteArray) (tag enc : ℕ → ByteArray → ByteArra
           ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)
   else none
 
+/-- `nikeHdrTrace` reads the keystreams, tagging functions and group elements of the path's hops
+only. -/
+theorem nikeHdrTrace_congr (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ge ge' : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop)
+    (h : ∀ i, i < path.size → ks i = ks' i ∧ tag i = tag' i ∧ ge i = ge' i) (j : ℕ)
+    (hj : j ≤ path.size) :
+    nikeHdrTrace geom ks tag ge filler path j = nikeHdrTrace geom ks' tag' ge' filler path j := by
+  induction j with
+  | zero => rfl
+  | succ j ih =>
+    rw [nikeHdrTrace, nikeHdrTrace, ih (by omega)]
+    simp only [(h (path.size - 1 - j) (by omega)).1, (h (path.size - 1 - j) (by omega)).2.1,
+      (h (path.size - 1 - j) (by omega)).2.2,
+      KEMSphinx.padAt_congr geom ks ks' (path.size - 1 - j - 1) fun m _ => (h m (by omega)).1]
+
+/-- `nikePktFn` reads what it is given for the path's hops only. -/
+theorem nikePktFn_congr (ks ks' : ℕ → ByteArray) (tag tag' enc enc' : ℕ → ByteArray → ByteArray)
+    (ge ge' : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (payload : ByteArray)
+    (hp : 0 < path.size)
+    (h : ∀ i, i < path.size → ks i = ks' i ∧ tag i = tag' i ∧ enc i = enc' i ∧ ge i = ge' i) :
+    nikePktFn geom ks tag enc ge filler path payload
+      = nikePktFn geom ks' tag' enc' ge' filler path payload := by
+  have hf : (List.range' 0 path.size).foldl (fun b iRev => enc (path.size - 1 - iRev) b)
+        ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)
+      = (List.range' 0 path.size).foldl (fun b iRev => enc' (path.size - 1 - iRev) b)
+        ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload) :=
+    List.foldl_ext _ _ _ fun b iRev hi => by
+      have hlt : iRev < path.size := by simpa using hi
+      rw [(h (path.size - 1 - iRev) (by omega)).2.2.1]
+  unfold nikePktFn
+  rw [nikeHdrTrace_congr geom ks ks' tag tag' ge ge' filler path
+    (fun i hi => ⟨(h i hi).1, (h i hi).2.1, (h i hi).2.2.2⟩) _ le_rfl, hf, (h 0 hp).2.2.2]
+
 end HeaderFn
 
 section Built

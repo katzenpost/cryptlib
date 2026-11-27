@@ -526,6 +526,12 @@ handed the sender's keys it answers as it does with its own key (`keysExcept_hop
 `procImplK_hopKeys`). Every blinding factor decodes, by a law of the NIKE type. An adversary
 that names a place off the path loses in both worlds.
 
+A sender's packet is `nikePktFn` on the sender's hop keys and the elements they blind
+(`layer_zero_pktFn`), and `nikePktFn` reads what it is given for the path's hops only
+(`nikePktFn_congr`). So the onion of the RSOR games is one function of the hop keys, and the
+game's two worlds differ in the keys alone. This is not yet used: the reduction of TLU→ to the
+game is the next step.
+
 Steps, in order:
 
 - the game: a hop's derived keys, blinding factor included, replaced by uniform ones, with the
