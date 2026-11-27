@@ -1512,13 +1512,15 @@ def strTag (names : Role → Name) (W : FwdWorld nike cipher macS kdfS streamS g
   macS.mac (Util.Bytes.ofVector x.1) (strMsg nike cipher macS kdfS streamS geom hvalid hmactag h16
       names W x U)
 
-/-- World 0 after its payload step, on its draws and the honest relay's header keystream: the
-relay answers one header, decrypts the block `u` to the sender's and any other to `v`. -/
-def strRun (names : Role → Name) (W : FwdWorld nike cipher macS kdfS streamS geom hvalid hmactag
+/-- A world after its payload step, on its draws and the honest relay's header keystream: the
+relay answers one header, decrypts the block `u` to the sender's and any other to `v`. The
+patch is given as a function of the onion's layer at the relay. -/
+def strRunP (names : Role → Name) (W : FwdWorld nike cipher macS kdfS streamS geom hvalid hmactag
     h16 names) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) (x :
     StrX nike cipher macS kdfS streamS geom hvalid hmactag h16 names W A)
     (U : KEMSphinx.Keystream geom) (u v : Vector UInt8 (geom.payloadTagLength +
-        geom.forwardPayloadLength)) : ProbComp Bool :=
+        geom.forwardPayloadLength))
+    (pt : Onion geom → Protocols.RSOR.Patch 𝒮) : ProbComp Bool :=
   (simulateQ (Protocols.RSOR.withDec (S := 𝒮) Role.relay
       (Util.Bytes.toVecN _ (strMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names W x U
           ++ Util.Bytes.ofVector (strTag nike cipher macS kdfS streamS geom hvalid hmactag h16
@@ -1547,9 +1549,7 @@ def strRun (names : Role → Name) (W : FwdWorld nike cipher macS kdfS streamS g
       (fun y => if y = u then (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16
           names W A).plain (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names W x)
           else v)
-      (W.patch (⟨x.2.2.keys, x.2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag
-          h16 names x.2.2.k.1) x.2.2.o
-        (onionOfStream nike cipher macS kdfS streamS geom x.2.2.c.pos (W.req (⟨x.2.2.keys,
+      (pt (onionOfStream nike cipher macS kdfS streamS geom x.2.2.c.pos (W.req (⟨x.2.2.keys,
           x.2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
           x.2.2.k.1) x.2.2.o) (W.rnd x.2.2.o)
         (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
@@ -1584,6 +1584,17 @@ def strRun (names : Role → Name) (W : FwdWorld nike cipher macS kdfS streamS g
             hvalid hmactag h16 names W x U))
         (Util.Bytes.ofVector u))
     else pure false)).run' x.2.2.log
+
+/-- The same with the world's own patch. -/
+def strRun (names : Role → Name) (W : FwdWorld nike cipher macS kdfS streamS geom hvalid hmactag
+    h16 names)
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) (x : StrX nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names W A)
+    (U : KEMSphinx.Keystream geom)
+    (u v : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)) : ProbComp Bool :=
+  strRunP nike cipher macS kdfS streamS geom hvalid hmactag h16 names W A x U u v
+    (W.patch (⟨x.2.2.keys, x.2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names x.2.2.k.1) x.2.2.o)
 
 /-- **The adversary against the keystream generator**: it plays world 0 after its payload step
 from the keystream it is given. -/
