@@ -350,6 +350,13 @@ The statement for SLU← is `backwardUnlinkable_le`, for `backwardWith freshSwap
 Not proved yet: bounds on the explicit events (bad draws, draws that are not good). Each is a
 statement about the KEM not failing, a layer being built, or a uniform block having a zero tag.
 
+The events of the SLU← bound are being reduced to the KEM in `KEMSphinxSLUEvents.lean`. So
+far: a bad draw of world 0 has a seed that is not reliable (`prEvent_backBad0_le`), and a bad
+draw of world 1 has one on the path the honest relay's layer is on (`prEvent_backBad1_le`).
+A forward layer builds when the sender's payload has the forward payload's length; the lemmas
+take that as a fact about the geometry (`hsurb`: room for a reply block). The other event terms
+of `backwardUnlinkable_le` are not reduced yet.
+
 ## STI↔ for KEM Sphinx
 
 World 0 shows the layer of the adversary's onion at forward position `pos`; world 1 shows the

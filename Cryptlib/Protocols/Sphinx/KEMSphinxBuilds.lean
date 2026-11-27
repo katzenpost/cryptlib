@@ -193,6 +193,26 @@ theorem builds_of_reliable (hvalid : geom.ValidForKEM kem)
   ⟨hrel, fun h => layer_zero_builds kem cipher macS kdfS streamS hvalid R h last hlast d payload
     hp⟩
 
+variable {geom} in
+/-- **With reliable seeds every layer of a route builds.** -/
+theorem layer_builds_of_reliable (hvalid : geom.ValidForKEM kem)
+    (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (RSOR.Key kem)) (last : List RoutingCommand)
+    (hlast : (∃ r, last = [.recipient r]) ∨ ∃ id, last = [.surbReply id])
+    (d : RSOR.Draw geom) (payload : ByteArray) (hp : payload.size = geom.forwardPayloadLength)
+    (hrel : ∀ i < R.hops.length, kem.Reliable (kem.stateFromSeed d.1.toArray[i]!))
+    (i : ℕ) (hi : i < R.hops.length) :
+    ∃ pkt, RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload i
+      = .ok pkt := by
+  refine RSOR.Builds.layer kem cipher macS kdfS streamS geom hvalid hmactag h16 R last ?_ ?_ d
+    payload (builds_of_reliable kem cipher macS kdfS streamS hvalid R last hlast d payload hp
+      hrel) i hi
+  · rcases hlast with ⟨r, rfl⟩ | ⟨id, rfl⟩ <;> intro c hc <;> rw [List.mem_singleton.1 hc] <;>
+      simp
+  · rcases hlast with ⟨r, rfl⟩ | ⟨id, rfl⟩ <;> intro c hc <;> rw [List.mem_singleton.1 hc] <;>
+      simp
+
 end Builds
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
