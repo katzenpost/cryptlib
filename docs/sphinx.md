@@ -685,7 +685,11 @@ for it:
    header of layer `j + 1` of the header function with the relay's keystream put in, with the
    block the later hops left (`nextOfStream_layerHdr`). Of the hops in front it reads their
    padding only.
-2. The relay's answer in world 0 in the same closed form. Not proved.
+2. The relay's answer in world 0 in the same closed form. Proved for it: what a relay
+   forwards, explicitly (`procD_forward`, `procD_forward_append`), and so a relay given a
+   layer before the last forwards the next layer's header and the payload decrypted
+   (`procD_layerHdr`), from the bytes under a layer's tag (`hdrMsg_struct`, `peel_bytes`,
+   `peel_cmdBuf`). Not proved: world 0's game written with it.
 3. The padding of the hops in front is absorbed by the tail of the uniform keystream, and the
    relay's header on a path that goes on becomes its header on a path that ends at it by
    xoring a fixed mask into the keystream's head. Not proved. The byte lemmas for this exist
