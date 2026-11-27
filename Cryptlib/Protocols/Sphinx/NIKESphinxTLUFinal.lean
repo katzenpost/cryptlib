@@ -455,4 +455,96 @@ noncomputable def blindAdvantage (B : BlindAdversary nike) : ℝ :=
 
 end Blind
 
+/-! ## The two final games -/
+
+section Final
+
+variable (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+  (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
+  (hmactag : macS.tagSize = macLength)
+  (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+
+local notation "𝒮" => sphinx nike cipher macS kdfS streamS geom hvalid hmactag h16
+
+/-- The hops' keys of world 0 after its steps: the sender's, the honest relay's replaced by
+its blinding seed alone. -/
+theorem fwd0_keys (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (x : StrX nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) A) :
+    forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names)
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS
+            kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+            hvalid hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+            names) x) default)
+      = hopKeysWith nike kdfS ((nike.decodePrivateKey x.2.2.d).getD default)
+        (RSOR.path nike x.2.2.c.req.fwd [.recipient x.2.2.c.req.receiver]) x.2.2.c.pos
+        (restKeys ((default, default, default), x.2.1) default)
+        (RSOR.path nike x.2.2.c.req.fwd [.recipient x.2.2.c.req.receiver]).size := by
+  have hpos : (x.2.2.c.pos : ℕ) < x.2.2.c.req.fwd.hops.length := x.2.2.c.pos.isLt
+  have hsz := RSOR.path_size nike x.2.2.c.req.fwd [.recipient x.2.2.c.req.receiver]
+  have hkey : (x.2.2.c.req.fwd.hops[(x.2.2.c.pos : ℕ)]'hpos).key = x.2.2.k.1 :=
+    congrArg (·.key) x.2.2.c.relay
+  have hpk : ((RSOR.path nike x.2.2.c.req.fwd [.recipient x.2.2.c.req.receiver])[
+        (x.2.2.c.pos : ℕ)]!).publicKey
+      = Util.Bytes.ofVector (nike.encodePublicKey x.2.2.k.1.1) := by
+    rw [RSOR.path_getElem! nike _ _ _ hpos]
+    exact congrArg (fun k : RSOR.Key nike => Util.Bytes.ofVector (nike.encodePublicKey k.1)) hkey
+  have hmod := modify_publicKey_self
+    (RSOR.path nike x.2.2.c.req.fwd [.recipient x.2.2.c.req.receiver]) x.2.2.c.pos
+    (Util.Bytes.ofVector (nike.encodePublicKey x.2.2.k.1.1)) (by rw [hsz]; exact hpos) hpk
+  show hopKeysWith nike kdfS ((nike.decodePrivateKey x.2.2.d).getD default)
+    ((RSOR.path nike x.2.2.c.req.fwd [.recipient x.2.2.c.req.receiver]).modify x.2.2.c.pos
+      fun h => { h with publicKey := Util.Bytes.ofVector (nike.encodePublicKey x.2.2.k.1.1) })
+    x.2.2.c.pos (restKeys ((default, default, default), x.2.1) default) _ = _
+  rw [hmod]
+  exact congrArg (hopKeysWith nike kdfS _ _ _ _) (congrArg Array.size hmod)
+
+/-- The hops' keys of world 1 after its first steps: the sender's for the replacement's path,
+which is the original's cut after the honest relay, the relay's replaced likewise. -/
+theorem fwd1_keys (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (x : StrX nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) A) :
+    forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names)
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+            kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+            hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+            names) x) default)
+      = hopKeysWith nike kdfS ((nike.decodePrivateKey x.2.2.d).getD default)
+        (RSOR.path nike (x.2.2.c.req.fwd.take (x.2.2.c.pos + 1)) []) x.2.2.c.pos
+        (restKeys ((default, default, default), x.2.1) default)
+        (RSOR.path nike (x.2.2.c.req.fwd.take (x.2.2.c.pos + 1)) []).size := by
+  have hpos : (x.2.2.c.pos : ℕ) < x.2.2.c.req.fwd.hops.length := x.2.2.c.pos.isLt
+  have hpos1 : (x.2.2.c.pos : ℕ) < (x.2.2.c.req.fwd.take (x.2.2.c.pos + 1)).hops.length := by
+    show (x.2.2.c.pos : ℕ) < (List.take ((x.2.2.c.pos : ℕ) + 1) x.2.2.c.req.fwd.hops).length
+    rw [List.length_take]
+    exact lt_min (Nat.lt_succ_self _) hpos
+  have hsz := RSOR.path_size nike (x.2.2.c.req.fwd.take (x.2.2.c.pos + 1)) []
+  have hkey : ((x.2.2.c.req.fwd.take (x.2.2.c.pos + 1)).hops[(x.2.2.c.pos : ℕ)]'hpos1).key
+      = x.2.2.k.1 := by
+    show ((List.take ((x.2.2.c.pos : ℕ) + 1) x.2.2.c.req.fwd.hops)[(x.2.2.c.pos : ℕ)]'hpos1).key
+      = _
+    have h0 : (x.2.2.c.req.fwd.hops[(x.2.2.c.pos : ℕ)]'hpos).key = x.2.2.k.1 :=
+      congrArg (·.key) x.2.2.c.relay
+    have h1 : (List.take ((x.2.2.c.pos : ℕ) + 1) x.2.2.c.req.fwd.hops)[(x.2.2.c.pos : ℕ)]'hpos1
+        = x.2.2.c.req.fwd.hops[(x.2.2.c.pos : ℕ)]'hpos := List.getElem_take
+    exact (congrArg Protocols.RSOR.Hop.key h1).trans h0
+  have hpk : ((RSOR.path nike (x.2.2.c.req.fwd.take (x.2.2.c.pos + 1)) [])[
+        (x.2.2.c.pos : ℕ)]!).publicKey
+      = Util.Bytes.ofVector (nike.encodePublicKey x.2.2.k.1.1) := by
+    rw [RSOR.path_getElem! nike _ _ _ hpos1]
+    exact congrArg (fun k : RSOR.Key nike => Util.Bytes.ofVector (nike.encodePublicKey k.1)) hkey
+  have hmod := modify_publicKey_self
+    (RSOR.path nike (x.2.2.c.req.fwd.take (x.2.2.c.pos + 1)) []) x.2.2.c.pos
+    (Util.Bytes.ofVector (nike.encodePublicKey x.2.2.k.1.1)) (by rw [hsz]; exact hpos1) hpk
+  show hopKeysWith nike kdfS ((nike.decodePrivateKey x.2.2.d).getD default)
+    ((RSOR.path nike (x.2.2.c.req.fwd.take (x.2.2.c.pos + 1)) []).modify x.2.2.c.pos
+      fun h => { h with publicKey := Util.Bytes.ofVector (nike.encodePublicKey x.2.2.k.1.1) })
+    x.2.2.c.pos (restKeys ((default, default, default), x.2.1) default) _ = _
+  rw [hmod]
+  exact congrArg (hopKeysWith nike kdfS _ _ _ _) (congrArg Array.size hmod)
+
+end Final
+
 end Cryptlib.Protocols.Sphinx.NIKESphinx
