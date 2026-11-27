@@ -171,7 +171,7 @@ The zero-tag event is bounded: a draw of world 1 is not good with at most the ch
 layer cannot be built, plus one in the number of payload tags (`prEvent_not_finalGood_le`,
 from `prEvent_zeroPrefix`).
 
-Not proved yet: those two; STI↔ for KEM Sphinx; all three for NIKE Sphinx. SLU← for KEM Sphinx
+Not proved yet: those two; the second half of STI↔ for KEM Sphinx; all three for NIKE Sphinx. SLU← for KEM Sphinx
 is below.
 
 ### SLU← (in progress)
@@ -349,7 +349,7 @@ The statement for SLU← is `backwardUnlinkable_le`, for `backwardWith freshSwap
 Not proved yet: bounds on the explicit events (bad draws, draws that are not good). Each is a
 statement about the KEM not failing, a layer being built, or a uniform block having a zero tag.
 
-## STI↔ for KEM Sphinx: started, the plan
+## STI↔ for KEM Sphinx: the first half is proved
 
 World 0 shows the layer of the adversary's onion at forward position `pos`; world 1 shows the
 first layer of an onion with the same message over the rest of the forward path and the
@@ -366,7 +366,7 @@ backward path up to its honest relay. Two honest relays hide the difference.
 
 In Lean so far (`KEMSphinxSTI.lean`, `KEMSphinxTLUNext.lean`):
 
-- The triangle through a world in the middle (`tailIndistinguishable_advantage_le`), and that
+- The triangle through a world in the middle (`tailPair_advantage_le`), and that
   world for KEM Sphinx (`tailMid`, `tailMidWorld`): the first layer over the rest of the forward
   path with a forward draw of its own, around the adversary's payload.
 - A forward layer from a position on is a layer over the rest of the path (`layer_drop`).
@@ -375,13 +375,25 @@ In Lean so far (`KEMSphinxSTI.lean`, `KEMSphinxTLUNext.lean`):
   (`keyedIdeal_sub_reject_le`), then the keystream step (`keyedReject_eq_prg`), together
   `keyedReal_sub_uniform_le`. The TLU→ lemmas for the original's hidden layer are corollaries.
 
-Still to do for the first relay. The challenge lets the relay before the shown layer be either
-honest role (`.relay` or `.back`), and the keyed game fixes the role before the adversary
-chooses. So the step is done once per role, through a hybrid that shows the middle world when
-that relay has a role already handled and world 0 otherwise. For each role: both worlds as the
-keyed game with the real keys off the bad draws (`tailSeed` puts the relay's seed on its own),
-then the two games from a uniform keystream compared by `layerPast_drop` and
-`fillerAtF_target`, as on the backward path of SLU←.
+The first half is `tailFirstHalf_le`: world 0 and the middle world are told apart with at most
+`tailHalfCost`. The challenge lets the relay before the shown layer be either honest role
+(`.relay` or `.back`), and the keyed game fixes the role before the adversary chooses. So the
+step is done once per role, through a hybrid (`tailHyb`) that shows the middle world when that
+relay has a role already handled and world 0 otherwise. One step (`tailStep_le`):
+
+- Each hybrid world is the keyed game with the real keys, off the bad draws
+  (`tail_sub_keyedReal_le`; the bad draws are `hybBad`: the relay's key pair is not a key pair,
+  or the encapsulation to it fails or cannot be undone).
+- `keyedReal_sub_uniform_le` takes each side to a uniform keystream.
+- From a uniform keystream the hybrid world is the next one (`evalDistEq_tailViewU`), by the
+  relabelling of the forward path (`fwdShift_spec`, `evalDistEq_fwdShift`).
+
+`tailStepCost` is one side of a step: the bad draws, the replacement of the relay's keys (KEM
+and KDF), a MAC forgery, and the keystream generator's advantage. `tailHalfCost` is four of
+them. The chance of a bad draw is not bounded yet.
+
+Still to do: the second half, at the honest relay on the backward path, and then one statement
+for `tailIndistinguishable`.
 
 ## How the bounds are built
 

@@ -1098,6 +1098,130 @@ theorem tailStep_le (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocol
   rw [add_comm]
   exact add_le_add h0 h1
 
+/-- **The cost of the first half of STI↔**: the two sides of the step for a relay on the forward
+path, and of the step for the relay on both paths. -/
+noncomputable def tailHalfCost (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.tailPair (S := 𝒮) (fun c => (Protocols.RSOR.tailIndistinguishable (S :=
+        𝒮)).world c false)
+      (tailMid kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) : ℝ :=
+  tailStepCost kem cipher macS kdfS streamS geom hvalid hmactag h16 (tailHyb kem cipher macS kdfS
+      streamS geom hvalid hmactag h16 (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => false || x ==
+          Role.relay)) .relay (fun _ => false) names
+      (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => false || x ==
+          Role.relay))
+      (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back)) A))
+    + tailStepCost kem cipher macS kdfS streamS geom hvalid hmactag h16 (tailHyb kem cipher macS
+        kdfS streamS geom hvalid hmactag h16 (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => false || x ==
+          Role.relay)) .relay (fun x => false || x == Role.relay) names
+      (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => false || x ==
+          Role.relay))
+      (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back)) A))
+    + (tailStepCost kem cipher macS kdfS streamS geom hvalid hmactag h16 (tailHyb kem cipher macS
+        kdfS streamS geom hvalid hmactag h16 (fun x => false || x == Role.relay))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back)) .back (fun x => false || x == Role.relay) names
+      (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (fun x => false || x == Role.relay))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back))
+      (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back)) A))
+    + tailStepCost kem cipher macS kdfS streamS geom hvalid hmactag h16 (tailHyb kem cipher macS
+        kdfS streamS geom hvalid hmactag h16 (fun x => false || x == Role.relay))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back)) .back (fun x => (false || x == Role.relay) || x ==
+          Role.back) names
+      (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (fun x => false || x == Role.relay))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back))
+      (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back)) A)))
+
+set_option maxHeartbeats 4000000 in
+/-- **The first half of STI↔ for KEM Sphinx.** World 0 and the world in the middle, which shows
+the first layer of an onion over the rest of the forward path, are told apart with at most the
+cost of the two steps of the hybrid over the role of the relay before the shown layer. -/
+theorem tailFirstHalf_le (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.tailPair (S := 𝒮) (fun c => (Protocols.RSOR.tailIndistinguishable (S :=
+        𝒮)).world c false)
+      (tailMid kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    ((Protocols.RSOR.tailPair (S := 𝒮) (fun c => (Protocols.RSOR.tailIndistinguishable (S :=
+        𝒮)).world c false)
+      (tailMid kem cipher macS kdfS streamS geom hvalid hmactag h16)).advantage names A).toReal
+    ≤ tailHalfCost kem cipher macS kdfS streamS geom hvalid hmactag h16 names A := by
+  have hd2 : (fun x => (false || x == Role.relay) || x == Role.back) = (fun ρ => ρ == Role.relay ||
+      ρ == Role.back) :=
+    funext fun x => by rw [Bool.false_or]
+  have hp := fun b => (Protocols.RSOR.tailPair_play_congr (S := 𝒮)
+    (fun c => (Protocols.RSOR.tailIndistinguishable (S := 𝒮)).world c false) (tailMid kem cipher
+        macS kdfS streamS geom hvalid hmactag h16)
+    (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun _ => false)) (tailHyb kem
+        cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x == Role.relay) || x
+        == Role.back))
+    (fun c => tailWorld_evalDistEq_tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 c)
+    (fun c => by
+      rw [hd2, tailHyb_all kem cipher macS kdfS streamS geom hvalid hmactag h16 c]) names A
+          b).prEvent_eq (fun x => x = true)
+  have h1 := Protocols.RSOR.tailPair_advantage_le (S := 𝒮) (tailHyb kem cipher macS kdfS streamS
+      geom hvalid hmactag h16 (fun _ => false))
+    (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => false || x ==
+        Role.relay)) (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false
+        || x == Role.relay) || x == Role.back)) names
+    (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back)) A)
+  have s1 := tailStep_le kem cipher macS kdfS streamS geom hvalid hmactag h16 (tailHyb kem cipher
+      macS kdfS streamS geom hvalid hmactag h16 (fun _ => false))
+    (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => false || x ==
+        Role.relay)) .relay (fun _ => false) (fun _ => rfl) (fun _ => rfl) names
+    (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => false || x ==
+          Role.relay))
+      (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back)) A))
+  have s2 := tailStep_le kem cipher macS kdfS streamS geom hvalid hmactag h16 (tailHyb kem cipher
+      macS kdfS streamS geom hvalid hmactag h16 (fun x => false || x == Role.relay))
+    (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+        Role.relay) || x == Role.back)) .back (fun x => false || x == Role.relay) (fun _ => rfl)
+        (fun _ => rfl) names
+    (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (fun x => false || x == Role.relay))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back))
+      (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back)) A))
+  rw [Protocols.RSOR.Property.advantage_toReal names A, hp true, hp false,
+    ← Protocols.RSOR.Property.advantage_toReal names
+      (Protocols.RSOR.tailPair.cast (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (fun _ => false))
+      (tailHyb kem cipher macS kdfS streamS geom hvalid hmactag h16 (fun x => (false || x ==
+          Role.relay) || x == Role.back)) A)]
+  unfold tailHalfCost
+  exact h1.trans (by rw [add_comm]; exact add_le_add s1 s2)
+
 end TailGame
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
