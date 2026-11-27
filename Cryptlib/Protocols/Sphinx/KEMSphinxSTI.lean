@@ -11,44 +11,63 @@ open OracleComp OracleSpec
 
 variable {S : Scheme}
 
-/-- STI↔ from its world 0 to a world in the middle. -/
-def tailTo (mid : {hon : Honest S} → TailChallenge hon → ProbComp (World S)) : Property S where
+/-- The game that tells two worlds for a challenge of STI↔ apart. -/
+def tailPair (w₀ w₁ : {hon : Honest S} → TailChallenge hon → ProbComp (World S)) : Property S where
   Challenge := TailChallenge
   world c b := match b with
-    | false => (tailIndistinguishable (S := S)).world c false
-    | true => mid c
+    | false => w₀ c
+    | true => w₁ c
 
-/-- STI↔ from a world in the middle to its world 1. -/
-def tailFrom (mid : {hon : Honest S} → TailChallenge hon → ProbComp (World S)) : Property S where
-  Challenge := TailChallenge
-  world c b := match b with
-    | false => mid c
-    | true => (tailIndistinguishable (S := S)).world c true
-
-/-- An adversary of STI↔, against the game up to the world in the middle. -/
-def tailTo.cast (mid : {hon : Honest S} → TailChallenge hon → ProbComp (World S))
-    (A : (tailIndistinguishable (S := S)).Adversary) : (tailTo mid).Adversary :=
+/-- An adversary of one such game, against another. -/
+def tailPair.cast {u₀ u₁ : {hon : Honest S} → TailChallenge hon → ProbComp (World S)}
+    (w₀ w₁ : {hon : Honest S} → TailChallenge hon → ProbComp (World S))
+    (A : (tailPair u₀ u₁).Adversary) : (tailPair w₀ w₁).Adversary :=
   ⟨A.State, A.choose, A.guess⟩
 
-/-- An adversary of STI↔, against the game from the world in the middle. -/
-def tailFrom.cast (mid : {hon : Honest S} → TailChallenge hon → ProbComp (World S))
-    (A : (tailIndistinguishable (S := S)).Adversary) : (tailFrom mid).Adversary :=
+/-- An adversary of STI↔, against the game of its two worlds. -/
+def tailPair.ofTail (A : (tailIndistinguishable (S := S)).Adversary) :
+    (tailPair (fun c => (tailIndistinguishable (S := S)).world c false)
+      (fun c => (tailIndistinguishable (S := S)).world c true)).Adversary :=
   ⟨A.State, A.choose, A.guess⟩
 
-/-- **STI↔ through a world in the middle.** -/
-theorem tailIndistinguishable_advantage_le
-    (mid : {hon : Honest S} → TailChallenge hon → ProbComp (World S)) (names : Role → S.Name)
+/-- STI↔ is the game of its two worlds. -/
+theorem tailIndistinguishable_advantage_eq (names : Role → S.Name)
     (A : (tailIndistinguishable (S := S)).Adversary) :
-    ((tailIndistinguishable (S := S)).advantage names A).toReal
-      ≤ ((tailFrom mid).advantage names (tailFrom.cast mid A)).toReal
-        + ((tailTo mid).advantage names (tailTo.cast mid A)).toReal := by
+    (tailIndistinguishable (S := S)).advantage names A
+      = (tailPair (fun c => (tailIndistinguishable (S := S)).world c false)
+        (fun c => (tailIndistinguishable (S := S)).world c true)).advantage names
+          (tailPair.ofTail A) :=
+  rfl
+
+/-- **Two worlds through a world in the middle.** -/
+theorem tailPair_advantage_le
+    (w₀ w₁ w₂ : {hon : Honest S} → TailChallenge hon → ProbComp (World S)) (names : Role → S.Name)
+    (A : (tailPair w₀ w₂).Adversary) :
+    ((tailPair w₀ w₂).advantage names A).toReal
+      ≤ ((tailPair w₁ w₂).advantage names (tailPair.cast w₁ w₂ A)).toReal
+        + ((tailPair w₀ w₁).advantage names (tailPair.cast w₀ w₁ A)).toReal := by
   rw [Property.advantage_toReal, Property.advantage_toReal, Property.advantage_toReal]
-  have e1 : Property.play names (tailFrom.cast mid A) true = Property.play names A true := rfl
-  have e2 : Property.play names (tailFrom.cast mid A) false
-      = Property.play names (tailTo.cast mid A) true := rfl
-  have e3 : Property.play names (tailTo.cast mid A) false = Property.play names A false := rfl
+  have e1 : Property.play names (tailPair.cast w₁ w₂ A) true = Property.play names A true := rfl
+  have e2 : Property.play names (tailPair.cast w₁ w₂ A) false
+      = Property.play names (tailPair.cast w₀ w₁ A) true := rfl
+  have e3 : Property.play names (tailPair.cast w₀ w₁ A) false = Property.play names A false :=
+    rfl
   rw [e1, e2, e3]
   exact abs_sub_le _ _ _
+
+/-- Worlds that are the same in distribution give the same game. -/
+theorem tailPair_play_congr
+    (w₀ w₁ u₀ u₁ : {hon : Honest S} → TailChallenge hon → ProbComp (World S))
+    (h₀ : ∀ {hon : Honest S} (c : TailChallenge hon), w₀ c =ᵈ u₀ c)
+    (h₁ : ∀ {hon : Honest S} (c : TailChallenge hon), w₁ c =ᵈ u₁ c)
+    (names : Role → S.Name) (A : (tailPair w₀ w₁).Adversary) (b : Bool) :
+    Property.play names A b =ᵈ Property.play names (tailPair.cast u₀ u₁ A) b := by
+  unfold Property.play Property.playFrom
+  refine EvalDistEq.bind_right _ fun kr => EvalDistEq.bind_right _ fun kb =>
+    EvalDistEq.bind_right _ fun ks => EvalDistEq.bind_right _ fun out => ?_
+  cases b
+  · exact (h₀ out.1.1).bind_left _
+  · exact (h₁ out.1.1).bind_left _
 
 end Cryptlib.Protocols.RSOR
 
@@ -75,7 +94,7 @@ World 0 of STI↔ shows a layer of the adversary's onion from a forward position
 shows the first layer of an onion over the rest of the forward path. A layer from a position on
 is a layer over the rest of the path, with the filler there as the rest's padding.
 
-The two worlds are compared through a world in the middle (`tailTo`, `tailFrom`). -/
+The two worlds are compared through worlds in the middle (`tailPair`). -/
 
 section RestOfForward
 
