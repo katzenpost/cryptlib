@@ -105,30 +105,20 @@ theorem kemEncap_key (k : RSOR.Key kem) (s : Vector UInt8 32) :
   rw [h]
   exact ⟨_, _, rfl⟩
 
-variable {geom} in
 set_option maxHeartbeats 1000000 in
-/-- **The first layer over a route builds**, for any draw and any payload of the right
-length. -/
-theorem layer_zero_builds (hvalid : geom.ValidForKEM kem)
-    (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (RSOR.Key kem)) (hR : 0 < R.hops.length)
-    (last : List RoutingCommand)
-    (hlast : (∃ r, last = [.recipient r]) ∨ ∃ id, last = [.surbReply id])
-    (d : RSOR.Draw geom) (payload : ByteArray) (hp : payload.size = geom.forwardPayloadLength) :
-    ∃ pkt, RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload 0
-      = .ok pkt := by
-  obtain ⟨-, -, hrouting, -⟩ := id hvalid
-  have hn := RSOR.path_size kem R last
-  have hle := R.length_le
-  obtain ⟨hops, hh⟩ : ∃ hops, hops = RSOR.path kem R last := ⟨_, rfl⟩
-  obtain ⟨seeds, hs⟩ : ∃ seeds, seeds = d.1.toArray.extract 0 hops.size := ⟨_, rfl⟩
-  obtain ⟨filler, hf⟩ : ∃ filler, filler = (ofVector d.2).extract 0
-      ((geom.nrHops - hops.size) * geom.perHopRoutingInfoLength) := ⟨_, rfl⟩
-  have hsz : hops.size = R.hops.length := by rw [hh]; exact hn
-  have hss : seeds.size = hops.size := by rw [hs]; simp; omega
-  have henc : ∀ i, i < hops.size → ∃ ct ss,
-      kemEncap kem (hops[i]!).publicKey (seeds[i]!) = .ok (ct, ss) := fun i hi => by
-    rw [hh, RSOR.path_getElem! kem R last i (by omega)]
-    exact kemEncap_key kem _ _
+/-- **A packet builds** when its sizes are right, every encapsulation succeeds and every
+routing fragment builds. -/
+theorem newKEMPacket_builds (seeds : Array (Vector UInt8 32)) (filler : ByteArray)
+    (hops : Array PathHop) (payload : ByteArray) (hpos : hops.size ≠ 0)
+    (hle : hops.size ≤ geom.nrHops) (hss : seeds.size = hops.size)
+    (hfs : geom.nrHops > hops.size →
+      filler.size = (geom.nrHops - hops.size) * geom.perHopRoutingInfoLength)
+    (hp : payload.size = geom.forwardPayloadLength)
+    (henc : ∀ i, i < hops.size → ∃ ct ss,
+      kemEncap kem (hops[i]!).publicKey (seeds[i]!) = .ok (ct, ss))
+    (hfrag : ∀ i, i < hops.size → ∀ ke mac,
+      ∃ f, kemRiFragment kem geom hops ke mac hops.size i = .ok f) :
+    ∃ pkt, newKEMPacket kem cipher macS kdfS streamS geom seeds filler hops payload = .ok pkt := by
   -- the ciphertexts and keys of the hops' encapsulations
   obtain ⟨E, hE⟩ : ∃ E : ℕ → ByteArray × ByteArray, E = fun i =>
       match kemEncap kem (hops[i]!).publicKey (seeds[i]!) with
@@ -147,37 +137,50 @@ theorem layer_zero_builds (hvalid : geom.ValidForKEM kem)
       simp [hE, h2]
     · rw [getElem!_pos _ _ (by simpa using hi)]
       simp [hE, h2]
-  have hb : (geom.nrHops - hops.size) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength := by
-    rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
-    exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
   have hcreate := createKEMHeader_eq_createKEMHeaderFrom kem macS kdfS streamS geom seeds filler
     hops (Array.ofFn fun i : Fin hops.size => (E i).1) (Array.ofFn fun i : Fin hops.size =>
         deriveHopKeys kdfS (E i).2)
-    (by omega) (by omega) hss
-    (fun _ => by rw [hf, ByteArray.size_extract, Util.Bytes.size_ofVector]; omega)
-    (by simp) (by simp) hkc
+    hpos hle hss hfs (by simp) (by simp) hkc
   obtain ⟨st, hst⟩ := hdrTrace_builds kem geom
     (keysKs geom streamS (Array.ofFn fun i : Fin hops.size => deriveHopKeys kdfS (E i).2)) (keysTag
         macS (Array.ofFn fun i : Fin hops.size => deriveHopKeys kdfS (E i).2)) (Array.ofFn fun i :
         Fin hops.size => (E i).1) filler hops
-    (fun i hi mac => by
-      rw [hh]
-      exact path_fragment_builds kem hvalid R last hlast _ mac i (by omega))
-    hops.size le_rfl
+    (fun i hi mac => hfrag i hi _ mac) hops.size le_rfl
   have hF := hdrTrace_createKEMHeaderFrom kem geom macS streamS (Array.ofFn fun i : Fin hops.size
       => (E i).1) (Array.ofFn fun i : Fin hops.size => deriveHopKeys kdfS (E i).2) filler hops st
       hst
-  have hL : RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload 0
-      = newKEMPacket kem cipher macS kdfS streamS geom seeds filler hops payload := by
-    subst hf hs hh
-    unfold RSOR.layer
-    simp only [RSOR.fillerAt, Array.extract_size]
-  rw [hL]
   unfold newKEMPacket
   simp only [hp, ne_eq, not_true_eq_false, ↓reduceIte, hcreate, hF,
     Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
     Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind]
   exact ⟨_, rfl⟩
+
+variable {geom} in
+/-- **The first layer over a route builds**, for any draw and any payload of the right
+length. -/
+theorem layer_zero_builds (hvalid : geom.ValidForKEM kem)
+    (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (RSOR.Key kem)) (hR : 0 < R.hops.length)
+    (last : List RoutingCommand)
+    (hlast : (∃ r, last = [.recipient r]) ∨ ∃ id, last = [.surbReply id])
+    (d : RSOR.Draw geom) (payload : ByteArray) (hp : payload.size = geom.forwardPayloadLength) :
+    ∃ pkt, RSOR.layer kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload 0
+      = .ok pkt := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hn := RSOR.path_size kem R last
+  have hle := R.length_le
+  have hb : (geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength
+      ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
+    exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+  unfold RSOR.layer
+  simp only [RSOR.fillerAt, Array.extract_size]
+  refine newKEMPacket_builds kem geom cipher macS kdfS streamS _ _ _ payload (by omega)
+    (by omega) (by simp; omega)
+    (fun _ => by rw [ByteArray.size_extract, Util.Bytes.size_ofVector]; omega) hp
+    (fun i hi => ?_)
+    (fun i hi ke mac => path_fragment_builds kem hvalid R last hlast ke mac i (by omega))
+  rw [RSOR.path_getElem! kem R last i (by omega)]
+  exact kemEncap_key kem _ _
 
 variable {geom} in
 /-- **Reliable seeds are all a route needs to build.** -/

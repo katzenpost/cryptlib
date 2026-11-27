@@ -409,18 +409,19 @@ relay (`cutReq`). For either request:
 - The payload cipher and keystream steps take the game to a uniform keystream
   (`back_tagged_sub_stream_le`, `backStream_ideal_evalDistEq`, `backUGame`).
 
-From a uniform keystream the two games are compared (`backUGame_cut_le`). With the seeds in
+From a uniform keystream the two games are the same game (`backUGame_cut`). With the seeds in
 front of the relay swapped and the keystream shifted (`shiftStream_path`, as in TLU→), the
 world and the relays of the whole path are those of the cut path (`tailBackViewU_shift`,
 `tailBack_relays_shift`). The relay's answer under its own header does not matter: the patch
 hides what it forwards, and it replies to neither header, one being of a hop in the middle of a
 path and the other ending a reply's path. The comparison needs the reply's next layer to be
-built; the draws where it cannot are `tailCutBad`. When the honest relay is the last backward
-hop the two requests are the same (`cutReq_eq_midReq`).
+built, and it always is: a layer past a keyed hop builds for any draw and keystream
+(`layerPast_builds`). When the honest relay is the last backward hop the two requests are
+the same (`cutReq_eq_midReq`).
 
 `backSideCost` is one side: the bad draws, the replacement of the relay's keys, a MAC forgery,
 the one-block advantage against the payload cipher, the keystream generator's advantage, and
-the draws that are not good (twice). `tailBackCost` is two sides and `tailCutBad`.
+the draws that are not good (twice). `tailBackCost` is two sides.
 
 The statement is `tailIndistinguishable_le`: the advantage in STI↔ is at most `tailBackCost`
 plus `tailHalfCost`. Its events, as far as they are reduced to the KEM:
@@ -432,8 +433,6 @@ plus `tailHalfCost`. Its events, as far as they are reduced to the KEM:
 - a bad draw of the second half has a seed on the backward path that is not reliable
   (`prEvent_backBadK_le`): with reliable seeds every layer builds (`builds_of_reliable`,
   `Builds.layer`);
-- the draws where the reply's next layer cannot be built from a uniform keystream
-  (`tailCutBad`) are not reduced yet.
 
 The first layer over a route always builds (`layer_zero_builds`, in `KEMSphinxBuilds.lean`): a
 packet fails to build on a wrong size, a failed encapsulation, or commands that do not fit a
