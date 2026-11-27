@@ -997,6 +997,26 @@ theorem procWith_join (hvalid : geom.ValidForNIKE nike) (mac' : MAC) (t : HopKey
   obtain rfl : t = k := by injection hk
   rw [hpoff, e2, Util.Bytes.toVecN_ofVector]
 
+/-- On an onion, a relay that is handed its payload's decryption reads it at the onion's
+payload. -/
+theorem procD_join (hvalid : geom.ValidForNIKE nike) (mac' : MAC) (str : StreamCipher)
+    (t : HopKeys)
+    (Dd : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+      → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)) (o : Onion geom) :
+    procD nike mac' str geom (fun _ => .ok t) (fun _ => Dd) (join o)
+      = procD nike mac' str geom (fun _ => .ok t) (fun _ _ => Dd o.2) (join o) := by
+  obtain ⟨-, -, -, hhdr, -, -⟩ := id hvalid
+  have e2 : (join o).extract geom.headerLength (join o).size = Util.Bytes.ofVector o.2 := by
+    unfold join
+    simpa using Cryptlib.Util.Bytes.extract_append_right (Util.Bytes.ofVector o.1)
+      (Util.Bytes.ofVector o.2)
+  have hpoff : 2 + nike.publicKeySize + geom.routingInfoLength + macLength
+      = geom.headerLength := by
+    rw [hhdr]
+    rfl
+  refine procD_congr nike _ str geom _ _ _ (join o) fun k _ => ?_
+  rw [hpoff, e2, Util.Bytes.toVecN_ofVector]
+
 end OneHeader
 
 /-! ## The oracle of a relay that answers one header -/
