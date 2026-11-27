@@ -3022,6 +3022,63 @@ theorem tailIndistinguishable_le (names : Role → RSOR.Name)
     (add_le_add (tailSecondHalf_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names _)
         (tailFirstHalf_le kem cipher macS kdfS streamS geom hvalid hmactag h16 names _))
 
+/-! ### The bad draws of the first half, on the KEM alone -/
+
+omit cipher macS kdfS streamS geom hvalid hmactag h16 [SampleableType kem.Plaintext] in
+/-- **The chance that an encapsulation to a freshly generated key fails**: the seed is not
+reliable, or the encapsulation returns an error. -/
+noncomputable def encapFailure : ENNReal :=
+  Pr{let p ← (do
+      let k ← keygen kem
+      let s ← $ᵗ (Vector UInt8 32)
+      return (k, s))}[(fun p : (Key kem × kem.PrivateKey) × Vector UInt8 32 =>
+      ¬ (kem.Reliable (kem.stateFromSeed p.2)
+        ∧ ∃ ct ss, kemEncap kem (ofVector (kem.encodePublicKey p.1.1.1)) p.2 = Except.ok (ct, ss)))
+            p]
+
+omit [SampleableType kem.Plaintext] in
+set_option maxHeartbeats 2000000 in
+/-- **A bad draw of a step of the first half is a failed encapsulation to the honest relay.**
+The event reads the relay's key pair and the seed of its layer only. -/
+theorem prEvent_hybBad_eq (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge
+    hon
+      → ProbComp (Protocols.RSOR.World 𝒮)) (ρ : Role) (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) :
+    Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.tailPair w₀ w₁) ρ names _ (hybDraw geom)
+        A)}[hybBad kem cipher macS kdfS streamS geom hvalid hmactag h16 d]
+      = encapFailure kem := by
+  have hmap : (fun d : PropDraw kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.tailPair w₀ w₁) ρ names (RSOR.Randomness geom × RSOR.Draw geom) A => (d.k,
+      d.s))
+        <$> propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+            (Protocols.RSOR.tailPair w₀ w₁) ρ names _ (hybDraw geom) A
+      =ᵈ (do
+        let k ← keygen kem
+        let s ← $ᵗ (Vector UInt8 32)
+        return (k, s)) := by
+    unfold propDrawOf
+    simp only [map_bind, map_pure]
+    refine EvalDistEq.bind_right _ fun k => ?_
+    refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k₁ => EvalDistEq.bind_right _ fun k₂ =>
+      EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _)
+        (OracleComp.EvalDistEq.bind_const _ _)) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    exact OracleComp.EvalDistEq.bind_const _ _
+  unfold encapFailure
+  rw [← hmap.prEvent_eq (fun p : (Key kem × kem.PrivateKey) × Vector UInt8 32 =>
+      ¬ (kem.Reliable (kem.stateFromSeed p.2)
+        ∧ ∃ ct ss, kemEncap kem (ofVector (kem.encodePublicKey p.1.1.1)) p.2 = Except.ok (ct,
+            ss))), prEvent_map]
+  refine prEvent_congr_of_support _ _ _ fun d hd => ?_
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold propDrawOf at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, k₁, -, k₂, -, out, -, o, -, s, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  unfold hybBad
+  simp only [hk, true_and]
+
 end TailGame
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
