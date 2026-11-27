@@ -638,6 +638,50 @@ theorem hdrPeels_layerHdr (streamS : StreamCipher) (K : List HopKeys) (ks : ℕ 
       (nikeHdrTrace_isSome_of_le geom ks tag ge filler path (path.size - j) j
         (by rwa [show path.size - j + j = path.size by omega]))
 
+omit nike in
+/-- The padding after a later hop is that after hop `j`, folded through the keystreams of the
+hops between. -/
+theorem padAt_congr_from (ks ks' : ℕ → ByteArray) (j : ℕ) (h : ∀ i, j < i → ks i = ks' i)
+    (hp : padAt geom ks j = padAt geom ks' j) (m : ℕ) (hm : j ≤ m) :
+    padAt geom ks m = padAt geom ks' m := by
+  induction m, hm using Nat.le_induction with
+  | base => exact hp
+  | succ m hm ih => rw [padAt, padAt, ih, h (m + 1) (by omega)]
+
+omit nike in
+/-- **The header's steps for the hops after `j` read the hops up to `j` through the padding
+after hop `j` only.** -/
+theorem nikeHdrTrace_congr_tail (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ge ge' : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (j : ℕ)
+    (h : ∀ i, j < i → ks i = ks' i ∧ tag i = tag' i ∧ ge i = ge' i)
+    (hp : padAt geom ks j = padAt geom ks' j) (t : ℕ) (ht : t + j + 1 ≤ path.size) :
+    nikeHdrTrace geom ks tag ge filler path t = nikeHdrTrace geom ks' tag' ge' filler path t := by
+  induction t with
+  | zero => rfl
+  | succ t ih =>
+    rw [nikeHdrTrace, nikeHdrTrace, ih (by omega)]
+    simp only [(h (path.size - 1 - t) (by omega)).1, (h (path.size - 1 - t) (by omega)).2.1,
+      (h (path.size - 1 - t) (by omega)).2.2,
+      padAt_congr_from geom ks ks' j (fun i hi => (h i hi).1) hp (path.size - 1 - t - 1)
+        (by omega)]
+
+omit nike in
+/-- **The header of the layer after hop `j` reads the hops up to `j` through the padding after
+hop `j` only.** -/
+theorem layerHdr_congr_tail (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ge ge' : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (j : ℕ)
+    (hj : j + 1 < path.size)
+    (h : ∀ i, j < i → ks i = ks' i ∧ tag i = tag' i ∧ ge i = ge' i)
+    (hp : padAt geom ks j = padAt geom ks' j) :
+    layerHdr geom ks tag ge filler path (j + 1) = layerHdr geom ks' tag' ge' filler path (j + 1) :=
+        by
+  have hpad : ∀ k : ℕ → ByteArray, (if j + 1 > 0 then padAt geom k (j + 1 - 1)
+      else ByteArray.empty) = padAt geom k j := fun k => ite_eq_left (Nat.succ_pos j)
+  unfold layerHdr hdrMsg
+  rw [nikeHdrTrace_congr_tail geom ks ks' tag tag' ge ge' filler path j h hp
+    (path.size - 1 - (j + 1)) (by omega), hpad, hpad, hp]
+  simp only [(h (j + 1) (by omega)).1, (h (j + 1) (by omega)).2.1, (h (j + 1) (by omega)).2.2]
+
 end Layer
 
 /-! ## What a relay forwards -/

@@ -690,7 +690,10 @@ for it:
    layer before the last forwards the next layer's header and the payload decrypted
    (`procD_layerHdr`), from the bytes under a layer's tag (`hdrMsg_struct`, `peel_bytes`,
    `peel_cmdBuf`). Not proved: world 0's game written with it.
-3. The padding of the hops in front is absorbed by the tail of the uniform keystream, and the
+3. The header of the layer after a hop reads the hops up to it through the padding after
+   that hop only. Proved (`layerHdr_congr_tail`, `nikeHdrTrace_congr_tail`,
+   `padAt_congr_from`). Still to prove with it:
+   the padding of the hops in front is absorbed by the tail of the uniform keystream, and the
    relay's header on a path that goes on becomes its header on a path that ends at it by
    xoring a fixed mask into the keystream's head. Not proved. The byte lemmas for this exist
    in `KEMSphinxPad.lean` and `KEMSphinxTLUFinal.lean` and do not depend on the KEM; they are
