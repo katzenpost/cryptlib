@@ -871,6 +871,148 @@ theorem prgIdeal_fwd1_sub_keyGame_le (names : Role → Name) (A : (Protocols.RSO
         macS kdfS streamS geom hvalid hmactag h16) (fun z hz => nextRun_eq nike cipher macS kdfS
         streamS geom hvalid hmactag h16 names A z hz) (fun b => b = true)
 
+/-! ## The relay refuses the original's element -/
+
+/-- The draws of the key game for `nextAdv` before its second phase: the honest relays' keys,
+the adversary's first phase, and the original's forward secret. -/
+structure NextPre (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    where
+  k : RSOR.Key nike × nike.PrivateKey
+  keys : Role → RSOR.Key nike × nike.PrivateKey
+  c : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Challenge (honAt nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 .relay names k.1 keys)
+  st : A.State
+  log : Protocols.RSOR.Log 𝒮
+  d0 : Vector UInt8 nike.privateKeySize
+
+/-- The draw of `NextPre`. -/
+def nextPre (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) :
+    ProbComp (NextPre nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) := do
+  let k ← RSOR.keygen nike
+  let k₁ ← RSOR.keygen nike
+  let k₂ ← RSOR.keygen nike
+  let out ← (simulateQ (Protocols.RSOR.honest (honAt nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 .relay names k.1 (keysOf nike .relay k₁ k₂))
+      (fun h => if h = .relay then k.2 else (keysOf nike .relay k₁ k₂ h).2) {})
+    (A.choose (honAt nike cipher macS kdfS streamS geom hvalid hmactag h16 .relay names k.1 (keysOf
+        nike .relay k₁ k₂)))).run {}
+  let d0 ← $ᵗ (Vector UInt8 nike.privateKeySize)
+  return ⟨k, keysOf nike .relay k₁ k₂, out.1.1, out.1.2, out.2, d0⟩
+
+/-- The original's hop keys with the honest relay's replaced by the uniform `u`. -/
+def nextKeysI {names : Role → Name} {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (x : (KEMSphinx.KeyTuple × Vector UInt8 32) × NextPre nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names A) : List HopKeys :=
+  hopKeysWith nike kdfS ((nike.decodePrivateKey x.2.d0).getD default)
+    (RSOR.path nike x.2.c.req.fwd [.recipient x.2.c.req.receiver]) x.2.c.pos (keysOfDraw x.1)
+    (RSOR.path nike x.2.c.req.fwd [.recipient x.2.c.req.receiver]).size
+
+/-- The original's element at the honest relay. -/
+def nextElemI {names : Role → Name} {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (x : (KEMSphinx.KeyTuple × Vector UInt8 32) × NextPre nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names A) : ByteArray :=
+  groupElem nike ((nike.decodePrivateKey x.2.d0).getD default) (nextKeysI nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x).toArray x.2.c.pos
+
+/-- The second phase of `nextAdv` on the original's group element and the replaced keys. -/
+def nextRunI (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (x : (KEMSphinx.KeyTuple × Vector UInt8 32) × NextPre nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names A) : OracleComp procSpec Bool :=
+  (nextAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A).post
+    ((⟨x.2.keys, x.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        x.2.k.1), x.2.st, x.2.log)
+    (groupElem nike ((nike.decodePrivateKey x.2.d0).getD default) (nextKeysI nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x).toArray 0)
+    (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16 x)
+
+/-- The key game's other world for `nextAdv` with the relay answering the original's element by
+`hand`. -/
+def nextGame (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (hand : (KEMSphinx.KeyTuple × Vector UInt8 32) × NextPre nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names A → ByteArray → ProcResult) :
+    ProbComp Bool :=
+  Relay.gameHand
+    (do
+      let u ← $ᵗ (KEMSphinx.KeyTuple × Vector UInt8 32)
+      let p ← nextPre nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
+      return (u, p))
+    (fun x pkt => decide (pkt.extract 2 (2 + nike.publicKeySize) = nextElemI nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x))
+    (fun x => procWith nike cipher macS streamS geom (relayKeys nike kdfS x.2.k.2))
+    (nextRunI nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) hand
+
+set_option maxHeartbeats 4000000 in
+/-- **The key game's other world for `nextAdv` is a relay game**: the relay answers the
+original's element with the replaced keys. -/
+theorem keyGame_false_nextAdv (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) :
+    keyGame cipher macS kdfS streamS geom (nextAdv nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names A) false
+      = nextGame nike cipher macS kdfS streamS geom hvalid hmactag h16 names A (fun x => procWith
+          nike cipher macS streamS geom
+        (fun _ => .ok (nextKeysI nike cipher macS kdfS streamS geom hvalid hmactag h16
+            x).toArray[(x.2.c.pos : ℕ)]!)) := by
+  unfold keyGame nextGame Relay.gameHand nextPre
+  simp only [Bool.false_eq_true, ite_false, nextAdv_pre, bind_assoc, pure_bind]
+  simp only [RSOR.keygen, bind_assoc, pure_bind]
+  refine bind_congr fun u => bind_congr fun s => bind_congr fun s₁ => bind_congr fun s₂ =>
+    bind_congr fun out => bind_congr fun d0 => ?_
+  have hpos : (out.1.1.pos : ℕ) < out.1.1.req.fwd.hops.length := out.1.1.pos.isLt
+  have hsz := RSOR.path_size nike out.1.1.req.fwd [.recipient out.1.1.req.receiver]
+  have hkey : (out.1.1.req.fwd.hops[(out.1.1.pos : ℕ)]'hpos).key
+      = ⟨nike.derivePublicKey (nike.privateKeyFromSeed s), _, rfl⟩ :=
+    congrArg (·.key) out.1.1.relay
+  have hpk : ((RSOR.path nike out.1.1.req.fwd [.recipient out.1.1.req.receiver])[
+        (out.1.1.pos : ℕ)]!).publicKey
+      = Util.Bytes.ofVector (nike.encodePublicKey
+        (nike.derivePublicKey (nike.privateKeyFromSeed s))) := by
+    rw [RSOR.path_getElem! nike _ _ _ hpos]
+    exact congrArg (fun k : RSOR.Key nike => Util.Bytes.ofVector (nike.encodePublicKey k.1)) hkey
+  have hmod := modify_publicKey_self
+    (RSOR.path nike out.1.1.req.fwd [.recipient out.1.1.req.receiver]) out.1.1.pos
+    (Util.Bytes.ofVector (nike.encodePublicKey (nike.derivePublicKey (nike.privateKeyFromSeed s))))
+    (by rw [hsz]; exact hpos) hpk
+  have hlt : (out.1.1.pos : ℕ)
+      < (RSOR.path nike out.1.1.req.fwd [.recipient out.1.1.req.receiver]).size := by
+    rw [hsz]; exact hpos
+  simp only [forwardPlace, fwd0, hmod]
+  refine (ite_eq_left hlt).trans ?_
+  have hI : ∀ (sk : nike.PrivateKey) (a : ByteArray) (t : HopKeys),
+      procImplK nike cipher macS kdfS streamS geom sk a t
+        = relayImpl (fun pkt => if decide (pkt.extract 2 (2 + nike.publicKeySize) = a) = true
+          then procWith nike cipher macS streamS geom (fun _ => .ok t) pkt
+          else procWith nike cipher macS streamS geom (relayKeys nike kdfS sk) pkt) :=
+    fun sk a t => congrArg relayImpl (funext fun pkt => by
+      rw [procWith_keysExcept]
+      by_cases he : pkt.extract 2 (2 + nike.publicKeySize) = a
+      · exact (ite_eq_left he).trans (ite_eq_left (decide_eq_true he)).symm
+      · exact (ite_eq_right he).trans (ite_eq_right fun h => he (of_decide_eq_true h)).symm)
+  rw [hI]
+  rfl
+
+/-- **Step 3 of the hidden layer.** In the key game's other world for `nextAdv` the relay may
+refuse the original's element, at the cost of the chance that the adversary sends a packet
+carrying it. -/
+theorem keyGame_false_nextAdv_sub_le (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable
+    (S := 𝒮)).Adversary) :
+    |(Pr{let b ← (keyGame cipher macS kdfS streamS geom
+          (nextAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) false)}[b =
+              true]).toReal
+      - (Pr{let b ← (nextGame nike cipher macS kdfS streamS geom hvalid hmactag h16 names A fun _ _
+          => none)}[b = true]).toReal|
+    ≤ (Pr{let b ← (Relay.gameChal
+        (do
+          let u ← $ᵗ (KEMSphinx.KeyTuple × Vector UInt8 32)
+          let p ← nextPre nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
+          return (u, p))
+        (fun x pkt => decide (pkt.extract 2 (2 + nike.publicKeySize) = nextElemI nike cipher macS
+            kdfS streamS geom hvalid hmactag h16 x))
+        (fun x => procWith nike cipher macS streamS geom (relayKeys nike kdfS x.2.k.2))
+        (nextRunI nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) fun _ _ =>
+            none)}[b = true]).toReal := by
+  rw [keyGame_false_nextAdv]
+  exact Relay.gameHand_sub_le _ _ _ _ _ _
+
 end ForwardNext
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
