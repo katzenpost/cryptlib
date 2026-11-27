@@ -378,7 +378,7 @@ the randomness with `s` at that hop. -/
 theorem tailViewU_real (done : Role → Bool) (ρ : Role) {hon : Protocols.RSOR.Honest 𝒮}
     (c : Protocols.RSOR.TailChallenge hon) (o : RSOR.Randomness geom × RSOR.Draw geom)
     (s : Vector UInt8 32) (ct ss : ByteArray)
-    (henc : kemEncap kem
+    (henc : tailRho kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c → kemEncap kem
       ((RSOR.path kem c.req.fwd [.recipient c.req.receiver])[c.pos.val - 1]!).publicKey s
       = .ok (ct, ss)) :
     tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 done ρ c o (ksOf streamS geom
@@ -393,6 +393,7 @@ theorem tailViewU_real (done : Role → Bool) (ρ : Role) {hon : Protocols.RSOR.
   · simp only [hd, ite_false]
     by_cases hρ : tailRho kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c
     · obtain ⟨k, hk, -⟩ := id hρ
+      have henc := henc hρ
       have hlt : c.pos.val < c.req.fwd.hops.length := c.pos.isLt
       have hle := c.req.fwd.length_le
       have hsd : tailSeedFor kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ c o.1 s =
@@ -416,6 +417,126 @@ theorem tailViewU_real (done : Role → Bool) (ρ : Role) {hon : Protocols.RSOR.
       rfl
     · unfold tailSeedFor
       simp only [hρ, ite_false]
+
+/-- The draws of a hybrid world. -/
+def hybDraw : ProbComp (RSOR.Randomness geom × RSOR.Draw geom) := do
+  let r ← $ᵗ (RSOR.Randomness geom)
+  let d ← $ᵗ (RSOR.Draw geom)
+  return (r, d)
+
+set_option maxHeartbeats 2000000 in
+/-- **A hybrid world as its draws**, with the seed of the hop before the shown layer drawn on
+its own when that hop is the honest relay with the role `ρ`, and then the adversary's guess
+against the honest relays. -/
+theorem tail_play_evalDistEq (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} →
+    Protocols.RSOR.TailChallenge hon
+      → ProbComp (Protocols.RSOR.World 𝒮)) (ρ : Role) (dn : Role → Bool) (b : Bool)
+    (hw : ∀ {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon),
+      (Protocols.RSOR.tailPair w₀ w₁).world c b = tailHyb kem cipher macS kdfS streamS geom hvalid
+          hmactag h16 dn c)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) :
+    Protocols.RSOR.Property.play names A b
+      =ᵈ propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.tailPair
+          w₀ w₁) ρ names _ (hybDraw geom) A >>= fun d =>
+        (simulateQ (Protocols.RSOR.honest
+            (honAt kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ names d.k.1 d.keys)
+            (fun h => if h = ρ then d.k.2 else (d.keys h).2)
+            (tailHybWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 dn d.c
+              (tailSeedFor kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ d.c d.o.1 d.s)
+                  d.o.2).patch)
+          (A.guess d.st (tailHybWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 dn d.c
+            (tailSeedFor kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ d.c d.o.1 d.s)
+                d.o.2).onion)).run' d.log := by
+  refine (play_evalDistEq_honAt kem cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.tailPair w₀ w₁) ρ names A b).trans ?_
+  unfold Protocols.RSOR.Property.playFrom propDrawOf
+  simp only [bind_assoc, pure_bind]
+  refine EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+    EvalDistEq.bind_right _ fun k₂ => EvalDistEq.bind_right _ fun out => ?_
+  have hcong : ∀ (m m' : ProbComp (Protocols.RSOR.World 𝒮))
+      (F : Protocols.RSOR.World 𝒮 → ProbComp Bool), m = m' → m >>= F =ᵈ m' >>= F :=
+    fun _ _ _ h => h ▸ EvalDistEq.rfl
+  refine (hcong _ _ _ (hw out.1.1)).trans ?_
+  unfold tailHyb
+  simp only [hybDraw, bind_assoc, pure_bind]
+  refine EvalDistEq.symm ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun r =>
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact evalDistEq_tailSeedFor kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ out.1.1 fun r
+      =>
+    $ᵗ (RSOR.Draw geom) >>= fun d =>
+      (simulateQ (Protocols.RSOR.honest
+          (honAt kem cipher macS kdfS streamS geom hvalid hmactag h16 ρ names k.1 (keysOf kem ρ k₁
+              k₂))
+          (fun h => if h = ρ then k.2 else (keysOf kem ρ k₁ k₂ h).2)
+          (tailHybWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 dn out.1.1 r d).patch)
+        (A.guess out.1.2 (tailHybWorld kem cipher macS kdfS streamS geom hvalid hmactag h16 dn
+            out.1.1 r d).onion)).run' out.2
+
+/-- The draws on which a hybrid world is not the keyed game with the real keys: the relay's
+key pair is not a key pair, or the encapsulation to it fails or cannot be undone. -/
+def hybBad {w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} → Protocols.RSOR.TailChallenge hon
+      → ProbComp (Protocols.RSOR.World 𝒮)} {ρ : Role} {names : Role → RSOR.Name}
+    {A : (Protocols.RSOR.tailPair w₀ w₁).Adversary}
+    (d : PropDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.tailPair w₀
+        w₁) ρ names (RSOR.Randomness geom × RSOR.Draw geom) A) : Prop :=
+  ¬ (d.k.1.1 = kem.derivePublicKey d.k.2 ∧ kem.Reliable (kem.stateFromSeed d.s)
+    ∧ ∃ ct ss, kemEncap kem (ofVector (kem.encodePublicKey d.k.1.1)) d.s = .ok (ct, ss))
+
+variable [SampleableType kem.Plaintext]
+
+set_option maxHeartbeats 2000000 in
+/-- **A hybrid world is the keyed game with the real keys, off the bad draws.** -/
+theorem tail_sub_keyedReal_le (w₀ w₁ : {hon : Protocols.RSOR.Honest 𝒮} →
+    Protocols.RSOR.TailChallenge hon
+      → ProbComp (Protocols.RSOR.World 𝒮)) (ρ : Role) (dn : Role → Bool) (b : Bool)
+    (hw : ∀ {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon),
+      (Protocols.RSOR.tailPair w₀ w₁).world c b = tailHyb kem cipher macS kdfS streamS geom hvalid
+          hmactag h16 dn c)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.tailPair w₀ w₁).Adversary) :
+    |(Pr{let x ← Protocols.RSOR.Property.play names A b}[x = true]).toReal
+      - (Pr{let x ← (keyedReal cipher macS kdfS streamS geom
+          (propAdvOf kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.tailPair
+              w₀ w₁) ρ names _ (hybDraw geom)
+            (fun ch o _ t => tailViewU kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ
+                ch.c o (ksOf streamS geom t)) A))}[x = true]).toReal|
+    ≤ (Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.tailPair w₀ w₁) ρ names _ (hybDraw geom)
+        A)}[hybBad kem cipher macS kdfS streamS geom hvalid hmactag h16 d]).toReal := by
+  rw [(tail_play_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16 w₀ w₁ ρ dn b hw
+      names A).prEvent_eq (fun x => x = true),
+    (keyedReal_propAdvOf_evalDistEq kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.tailPair w₀ w₁) ρ names _ _ _ A).prEvent_eq
+      (fun x => x = true)]
+  refine prEvent_bind_toReal_sub_le_of_bad _ _ _ (hybBad kem cipher macS kdfS streamS geom hvalid
+      hmactag h16) (fun d hd => ?_)
+    (fun x => x = true)
+  obtain ⟨hpk, hrel, ct, ss, henc⟩ := Classical.not_not.mp hd
+  obtain ⟨rfl, rfl⟩ := kemEncap_encapOf kem d.k.1.1 d.s ct ss henc
+  have hdec : decapOf kem d.k.2 (encapOf kem d.k.1.1 d.s).1
+      = some (encapOf kem d.k.1.1 d.s).2 := by
+    have h := decapOf_encapOf kem d.k.2 d.s hrel _ _ (hpk ▸ henc)
+    rwa [← hpk] at h
+  have hview := tailViewU_real kem cipher macS kdfS streamS geom hvalid hmactag h16 dn ρ d.c d.o
+      d.s _ _ (fun hρ => by
+    obtain ⟨k, hk, hh⟩ := hρ
+    have hklt : k < d.c.req.fwd.hops.length := by
+      have := d.c.pos.isLt
+      omega
+    have h1 : d.c.req.fwd.hops[k]'hklt = honAt kem cipher macS kdfS streamS geom hvalid hmactag h16
+        ρ names d.k.1 d.keys ρ :=
+      Option.some.inj ((List.getElem?_eq_getElem hklt).symm.trans hh)
+    have hpub : ((RSOR.path kem d.c.req.fwd [.recipient d.c.req.receiver])[k]!).publicKey
+        = ofVector (kem.encodePublicKey d.k.1.1) := by
+      rw [RSOR.path_getElem! kem _ _ _ hklt]
+      show ofVector (kem.encodePublicKey (d.c.req.fwd.hops[k]'hklt).key.1) = _
+      rw [h1]
+      simp [honAt]
+    rw [← hk, Nat.add_sub_cancel, hpub]
+    exact henc)
+  rw [propAdv_post kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.tailPair w₀
+      w₁) ρ names _ _ _ A d.k d.keys _ _ hdec d.st d.log _, ← hview]
+  rfl
 
 end TailGame
 
