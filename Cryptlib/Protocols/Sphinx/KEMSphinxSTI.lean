@@ -5,6 +5,53 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Cryptlib.Protocols.Sphinx.KEMSphinxSLURelay
 
+namespace Cryptlib.Protocols.RSOR
+
+open OracleComp OracleSpec
+
+variable {S : Scheme}
+
+/-- STI↔ from its world 0 to a world in the middle. -/
+def tailTo (mid : {hon : Honest S} → TailChallenge hon → ProbComp (World S)) : Property S where
+  Challenge := TailChallenge
+  world c b := match b with
+    | false => (tailIndistinguishable (S := S)).world c false
+    | true => mid c
+
+/-- STI↔ from a world in the middle to its world 1. -/
+def tailFrom (mid : {hon : Honest S} → TailChallenge hon → ProbComp (World S)) : Property S where
+  Challenge := TailChallenge
+  world c b := match b with
+    | false => mid c
+    | true => (tailIndistinguishable (S := S)).world c true
+
+/-- An adversary of STI↔, against the game up to the world in the middle. -/
+def tailTo.cast (mid : {hon : Honest S} → TailChallenge hon → ProbComp (World S))
+    (A : (tailIndistinguishable (S := S)).Adversary) : (tailTo mid).Adversary :=
+  ⟨A.State, A.choose, A.guess⟩
+
+/-- An adversary of STI↔, against the game from the world in the middle. -/
+def tailFrom.cast (mid : {hon : Honest S} → TailChallenge hon → ProbComp (World S))
+    (A : (tailIndistinguishable (S := S)).Adversary) : (tailFrom mid).Adversary :=
+  ⟨A.State, A.choose, A.guess⟩
+
+/-- **STI↔ through a world in the middle.** -/
+theorem tailIndistinguishable_advantage_le
+    (mid : {hon : Honest S} → TailChallenge hon → ProbComp (World S)) (names : Role → S.Name)
+    (A : (tailIndistinguishable (S := S)).Adversary) :
+    ((tailIndistinguishable (S := S)).advantage names A).toReal
+      ≤ ((tailFrom mid).advantage names (tailFrom.cast mid A)).toReal
+        + ((tailTo mid).advantage names (tailTo.cast mid A)).toReal := by
+  rw [Property.advantage_toReal, Property.advantage_toReal, Property.advantage_toReal]
+  have e1 : Property.play names (tailFrom.cast mid A) true = Property.play names A true := rfl
+  have e2 : Property.play names (tailFrom.cast mid A) false
+      = Property.play names (tailTo.cast mid A) true := rfl
+  have e3 : Property.play names (tailTo.cast mid A) false = Property.play names A false := rfl
+  rw [e1, e2, e3]
+  exact abs_sub_le _ _ _
+
+end Cryptlib.Protocols.RSOR
+
 namespace Cryptlib.Protocols.Sphinx.KEMSphinx
 
 open OracleComp OracleSpec ENNReal
@@ -26,7 +73,9 @@ open Cryptlib.Util.Bytes (ofVector)
 
 World 0 of STI↔ shows a layer of the adversary's onion from a forward position on; world 1
 shows the first layer of an onion over the rest of the forward path. A layer from a position on
-is a layer over the rest of the path, with the filler there as the rest's padding. -/
+is a layer over the rest of the path, with the filler there as the rest's padding.
+
+The two worlds are compared through a world in the middle (`tailTo`, `tailFrom`). -/
 
 section RestOfForward
 
@@ -75,5 +124,33 @@ theorem layer_drop (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem))
     path_extract_drop kem geom R last j hj]
 
 end RestOfForward
+
+section TailGame
+
+variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+  (geom : Geometry)
+  (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+  (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+
+local notation "𝒮" => sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16
+
+/-- **The world in the middle of STI↔**: the first layer of an onion over the rest of the
+forward path, with a forward draw of its own, around the payload of the adversary's onion. The
+payload still carries the SURB over the whole backward path, and the honest backward relay
+answers nothing to the reply's layer, as in world 0. -/
+def tailMid {hon : Protocols.RSOR.Honest 𝒮} (c : Protocols.RSOR.TailChallenge hon) :
+    ProbComp (Protocols.RSOR.World 𝒮) := do
+  let r ← $ᵗ (RSOR.Randomness geom)
+  let d ← $ᵗ (RSOR.Draw geom)
+  return {
+    onion :=
+      (match RSOR.layer kem cipher macS kdfS streamS geom
+          (RSOR.path kem (c.req.fwd.drop c.pos) [.recipient c.req.receiver]) d
+          (RSOR.body kem macS kdfS streamS geom c.req r) 0 with
+      | .ok pkt => RSOR.split geom pkt
+      | .error _ => (default : RSOR.Onion geom))
+    patch := (Protocols.RSOR.tailWorld (S := 𝒮) c.req r c.pos c.back).patch }
+
+end TailGame
 
 end Cryptlib.Protocols.Sphinx.KEMSphinx
