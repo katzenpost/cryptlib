@@ -203,4 +203,66 @@ theorem relayImpl_comp_first (ans : ByteArray → ProcResult) (chal : ByteArray 
     · simp
     · rw [QueryImpl.simulateQ_add_liftM_query_right]
 
+/-! ## Changing a relay's answers to some packets -/
+
+section Hand
+
+variable {X : Type} (mx : ProbComp X) (chal : X → ByteArray → Bool)
+  (own : X → ByteArray → ProcResult) (run : X → OracleComp procSpec Bool)
+
+/-- A game whose relay answers the packets `chal` picks by `hand`. -/
+def gameHand (hand : X → ByteArray → ProcResult) : ProbComp Bool := do
+  let x ← mx
+  simulateQ (relayImpl (ansOf chal own x (hand x))) (run x)
+
+/-- Whether the adversary sent the relay a packet that `chal` picks, in the game with `hand`. -/
+def gameChal (hand : X → ByteArray → ProcResult) : ProbComp Bool := do
+  let x ← mx
+  let z ← (simulateQ (Util.UntilBad.logged (relayImpl (ansOf chal own x (hand x))))
+    (run x)).run []
+  return z.2.any fun t => match t with
+    | .inl _ => false
+    | .inr pkt => chal x pkt
+
+/-- **Changing a relay's answers to the packets `chal` picks** changes the game by at most the
+chance that the adversary sends such a packet, counted in the second game. -/
+theorem gameHand_sub_le (hand₁ hand₂ : X → ByteArray → ProcResult) :
+    |(Pr{let b ← gameHand mx chal own run hand₁}[b = true]).toReal
+      - (Pr{let b ← gameHand mx chal own run hand₂}[b = true]).toReal|
+    ≤ (Pr{let b ← gameChal mx chal own run hand₂}[b = true]).toReal := by
+  have hstep := fun (x : X) =>
+    Util.UntilBad.prEvent_le_add_bad (relayImpl (ansOf chal own x (hand₁ x)))
+      (relayImpl (ansOf chal own x (hand₂ x)))
+      (fun t => match t with
+        | .inl _ => false
+        | .inr pkt => chal x pkt)
+      (fun t ht => by
+        cases t with
+        | inl t => rfl
+        | inr pkt =>
+          refine congrArg (pure : ProcResult → ProbComp ProcResult) ?_
+          unfold ansOf
+          have hc : ¬ chal x pkt = true := by simpa using ht
+          simp only [hc]
+          rfl)
+      (run x) (· = true)
+  have h12 : Pr{let b ← gameHand mx chal own run hand₁}[b = true]
+      ≤ Pr{let b ← gameHand mx chal own run hand₂}[b = true]
+        + Pr{let b ← gameChal mx chal own run hand₂}[b = true] := by
+    refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun x => ?_
+    simpa only [bind_pure_comp, prEvent_map] using (hstep x).1
+  have h21 : Pr{let b ← gameHand mx chal own run hand₂}[b = true]
+      ≤ Pr{let b ← gameHand mx chal own run hand₁}[b = true]
+        + Pr{let b ← gameChal mx chal own run hand₂}[b = true] := by
+    refine Util.UntilBad.prEvent_bind_le_add _ _ _ _ _ _ fun x => ?_
+    simpa only [bind_pure_comp, prEvent_map] using (hstep x).2
+  have r12 := ENNReal.toReal_mono
+    (ENNReal.add_ne_top.mpr ⟨prEvent_ne_top _, prEvent_ne_top _⟩) h12
+  have r21 := ENNReal.toReal_mono
+    (ENNReal.add_ne_top.mpr ⟨prEvent_ne_top _, prEvent_ne_top _⟩) h21
+  rw [ENNReal.toReal_add (prEvent_ne_top _) (prEvent_ne_top _)] at r12 r21
+  exact abs_sub_le_iff.2 ⟨by linarith, by linarith⟩
+
+end Hand
+
 end Cryptlib.Protocols.Sphinx.Relay
