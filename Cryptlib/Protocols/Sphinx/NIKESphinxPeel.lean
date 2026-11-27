@@ -116,27 +116,29 @@ theorem encTrace_keysEnc_size (K : Array HopKeys) (n : ℕ) (init : ByteArray) (
     rw [encTrace_succ]
     exact (cipher.encrypt_size _ _ _).trans ih
 
-/-- **A layer of a packet is its header peeled, and the block the hops after it left.** Each
-hop's decryption undoes its encryption. -/
-theorem peels_append (ks : List HopKeys) (n : ℕ) (init H : ByteArray)
-    (hH : H.size = 2 + nike.publicKeySize + geom.routingInfoLength + macLength)
-    (h16 : 16 ≤ init.size) (i : ℕ) (hin : i ≤ n) (hik : i ≤ ks.length) :
+/-- **A layer of a packet is its header peeled, and the block the hops after it left**, for
+any encryptions that are the keys' at the hops peeled. Each such hop's decryption undoes its
+encryption. -/
+theorem peels_enc (ks : List HopKeys) (enc : ℕ → ByteArray → ByteArray) (n : ℕ)
+    (init H : ByteArray)
+    (hH : H.size = 2 + nike.publicKeySize + geom.routingInfoLength + macLength) (i : ℕ)
+    (hin : i ≤ n) (hik : i ≤ ks.length) (henc : ∀ m < i, enc m = keysEnc cipher ks.toArray m)
+    (h16 : ∀ m < i, 16 ≤ (encTrace enc n init (n - (m + 1))).size) :
     (hdrPeels nike streamS geom ks i H).size
         = 2 + nike.publicKeySize + geom.routingInfoLength + macLength ∧
-      peels nike cipher streamS geom ks i (H ++ encTrace (keysEnc cipher ks.toArray) n init n)
-        = hdrPeels nike streamS geom ks i H
-          ++ encTrace (keysEnc cipher ks.toArray) n init (n - i) := by
+      peels nike cipher streamS geom ks i (H ++ encTrace enc n init n)
+        = hdrPeels nike streamS geom ks i H ++ encTrace enc n init (n - i) := by
   induction i with
   | zero => exact ⟨hH, rfl⟩
   | succ i ih =>
-    obtain ⟨ihs, ihp⟩ := ih (by omega) (by omega)
+    obtain ⟨ihs, ihp⟩ := ih (by omega) (by omega) (fun m hm => henc m (by omega))
+      (fun m hm => h16 m (by omega))
     have hi : i < ks.length := hik
     have hk : ks.toArray[i]! = ks[i] :=
       toArray_getElem!_of_getElem? _ _ _ (List.getElem?_eq_getElem hi)
-    have hs : peels nike cipher streamS geom ks (i + 1)
-          (H ++ encTrace (keysEnc cipher ks.toArray) n init n)
+    have hs : peels nike cipher streamS geom ks (i + 1) (H ++ encTrace enc n init n)
         = RSOR.peel nike cipher streamS geom ks[i] (peels nike cipher streamS geom ks i
-          (H ++ encTrace (keysEnc cipher ks.toArray) n init n)) := by
+          (H ++ encTrace enc n init n)) := by
       unfold peels
       rw [List.take_succ_eq_append_getElem hi, List.foldl_append]
       rfl
@@ -148,18 +150,30 @@ theorem peels_append (ks : List HopKeys) (n : ℕ) (init H : ByteArray)
       unfold hdrPeels
       rw [List.take_succ_eq_append_getElem hi, List.foldl_append]
       rfl
-    have he : encTrace (keysEnc cipher ks.toArray) n init (n - i)
+    have he : encTrace enc n init (n - i)
         = cipher.encrypt ks[i].payloadEncryption.toArray (ofVector ks[i].headerEncryptionIV)
-          (encTrace (keysEnc cipher ks.toArray) n init (n - (i + 1))) := by
+          (encTrace enc n init (n - (i + 1))) := by
       rw [show n - i = n - (i + 1) + 1 by omega, encTrace_succ,
-        show n - 1 - (n - (i + 1)) = i by omega]
+        show n - 1 - (n - (i + 1)) = i by omega, henc i (Nat.lt_succ_self i)]
       unfold keysEnc
       rw [hk]
-    have hsz := encTrace_keysEnc_size cipher ks.toArray n init (n - (i + 1))
+    have hsz := h16 i (Nat.lt_succ_self i)
     refine ⟨by rw [hh]; exact peelHdr_size nike geom _ _ _ ihs, ?_⟩
     rw [hs, ihp, he, peel_append nike cipher streamS geom _ _ _ ihs
-      (by rw [cipher.encrypt_size, hsz]; omega), cipher.roundTrip _ _ _ (by rw [hsz]; exact h16),
-      hh]
+      (by rw [cipher.encrypt_size]; omega), cipher.roundTrip _ _ _ hsz, hh]
+
+/-- The same for the keys' own encryptions. -/
+theorem peels_append (ks : List HopKeys) (n : ℕ) (init H : ByteArray)
+    (hH : H.size = 2 + nike.publicKeySize + geom.routingInfoLength + macLength)
+    (h16 : 16 ≤ init.size) (i : ℕ) (hin : i ≤ n) (hik : i ≤ ks.length) :
+    (hdrPeels nike streamS geom ks i H).size
+        = 2 + nike.publicKeySize + geom.routingInfoLength + macLength ∧
+      peels nike cipher streamS geom ks i (H ++ encTrace (keysEnc cipher ks.toArray) n init n)
+        = hdrPeels nike streamS geom ks i H
+          ++ encTrace (keysEnc cipher ks.toArray) n init (n - i) :=
+  peels_enc nike cipher streamS geom ks _ n init H hH i hin hik (fun _ _ => rfl) fun m _ => by
+    rw [encTrace_keysEnc_size]
+    exact h16
 
 end Peel
 
@@ -339,6 +353,24 @@ theorem nikeHdrTrace_size (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → 
           (ih s0 h0).1, show geom.nrHops - path.size + (j + 1) = geom.nrHops - path.size + j + 1
             from rfl, Nat.succ_mul]
         omega
+
+/-- **A header that builds has a header's length**, when the tags have a tag's length and the
+first element a key's. -/
+theorem hdr_size (pk : ℕ) (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength) (hrouting :
+        geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hn : path.size ≤ geom.nrHops) (hpos : 0 < path.size)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (htag : ∀ i m, (tag i m).size = macLength) (hge : (ge 0).size = pk)
+    (s : ByteArray × ByteArray)
+    (h : nikeHdrTrace geom ks tag ge filler path path.size = some s) :
+    (v0AD ++ ge 0 ++ s.1 ++ s.2).size = 2 + pk + geom.routingInfoLength + macLength := by
+  obtain ⟨h1, h2⟩ := nikeHdrTrace_size geom ks tag ge filler path hnnh hle hfill htag _ s h
+  have hv : v0AD.size = 2 := rfl
+  rw [ByteArray.size_append, ByteArray.size_append, ByteArray.size_append, hv, hge, h1, h2 hpos,
+    show geom.nrHops - path.size + path.size = geom.nrHops by omega, hrouting, Nat.mul_comm]
 
 end HeaderSize
 
@@ -818,6 +850,18 @@ theorem hdrMsg_last (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteAr
   rw [show path.size - 1 - i = 0 by omega, nikeHdrTrace]
   dsimp only
   rw [hF]
+
+omit nike in
+/-- The payload after hop `j` returned the block `e` has `e`'s length, when the hops in front
+keep lengths. -/
+theorem encTrace_size_const (enc : ℕ → ByteArray → ByteArray) (n : ℕ) (init e : ByteArray)
+    (j : ℕ) (hj : j < n) (he : ∀ b, enc j b = e)
+    (hsz : ∀ m < j, ∀ b, (enc m b).size = b.size) (t : ℕ) (ht : n - j ≤ t) (ht' : t ≤ n) :
+    (encTrace enc n init t).size = e.size := by
+  induction t, ht using Nat.le_induction with
+  | base => rw [encTrace_const enc n init e j hj he]
+  | succ t ht ih =>
+    rw [encTrace_succ, hsz (n - 1 - t) (by omega), ih (by omega)]
 
 end Layer
 

@@ -720,8 +720,10 @@ for it:
      hop's blinding factor uniform. In a prime-order group with uniform scalars the advantage
      is zero; that is not proved for any NIKE here. No axiom is added. The tail of a path
      with replaced keys is `tailOf` (`tailOf_hopKeysWith`), and the next layer is a function
-     of the later hops and the padding (`nextOfFn`, `nextOfFn_congr`,
-     `nextOfStream_eq_nextOfFn`). The reduction to the game is not written.
+     of the later hops and the padding (`layerFn`, `layerFn_congr`,
+     `nextOfStream_eq_layerFn`). The onion shown, at any layer up to the relay's, is the same
+     function (`onionOfStream_eq_layerFn`, from `peels_enc`, `hdr_size`,
+     `encTrace_size_const`). The reduction to the game is not written.
    - World 1 after its hidden-layer steps is the same game under a relabelling of its draws.
    How the pieces fit, for whoever continues this:
    - Both final games are `strRunP`: world 0 on the original with the empty patch, world 1 on
