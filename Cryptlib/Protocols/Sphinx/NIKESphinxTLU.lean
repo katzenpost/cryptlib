@@ -187,6 +187,96 @@ theorem onionOfKeys_tag (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike
   rw [hks, henc, hge, htag, nikePktFn_tagAt geom _ _ _ _ _ _ _ j hjp
     (fun m => Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector km) m))]
 
+/-- The first layer of `q`'s onion, with the tag of hop `j` and its encryption of the payload
+given. -/
+def onionOfEnc (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
+    (ks : List HopKeys) (j : ℕ) (tag e : ByteArray) : Onion geom :=
+  match nikePktFn geom (keysKs geom streamS ks.toArray)
+      (Function.update (keysTag macS ks.toArray) j fun _ => tag)
+      (Function.update (keysEnc cipher ks.toArray) j fun _ => e) (blindElem nike a ks.toArray)
+      (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient q.receiver]) r.1) (RSOR.path nike
+          q.fwd [.recipient q.receiver])
+      (RSOR.body nike macS kdfS streamS geom q r) with
+  | some pkt => split geom pkt
+  | none => default
+
+/-- The block of `q`'s onion that hop `j` encrypts: the payload after the hops behind it. -/
+def onionBlock (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (ks : List HopKeys)
+    (j : ℕ) : ByteArray :=
+  encTrace (keysEnc cipher ks.toArray) (RSOR.path nike q.fwd [.recipient q.receiver]).size
+    ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray)
+      ++ RSOR.body nike macS kdfS streamS geom q r) ((RSOR.path nike q.fwd [.recipient
+          q.receiver]).size - 1 - j)
+
+/-- **The onion uses hop `j`'s payload key for one encryption**, of `onionBlock`. -/
+theorem onionOfTag_enc (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike geom)
+    (a : ByteArray) (ks : List HopKeys) (j : ℕ) (tag : ByteArray) (hjp : j < (RSOR.path nike q.fwd
+        [.recipient q.receiver]).size) :
+    onionOfTag nike cipher macS kdfS streamS geom q rnd a ks j tag
+      = onionOfEnc nike cipher macS kdfS streamS geom q rnd a ks j tag
+        (cipher.encrypt (ks.toArray[j]!).payloadEncryption.toArray
+          (Util.Bytes.ofVector (ks.toArray[j]!).headerEncryptionIV)
+          (onionBlock nike cipher macS kdfS streamS geom q rnd ks j)) := by
+  have henc : keysEnc cipher ks.toArray = Function.update (keysEnc cipher ks.toArray) j
+      (fun b => cipher.encrypt (ks.toArray[j]!).payloadEncryption.toArray
+        (Util.Bytes.ofVector (ks.toArray[j]!).headerEncryptionIV) b) := by
+    funext i
+    by_cases hi : i = j
+    · rw [hi, Function.update_self]
+      rfl
+    · rw [Function.update_of_ne hi]
+  unfold onionOfTag onionOfEnc onionBlock
+  rw [henc, nikePktFn_encAt geom _ _ _ _ _ _ _ j hjp, ← henc]
+
+/-- **These read hop `j`'s payload key nowhere else.** Two key lists that agree but for hop
+`j`'s payload key give the same onion from the encrypted block, the same bytes under hop `j`'s
+tag, and the same block for hop `j` to encrypt. -/
+theorem onion_payloadKey (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike geom)
+    (a : ByteArray) (ks ks' : List HopKeys) (j : ℕ) (tag e : ByteArray) (hjp : j < (RSOR.path nike
+        q.fwd [.recipient q.receiver]).size)
+    (hne : ∀ i, i ≠ j → ks.toArray[i]! = ks'.toArray[i]!)
+    (hj : ks.toArray[j]! = { ks'.toArray[j]! with
+      payloadEncryption := (ks.toArray[j]!).payloadEncryption }) :
+    onionOfEnc nike cipher macS kdfS streamS geom q rnd a ks j tag e
+        = onionOfEnc nike cipher macS kdfS streamS geom q rnd a ks' j tag e ∧
+      onionMsg nike macS streamS geom q rnd a ks j
+        = onionMsg nike macS streamS geom q rnd a ks' j ∧
+      onionBlock nike cipher macS kdfS streamS geom q rnd ks j
+        = onionBlock nike cipher macS kdfS streamS geom q rnd ks' j := by
+  have hks : keysKs geom streamS ks.toArray = keysKs geom streamS ks'.toArray := by
+    funext i
+    unfold keysKs
+    by_cases hi : i = j
+    · rw [hi, hj]
+    · rw [hne i hi]
+  have htag : keysTag macS ks.toArray = keysTag macS ks'.toArray := by
+    funext i
+    unfold keysTag
+    by_cases hi : i = j
+    · rw [hi, hj]
+    · rw [hne i hi]
+  have hge : blindElem nike a ks.toArray = blindElem nike a ks'.toArray := by
+    funext i
+    refine blindElem_congr nike a _ _ (fun m => ?_) i
+    by_cases hm : m = j
+    · rw [hm, hj]
+    · rw [hne m hm]
+  have hencne : ∀ i, i ≠ j → keysEnc cipher ks.toArray i = keysEnc cipher ks'.toArray i :=
+    fun i hi => by unfold keysEnc; rw [hne i hi]
+  refine ⟨?_, ?_, ?_⟩
+  · have hu : Function.update (keysEnc cipher ks.toArray) j (fun _ => e)
+        = Function.update (keysEnc cipher ks'.toArray) j (fun _ => e) := by
+      funext i
+      by_cases hi : i = j
+      · rw [hi, Function.update_self, Function.update_self]
+      · rw [Function.update_of_ne hi, Function.update_of_ne hi, hencne i hi]
+    unfold onionOfEnc
+    rw [hks, htag, hge, hu]
+  · unfold onionMsg
+    rw [hks, htag, hge]
+  · unfold onionBlock
+    exact encTrace_congr _ _ _ _ _ (by omega) fun i hi _ => hencne i (by omega)
+
 end Onion
 
 section Forward

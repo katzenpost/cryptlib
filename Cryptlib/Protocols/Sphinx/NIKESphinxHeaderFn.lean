@@ -347,6 +347,17 @@ theorem encTrace_succ (enc : ℕ → ByteArray → ByteArray) (n : ℕ) (init : 
   simp
 
 omit geom in
+/-- The first `m` encryptions are those of the last `m` hops. -/
+theorem encTrace_congr (enc enc' : ℕ → ByteArray → ByteArray) (n : ℕ) (init : ByteArray)
+    (m : ℕ) (hm : m ≤ n) (h : ∀ i, n - m ≤ i → i < n → enc i = enc' i) :
+    encTrace enc n init m = encTrace enc' n init m := by
+  induction m with
+  | zero => rfl
+  | succ m ih =>
+    rw [encTrace_succ, encTrace_succ, ih (by omega) fun i hi hlt => h i (by omega) hlt,
+      h (n - 1 - m) (by omega) (by omega)]
+
+omit geom in
 /-- **A payload is encrypted by a hop once**, on the block the hops after it left: with hop
 `j`'s encryption replaced by the constant that returns its encryption of that block, the
 payload is the same. The block does not depend on hop `j`'s encryption. -/

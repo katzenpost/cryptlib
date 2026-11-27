@@ -592,9 +592,11 @@ relay with a cipher is the relay that decrypts by the cipher (`procWith_eq_procD
 A relay that answers one element under one header only decrypts, under that header, the
 onion's payload with its payload key, and under any other refuses the element (`onlyAns_join`).
 The honest relays' oracle, with one relay answering one header, is the one-decryption oracle of
-the payload game (`oracle_onlyAns`). Still to do for the payload step of world 0: the equality
-of world 0 after its MAC step with a payload game, which needs the onion written from the
-relay's one encrypted block.
+the payload game (`oracle_onlyAns`). The onion uses the relay's payload key for one encryption,
+of `onionBlock` (`onionOfTag_enc`), and reads that key nowhere else (`onion_payloadKey`); a
+relay handed its payload's decryption does not read it either (`procD_payloadKey`). Still to
+do for the payload step of world 0: the equality of world 0 after its MAC step with a payload
+game.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two

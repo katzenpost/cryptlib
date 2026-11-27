@@ -143,6 +143,15 @@ theorem procD_congr {L : ℕ} (keysOf : ByteArray → Except String HopKeys)
   rw [unwrapNIKEDec_congr nike macS streamS geom keysOf (blockDec D) (blockDec D') _ _ pkt
     fun k hk => by unfold blockDec; rw [h k hk]]
 
+/-- A relay that is handed its payload's decryption does not read its payload key. -/
+theorem procD_payloadKey {L : ℕ} (t : HopKeys) (kp : Vector UInt8 48)
+    (D : Vector UInt8 L → Vector UInt8 L) (pkt : ByteArray) :
+    procD nike macS streamS geom (fun _ => .ok t) (fun _ => D) pkt
+      = procD nike macS streamS geom (fun _ => .ok { t with payloadEncryption := kp })
+        (fun _ => D) pkt := by
+  unfold procD unwrapNIKEDec
+  rfl
+
 /-- **A relay with a cipher is a relay that decrypts by the cipher**, on a packet whose payload
 has `L` bytes. -/
 theorem procWith_eq_procD {L : ℕ} (keysOf : ByteArray → Except String HopKeys) (pkt : ByteArray)
