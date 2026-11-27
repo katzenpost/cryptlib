@@ -43,6 +43,72 @@ def procWith (keysOf : ByteArray → Except String HopKeys) (pkt : ByteArray) : 
   | .ok (p, t, c, f) => some (p, t, c, f.map ofVector)
   | .error _ => none
 
+open Cryptlib.Protocols.Sphinx.Constants (macLength) in
+open Cryptlib.Protocols.Sphinx.Common (v0AD) in
+/-- A relay that accepts a packet has checked its MAC under the MAC key of the keys it had for
+the packet's group element. -/
+theorem procWith_mac (keysOf : ByteArray → Except String HopKeys) (pkt : ByteArray) (t : HopKeys)
+    (res : Option ByteArray × Vector UInt8 32 × List Commands.RoutingCommand × Option ByteArray)
+    (hk : keysOf (pkt.extract 2 (2 + nike.publicKeySize)) = .ok t)
+    (h : procWith nike cipher macS streamS geom keysOf pkt = some res) :
+    ¬ pkt.size < (2 + nike.publicKeySize + geom.routingInfoLength) + macLength ∧
+      (ofVector (macS.mac (ofVector t.headerMAC) (pkt.extract 0 (2 + nike.publicKeySize +
+          geom.routingInfoLength)))).data
+        = (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength) ((2 + nike.publicKeySize +
+            geom.routingInfoLength) + macLength)).data := by
+  unfold procWith unwrapNIKEWith at h
+  dsimp only at h
+  by_cases h1 : pkt.size < 2 + nike.publicKeySize + geom.routingInfoLength + macLength
+  · rw [dite_eq_left h1] at h; cases h
+  rw [dite_eq_right h1] at h
+  by_cases h2 : (pkt.extract 0 2).data ≠ v0AD.data
+  · rw [ite_eq_left h2] at h; cases h
+  rw [ite_eq_right h2, hk] at h
+  dsimp only [Bind.bind, Except.bind] at h
+  refine ⟨h1, ?_⟩
+  by_contra h3
+  rw [ite_eq_left h3] at h
+  cases h
+
+open Cryptlib.Protocols.Sphinx.Constants (macLength) in
+/-- **A packet a relay accepts under another header is a forgery.** If the packet's header is
+not the message `M` followed by its tag, the packet carries the right tag on a message other
+than `M`. -/
+theorem procWith_forgery (hmactag : macS.tagSize = macLength)
+    (keysOf : ByteArray → Except String HopKeys) (pkt M : ByteArray) (t : HopKeys)
+    (hk : keysOf (pkt.extract 2 (2 + nike.publicKeySize)) = .ok t)
+    (h : (procWith nike cipher macS streamS geom keysOf pkt).isSome = true)
+    (hne : pkt.extract 0 ((2 + nike.publicKeySize + geom.routingInfoLength) + macS.tagSize) ≠ M ++
+        ofVector (macS.mac (ofVector t.headerMAC) M)) :
+    pkt.extract 0 (2 + nike.publicKeySize + geom.routingInfoLength) ≠ M ∧
+      macS.mac (ofVector t.headerMAC) (pkt.extract 0 (2 + nike.publicKeySize +
+          geom.routingInfoLength))
+        = Util.Bytes.toVecN macS.tagSize (pkt.extract (2 + nike.publicKeySize +
+            geom.routingInfoLength) ((2 + nike.publicKeySize + geom.routingInfoLength) +
+            macS.tagSize)) := by
+  obtain ⟨res, hres⟩ := Option.isSome_iff_exists.mp h
+  obtain ⟨hsz, hd⟩ := procWith_mac nike cipher macS streamS geom keysOf pkt t res hk hres
+  have e : (2 + nike.publicKeySize + geom.routingInfoLength) + macS.tagSize = (2 +
+      nike.publicKeySize + geom.routingInfoLength) + macLength := by rw [hmactag]
+  rw [e] at hne ⊢
+  have hm : ofVector (macS.mac (ofVector t.headerMAC) (pkt.extract 0 (2 + nike.publicKeySize +
+      geom.routingInfoLength)))
+      = pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength) ((2 + nike.publicKeySize +
+          geom.routingInfoLength) + macLength) := ByteArray.ext hd
+  refine ⟨fun hp => hne ?_, (Util.Bytes.toVecN_ofVector _).symm.trans
+    (congrArg (Util.Bytes.toVecN macS.tagSize) hm)⟩
+  rw [KEMSphinx.extract_split pkt (2 + nike.publicKeySize + geom.routingInfoLength) ((2 +
+      nike.publicKeySize + geom.routingInfoLength) + macLength) (by omega) (by omega), ← hm, hp]
+
+/-- Under a header whose tag is known, a relay uses its MAC key for that tag only. -/
+theorem procWith_const (t : HopKeys) (km : Vector UInt8 32) (pkt : ByteArray) :
+    procWith nike cipher macS streamS geom (fun _ => .ok t) pkt
+      = procWith nike cipher (Primitives.MAC.MAC.const (macS.mac (ofVector t.headerMAC)
+          (pkt.extract 0 (2 + nike.publicKeySize + geom.routingInfoLength)))) streamS geom
+        (fun _ => .ok { t with headerMAC := km }) pkt := by
+  unfold procWith unwrapNIKEWith
+  rfl
+
 /-- The keys a relay derives for a group element. -/
 def relayKeys (sk : nike.PrivateKey) (ge : ByteArray) : Except String HopKeys :=
   deriveHopKeys kdfS <$> nikeDH nike sk ge
