@@ -31,6 +31,72 @@ reliable seeds every layer of a route builds (`KEMSphinxBuilds`). So each event 
 is not reliable. A forward layer needs the sender's payload to have the forward payload's
 length, which a geometry with room for a reply block gives (`hsurb`). -/
 
+section PastBuilds
+
+variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+  (geom : Geometry)
+
+set_option maxHeartbeats 2000000 in
+/-- **A layer past a keyed hop builds**, for any draw and any keystream of the keyed hop: it is
+a packet over the rest of the route, whose filler has the right length. -/
+theorem layerPast_builds (hvalid : geom.ValidForKEM kem)
+    (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem)) (last : List RoutingCommand)
+    (hlast : (∃ r, last = [.recipient r]) ∨ ∃ id, last = [.surbReply id])
+    (d : RSOR.Draw geom) (payload : ByteArray) (hp : payload.size = geom.forwardPayloadLength)
+    (j : ℕ) (U : ByteArray) (hU : U.size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+        (i : ℕ) (hi : i < R.hops.length) :
+    ∃ fwd, layerPast kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload j U i = .ok
+        fwd := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hn := RSOR.path_size kem R last
+  have hle := R.length_le
+  have hnd : (RSOR.path kem (R.drop i) last).size = R.hops.length - i := by
+    rw [RSOR.path_size]
+    simp [Protocols.RSOR.Route.drop]
+  have hb : (geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength
+      ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
+    exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+  have hfs := fillerAtF_size kem kdfS streamS geom hrouting (RSOR.path kem R last)
+    (d.1.toArray.extract 0 (RSOR.path kem R last).size)
+    ((ofVector d.2).extract 0
+      ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)) j U
+    (by omega) (by rw [ByteArray.size_extract, Util.Bytes.size_ofVector]; omega) hU i (by omega)
+  unfold layerPast
+  dsimp only
+  rw [path_extract_drop kem geom R last i (le_of_lt hi)]
+  refine newKEMPacket_builds kem geom cipher macS kdfS streamS _ _ _ payload (by omega) (by omega)
+      (by simp; omega)
+    (fun _ => by
+      rw [hfs, hnd, hn]
+      exact congrArg (· * geom.perHopRoutingInfoLength) (by omega))
+    hp (fun k hk => ?_)
+    (fun k hk ke mac => by
+      have := path_fragment_builds kem hvalid (R.drop i) last hlast ke mac k
+        (by simpa [Protocols.RSOR.Route.drop] using (hnd ▸ hk))
+      exact this)
+  rw [RSOR.path_getElem! kem (R.drop i) last k (by simpa [Protocols.RSOR.Route.drop] using
+    (hnd ▸ hk))]
+  exact kemEncap_key kem _ _
+
+omit cipher in
+/-- **On the backward path the draws are always good**: the reply's next layer and the first
+layer over the rest of the path build. -/
+theorem backGoodF_holds (hvalid : geom.ValidForKEM kem)
+    (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem)) (j : ℕ)
+    (hj : j + 1 < R.hops.length)
+    (p : RSOR.Randomness geom × RSOR.Randomness geom × Keystream geom) :
+    backGoodF kem macS kdfS streamS geom R j p :=
+  ⟨layerPast_builds kem default macS kdfS streamS geom hvalid R [.surbReply p.1.2.2.2]
+      (Or.inr ⟨_, rfl⟩) p.1.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray)
+          Array.size_replicate j (ofVector p.2.2)
+      (Util.Bytes.size_ofVector _) (j + 1) hj,
+    layer_zero_builds kem default macS kdfS streamS hvalid (R.drop (j + 1))
+      (by simp [Protocols.RSOR.Route.drop]; omega) [.surbReply p.2.1.2.2.2] (Or.inr ⟨_, rfl⟩)
+      p.2.1.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) Array.size_replicate⟩
+
+end PastBuilds
+
 section BackEvents
 
 open Cryptlib.Protocols.RSOR (Role)
@@ -506,6 +572,22 @@ theorem prEvent_not_swapFinalGood_le
   exact h ⟨fun i hi => kemHopCt_route_size kem geom _ _ _ i (hlen i hi),
     fun i hi => kemHopCt_route_size kem geom _ _ _ i (hlen i hi),
     (RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm, hzero⟩
+
+/-- **The backward-path term of the SLU← bound is zero**: there the draws are always good. -/
+theorem prEvent_not_backGoodF_eq_zero (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.backwardWith (replySwap kem cipher macS kdfS streamS geom hvalid hmactag
+        h16)).Adversary) :
+    Pr{let z ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+        (fun p => (x, p)) <$> (do
+        let r ← $ᵗ (RSOR.Randomness geom)
+        let r' ← $ᵗ (RSOR.Randomness geom)
+        let U ← $ᵗ (Keystream geom)
+        pure (r, r', U)))}[z.1.cs.1.c.pos.val ≠ 0
+          ∧ ¬ backGoodF kem macS kdfS streamS geom z.1.cs.1.c.req.back
+            (z.1.cs.1.c.pos.val - 1) z.2] = 0 :=
+  prEvent_eq_zero_of_forall_not _ _ fun z h =>
+    h.2 (backGoodF_holds kem macS kdfS streamS geom hvalid z.1.cs.1.c.req.back _
+      (lt_of_eq_of_lt (Nat.sub_add_cancel (Nat.pos_of_ne_zero h.1)) z.1.cs.1.c.pos.isLt) z.2)
 
 end SwapEvents
 

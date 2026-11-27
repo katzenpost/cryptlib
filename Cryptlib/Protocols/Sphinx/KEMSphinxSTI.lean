@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Cryptlib.Protocols.Sphinx.KEMSphinxSLURelay
-import Cryptlib.Protocols.Sphinx.KEMSphinxBuilds
+import Cryptlib.Protocols.Sphinx.KEMSphinxSLUEvents
 
 namespace Cryptlib.Protocols.RSOR
 
@@ -357,49 +357,6 @@ theorem fwdShift_size (hvalid : geom.ValidForKEM kem)
     ByteArray.size_extract, hU, Util.Bytes.size_ofVector]
   rw [Nat.succ_mul] at hjp hat ⊢
   omega
-
-set_option maxHeartbeats 2000000 in
-/-- **A layer past a keyed hop builds**, for any draw and any keystream of the keyed hop: it is
-a packet over the rest of the route, whose filler has the right length. -/
-theorem layerPast_builds (hvalid : geom.ValidForKEM kem)
-    (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem)) (last : List RoutingCommand)
-    (hlast : (∃ r, last = [.recipient r]) ∨ ∃ id, last = [.surbReply id])
-    (d : RSOR.Draw geom) (payload : ByteArray) (hp : payload.size = geom.forwardPayloadLength)
-    (j : ℕ) (U : ByteArray) (hU : U.size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
-        (i : ℕ) (hi : i < R.hops.length) :
-    ∃ fwd, layerPast kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload j U i = .ok
-        fwd := by
-  obtain ⟨-, -, hrouting, -⟩ := id hvalid
-  have hn := RSOR.path_size kem R last
-  have hle := R.length_le
-  have hnd : (RSOR.path kem (R.drop i) last).size = R.hops.length - i := by
-    rw [RSOR.path_size]
-    simp [Protocols.RSOR.Route.drop]
-  have hb : (geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength
-      ≤ geom.routingInfoLength := by
-    rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
-    exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
-  have hfs := fillerAtF_size kem kdfS streamS geom hrouting (RSOR.path kem R last)
-    (d.1.toArray.extract 0 (RSOR.path kem R last).size)
-    ((ofVector d.2).extract 0
-      ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)) j U
-    (by omega) (by rw [ByteArray.size_extract, Util.Bytes.size_ofVector]; omega) hU i (by omega)
-  unfold layerPast
-  dsimp only
-  rw [path_extract_drop kem geom R last i (le_of_lt hi)]
-  refine newKEMPacket_builds kem geom cipher macS kdfS streamS _ _ _ payload (by omega) (by omega)
-      (by simp; omega)
-    (fun _ => by
-      rw [hfs, hnd, hn]
-      exact congrArg (· * geom.perHopRoutingInfoLength) (by omega))
-    hp (fun k hk => ?_)
-    (fun k hk ke mac => by
-      have := path_fragment_builds kem hvalid (R.drop i) last hlast ke mac k
-        (by simpa [Protocols.RSOR.Route.drop] using (hnd ▸ hk))
-      exact this)
-  rw [RSOR.path_getElem! kem (R.drop i) last k (by simpa [Protocols.RSOR.Route.drop] using
-    (hnd ▸ hk))]
-  exact kemEncap_key kem _ _
 
 end RestOfForward
 

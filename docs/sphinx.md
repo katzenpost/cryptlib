@@ -365,6 +365,9 @@ whatever its seed (`kemHopCt_route_size`), so only the zero-tag event is left.
 The relay's draws that are not good, in both worlds and for the payload step, have a seed
 that is not reliable among the relay's and those of the hops in front of it (`relaySeedsGood`,
 `backGoodAt_of_reliable`, `prEvent_not_backGood0_le` and the three like it).
+The backward-path term of the last comparison is zero: there the draws are always good,
+because the two layers they ask for always build (`backGoodF_holds`,
+`prEvent_not_backGoodF_eq_zero`).
 A forward layer builds when the sender's payload has the forward payload's length; the lemmas
 take that as a fact about the geometry (`hsurb`: room for a reply block). The other event terms
 of `backwardUnlinkable_le` are not reduced yet.
