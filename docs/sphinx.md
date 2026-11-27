@@ -585,6 +585,8 @@ one-query game of the payload cipher, for any scheme of the RSOR games. It rests
 Sphinx after its MAC step has still to be written as such a game, and KEM Sphinx has its own
 copy (`KEMSphinxPayload`). For that, the NIKE relay's unwrap takes the payload decryption as a
 function (`unwrapNIKEDec`); the form with a cipher is defined from it, so the body exists once.
+A packet uses a hop's payload encryption once, on the block the hops after it left
+(`encTrace_encAt`, `nikePktFn_encAt`), as it uses the hop's tag once.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two

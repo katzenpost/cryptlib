@@ -335,6 +335,56 @@ theorem nikePktFn_tagAt (ks : ℕ → ByteArray) (tag enc : ℕ → ByteArray �
   unfold nikePktFn
   rw [nikeHdrTrace_tagAt geom ks tag ge filler path i hi f _ le_rfl]
 
+/-- The payload after the first `m` encryptions: those of the last `m` hops, innermost first. -/
+def encTrace (enc : ℕ → ByteArray → ByteArray) (n : ℕ) (init : ByteArray) (m : ℕ) : ByteArray :=
+  (List.range' 0 m).foldl (fun b iRev => enc (n - 1 - iRev) b) init
+
+omit geom in
+theorem encTrace_succ (enc : ℕ → ByteArray → ByteArray) (n : ℕ) (init : ByteArray) (m : ℕ) :
+    encTrace enc n init (m + 1) = enc (n - 1 - m) (encTrace enc n init m) := by
+  unfold encTrace
+  rw [List.range'_1_concat, List.foldl_append]
+  simp
+
+omit geom in
+/-- **A payload is encrypted by a hop once**, on the block the hops after it left: with hop
+`j`'s encryption replaced by the constant that returns its encryption of that block, the
+payload is the same. The block does not depend on hop `j`'s encryption. -/
+theorem encTrace_encAt (enc : ℕ → ByteArray → ByteArray) (n : ℕ) (init : ByteArray) (j : ℕ)
+    (hj : j < n) (f : ByteArray → ByteArray) (m : ℕ) (hm : m ≤ n) :
+    encTrace (Function.update enc j f) n init m
+      = encTrace (Function.update enc j fun _ => f (encTrace enc n init (n - 1 - j))) n init m ∧
+      (m ≤ n - 1 - j → encTrace (Function.update enc j f) n init m = encTrace enc n init m) := by
+  induction m with
+  | zero => exact ⟨rfl, fun _ => rfl⟩
+  | succ m ih =>
+    obtain ⟨ih1, ih2⟩ := ih (by omega)
+    rw [encTrace_succ, encTrace_succ, encTrace_succ]
+    by_cases hmj : n - 1 - m = j
+    · refine ⟨?_, fun h => absurd h (by omega)⟩
+      rw [hmj, Function.update_self, Function.update_self, ih2 (by omega)]
+      congr 2
+      omega
+    · rw [Function.update_of_ne hmj, Function.update_of_ne hmj, ih1]
+      exact ⟨rfl, fun h => by rw [← ih1, ih2 (by omega)]⟩
+
+/-- The packet uses a hop's payload encryption once, on the block the hops after it left. -/
+theorem nikePktFn_encAt (ks : ℕ → ByteArray) (tag enc : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (payload : ByteArray)
+    (j : ℕ) (hj : j < path.size) (f : ByteArray → ByteArray) :
+    nikePktFn geom ks tag (Function.update enc j f) ge filler path payload
+      = nikePktFn geom ks tag (Function.update enc j fun _ =>
+          f (encTrace enc path.size
+            ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)
+            (path.size - 1 - j))) ge filler path payload := by
+  have h := (encTrace_encAt enc path.size
+    ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload) j hj f path.size
+    le_rfl).1
+  unfold encTrace at h
+  unfold nikePktFn
+  rw [h]
+  rfl
+
 end HeaderFn
 
 section Built
