@@ -182,8 +182,8 @@ decrypted payload whose first byte is 1 as carrying a SURB, on a reply packet to
 payload is not checked. The sender answered in 9 of 3000 runs, about 1 in 256, and never in
 world 1. The rule now replies only to a packet the relay delivers (`RSOR.delivers`,
 `RSOR.replyOf`): one that names a recipient and carries no reply block. The self-test asks the
-sender in both worlds (`runBackwardSenderReply`); neither answers. NIKE Sphinx has the old
-rule still.
+sender in both worlds (`runBackwardSenderReply`); neither answers. NIKE Sphinx has the same
+rule; with the old one its sender answered 10 of 3000 runs (`runSenderReply`).
 
 A reply's layers are the layers of a packet over the backward path, with only the payload
 swapped for the reply's (`formBack_fst`), and the reply block in the sender's payload is the

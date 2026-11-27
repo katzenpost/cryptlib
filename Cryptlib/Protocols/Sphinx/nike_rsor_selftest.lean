@@ -133,6 +133,36 @@ def runRound (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
     IO.eprintln "  runRound: the paths are not routes"
     pure false
 
+/-- The sender asked to reply to the last layer of a reply. A relay replies only to a packet it
+delivers, so the sender must not answer. Counts the answers over `trials` runs: the old rule
+read any decrypted payload whose first byte is 1 as carrying a SURB, about 1 run in 256. -/
+def runSenderReply (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) (trials : Nat) : IO Bool := do
+  let S := RSOR.scheme nike wbCipher macS kdfS streamS geom hvalid rfl h16
+  let mut answers := 0
+  for _ in [0:trials] do
+    let (exit, exitKey) ← newRelay nike
+    let (sender, senderKey) ← newRelay nike
+    if h : 1 ≤ geom.nrHops then
+      let q : RSOR.Request nike geom :=
+        { msg := ← randomVector _, receiver := ← randomVector 32,
+          fwd := ⟨[exit], h, by simp⟩, back := ⟨[sender], h, by simp⟩, fwd_ne := by simp }
+      let r : RSOR.Randomness nike geom := (← randomDraw nike geom, ← randomDraw nike geom,
+        ← randomVector 64, ← randomVector 16)
+      let answer : Msg geom ← randomVector _
+      let re : Option (Name × Onion geom) := S.reply exitKey exit.name answer (S.form q r q.first)
+      let some (_, last) := re
+        | IO.eprintln "  runSenderReply: the exit relay's reply failed"; return false
+      let re2 : Option (Name × Onion geom) := S.reply senderKey sender.name answer last
+      if re2.isSome then answers := answers + 1
+    else
+      IO.eprintln "  runSenderReply: no hops"
+      return false
+  let ok := answers == 0
+  IO.println (s!"the sender asked to reply to a reply's last layer ({trials} runs): "
+    ++ s!"answered {answers} times: {if ok then "ok" else "FAIL"}")
+  pure ok
+
 def runSuite (schemeName : String) (nike : NIKE) : IO Bool := do
   IO.println s!"-- {schemeName} --"
   let geom := ofNIKEWith schemeName nike 103 true 5
@@ -146,6 +176,7 @@ def runSuite (schemeName : String) (nike : NIKE) : IO Bool := do
     IO.println (s!"RSOR scheme ({nFwd} forward, {nBack} back of 5): "
       ++ (if roundOk then "ok" else "FAIL"))
     ok := ok && roundOk
+  ok := (← runSenderReply nike geom hvalid h16 5) && ok
   pure ok
 
 def main : IO UInt32 := do

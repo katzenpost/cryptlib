@@ -27,7 +27,7 @@ open Cryptlib.Protocols.Sphinx.Commands
 open Cryptlib.Protocols.Sphinx.Types
 open Cryptlib.Protocols.Sphinx.Common
 open Cryptlib.Protocols.Sphinx.KEMSphinx (extract_append_tail encrypt_decrypt)
-open Cryptlib.Protocols.Sphinx.KEMSphinx.RSOR (Name Msg Onion split join msgOf pad surbKeys
+open Cryptlib.Protocols.Sphinx.KEMSphinx.RSOR (Name Msg Onion split join msgOf pad surbKeys delivers
   size_tagged join_split decryptSURBPayload_surbKeys newPacketFromSURB_eq)
 open Cryptlib.Primitives.WideBlockCipher (WideBlockCipher)
 open Cryptlib.Primitives.MAC (MAC)
@@ -224,11 +224,12 @@ def formBack (q : Request nike geom) (r : Randomness nike geom) (m : Msg geom)
       (first.extract geom.headerLength first.size))
   | .error _ => default
 
-/-- The exit relay answers with the SURB it finds in the payload. -/
+/-- The exit relay answers with the SURB it finds in the payload. A relay replies only to a
+packet it delivers: a reply packet's payload is not read for a SURB. -/
 def reply (sk : nike.PrivateKey) (m : Msg geom) (o : Onion geom) : Option (Name × Onion geom) :=
   match unwrap nike cipher macS kdfS streamS geom sk (join o) with
-  | some (some p, _, none) =>
-    if p.get! 0 = 1 then
+  | some (some p, cmds, none) =>
+    if delivers cmds = true ∧ p.get! 0 = 1 then
       match SURB.newPacketFromSURB cipher geom (p.extract 2 (2 + geom.surbLength)) (pad geom m) with
       | .ok (pkt, next) => some (next, split geom pkt)
       | .error _ => none
@@ -386,16 +387,16 @@ theorem unwrap_of_ok (sk : nike.PrivateKey) (pkt : ByteArray) (p : Option ByteAr
 theorem of_ite_throw {c : Prop} [Decidable c] {β : Type} {e : String} {K : Unit → Except String β}
     {x : β} (h : (if c then (throw e >>= K) else K ()) = Except.ok x) : ¬c ∧ K () = .ok x := by
   by_cases hc : c
-  · rw [if_pos hc] at h
+  · rw [ite_eq_left hc] at h
     cases h
-  · rw [if_neg hc] at h
+  · rw [ite_eq_right hc] at h
     exact ⟨hc, h⟩
 
 theorem of_ite {c : Prop} [Decidable c] {α : Type} {a b x : α} (h : (if c then a else b) = x) :
     a = x ∨ b = x := by
   by_cases hc : c
-  · exact .inl (by rwa [if_pos hc] at h)
-  · exact .inr (by rwa [if_neg hc] at h)
+  · exact .inl (by rwa [ite_eq_left hc] at h)
+  · exact .inr (by rwa [ite_eq_right hc] at h)
 
 set_option maxHeartbeats 1000000 in
 /-- The packet a relay forwards is `peel` of the packet it got, under the keys it derived. -/
@@ -408,9 +409,9 @@ theorem unwrapNIKE_forward (priv pkt : ByteArray) (sk : nike.PrivateKey)
   unfold unwrapNIKE at h
   dsimp only at h
   by_cases h1 : pkt.size < 2 + nike.publicKeySize + geom.routingInfoLength + macLength
-  · rw [dif_pos h1] at h
+  · rw [dite_eq_left h1] at h
     cases h
-  rw [dif_neg h1] at h
+  rw [dite_eq_right h1] at h
   replace h := (of_ite_throw h).2
   obtain ⟨privSk, hpriv, h⟩ := Except.eq_ok_of_bind_eq_ok h
   obtain ⟨ss, hss, h⟩ := Except.eq_ok_of_bind_eq_ok h
@@ -644,7 +645,7 @@ theorem unwrap_layer (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize =
       intro _
       rw [h0, hpkteq, hhdreq]
       unfold hopPacket
-      rw [Nat.sub_zero, if_neg (lt_irrefl 0), ByteArray.append_empty, hsprp]
+      rw [Nat.sub_zero, ite_eq_right (lt_irrefl 0), ByteArray.append_empty, hsprp]
     | succ k ih =>
       intro hk
       obtain ⟨tag, cmds, hsz, hun, -⟩ := NT t ht0size htstep k hk _ (hpriv k)
@@ -706,7 +707,8 @@ theorem unwrap_layer (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize =
         (hopPacket groupElements riPadding s (trace cipher sprpKeys P i) hops.size i)
         = some (some (trace cipher sprpKeys P i 0), hops[i]!.commands, none) :=
       unwrap_of_ok nike cipher macS kdfS streamS geom sk _ _ _ _ _
-        ((LT (trace cipher sprpKeys P i) hs0' (fun _ _ => rfl) i hlast _ hti').trans (if_pos hs))
+        ((LT (trace cipher sprpKeys P i) hs0' (fun _ _ => rfl) i hlast _ hti').trans
+          (ite_eq_left hs))
     have h0' := trace_next cipher sprpKeys P i (by omega) (by omega)
     rw [show sprpKeys.size - (i + 1) = 0 by omega, hsprpK i hi] at h0'
     rw [hpk] at hu
@@ -787,11 +789,11 @@ theorem proc_form (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = ma
   rw [join_split geom pkt (by omega) (by omega)]
   by_cases h : i + 1 < q.fwd.hops.length
   · obtain ⟨pkt', mac, hpkt', hun, -⟩ := hmid (by rw [hn]; exact h)
-    rw [hun, dif_pos h, hpkt', path_getElem! nike _ _ _ i.isLt, path_getElem! nike _ _ _ h]
+    rw [hun, dite_eq_left h, hpkt', path_getElem! nike _ _ _ i.isLt, path_getElem! nike _ _ _ h]
     simp [show ¬ (i.val + 1 = q.fwd.hops.length) by omega]
   · have hcmd : (path nike q.fwd [RoutingCommand.recipient q.receiver])[i.val]!.commands
         = [RoutingCommand.recipient q.receiver] := by
-      rw [path_getElem! nike _ _ _ i.isLt, if_pos (by omega)]
+      rw [path_getElem! nike _ _ _ i.isLt, ite_eq_left (by omega)]
     have hmsg : msgOf geom (body nike macS kdfS streamS geom q r) = q.msg := by
       unfold msgOf body
       have := Cryptlib.Util.Bytes.extract_append_right
@@ -800,7 +802,7 @@ theorem proc_form (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = ma
       rw [Cryptlib.Util.Bytes.size_ofVector] at this
       rw [ByteArray.size_append, Cryptlib.Util.Bytes.size_ofVector, Nat.add_sub_cancel, this,
         toVecN_ofVector]
-    rw [(hlast (by rw [hn]; omega)).1 (by rw [hcmd]; simp), dif_neg h, hcmd]
+    rw [(hlast (by rw [hn]; omega)).1 (by rw [hcmd]; simp), dite_eq_right h, hcmd]
     simp [hmsg]
 
 theorem newNIKESURB_eq (ck : ByteArray) (kp : Vector UInt8 64) (fill : ByteArray)
@@ -903,7 +905,7 @@ theorem reply_form (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = m
   obtain ⟨-, -, -, -, hpacket, -⟩ := id hvalid
   have hcmd : (path nike q.fwd [RoutingCommand.recipient q.receiver])[i.val]!.commands
       = [RoutingCommand.recipient q.receiver] := by
-    rw [path_getElem! nike _ _ _ i.isLt, if_pos hi]
+    rw [path_getElem! nike _ _ _ i.isLt, ite_eq_left hi]
   have hp := (hlast (by rw [hn]; exact hi)).1 (by rw [hcmd]; simp)
   obtain ⟨-, -, x0, sprp, hx0, -, -, hs1, hxs, -, hnp, hfirst⟩ :=
     reply_spec nike cipher macS kdfS streamS geom hvalid hmactag h16 q r m hr hjlt
@@ -936,7 +938,7 @@ theorem reply_form (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = m
   dsimp only
   rw [join_split geom pkt (by omega) (by omega), hp]
   dsimp only
-  rw [if_pos hfl, hsb, hnp, hx0]
+  rw [ite_eq_left ⟨by rw [hcmd]; rfl, hfl⟩, hsb, hnp, hx0]
   dsimp only
   rw [hfirst]
   rfl
@@ -996,7 +998,7 @@ theorem recover_formBack (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSi
   obtain ⟨-, -, -, -, hpacket, -⟩ := id hvalid
   have hcmd : (path nike q.back [RoutingCommand.surbReply r.2.2.2])[i.val]!.commands
       = [RoutingCommand.surbReply r.2.2.2] := by
-    rw [path_getElem! nike _ _ _ i.isLt, if_pos hi]
+    rw [path_getElem! nike _ _ _ i.isLt, ite_eq_left hi]
   have hP := (hlast (by rw [hn]; exact hi)).2 (by rw [hcmd]; rfl)
   refine ⟨toVecN _ (peeled cipher (hopKeys nike kdfS (clientKey nike geom r.2.1)
     (path nike q.back [.surbReply r.2.2.2]) (i + 1)) (sealed cipher geom r.2.2.1 m)), ?_, ?_⟩
