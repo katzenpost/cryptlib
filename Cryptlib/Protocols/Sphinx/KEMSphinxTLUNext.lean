@@ -671,6 +671,51 @@ theorem keyedReject_eq_prg {V R : Type} {S : KeyedSetup kem V R} (A : KeyedAdver
     (g := fun (ke : Vector UInt8 32) (iv : Vector UInt8 16) => (ke, iv)) hb
     (fun s => K s.2 s.1)
 
+include hmactag in
+omit hvalid h16 names in
+/-- **A hop whose ciphertext is never shown, down to a uniform keystream.** A keyed game whose
+view and score read the node's keys through their header keystream only differs from the same
+game played from a uniform keystream, with the node rejecting the challenge ciphertext, by at
+most the cost of replacing the keys, a MAC forgery, and the keystream generator's advantage. -/
+theorem keyedReal_sub_uniform_le {V R : Type} {S : KeyedSetup kem V R} (A : KeyedAdversary S)
+    (viewU : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → ByteArray → V)
+    (finU : {pk : Key kem} → S.Ch pk → S.Oth → kem.Ciphertext → R → Bool)
+    (hview : ∀ {pk : Key kem} (ch : S.Ch pk) (o : S.Oth) (c : kem.Ciphertext) (t : KeyTuple),
+      S.view ch o c t = viewU ch o c (ksOf streamS geom t))
+    (hfin : ∀ {pk : Key kem} (ch : S.Ch pk) (o : S.Oth) (c : kem.Ciphertext) (t : KeyTuple),
+      S.final ch o c t = finU ch o c) :
+    |(Pr{let x ← (keyedReal cipher macS kdfS streamS geom A)}[x = true]).toReal
+      - (Pr{let x ← (PRGScheme.prgIdealExperiment
+          (rejectStreamAdv kem cipher macS kdfS streamS geom A viewU finU))}[x = true]).toReal|
+    ≤ keyedCost cipher macS kdfS streamS geom A
+      + (Pr{let x ← (Primitives.MAC.forgeExp macS (forgeAdv cipher macS kdfS streamS geom A
+          (fun _ _ _ _ => nextM0 kem geom)
+          (fun ch o c rest _ => S.view ch o c (withMAC rest default))))}[x = true]).toReal
+      + |(Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+          (rejectStreamAdv kem cipher macS kdfS streamS geom A viewU finU))}[x = true]).toReal
+        - (Pr{let x ← (PRGScheme.prgIdealExperiment
+          (rejectStreamAdv kem cipher macS kdfS streamS geom A viewU finU))}[x = true]).toReal|
+      := by
+  have h1 := keyedChain_le cipher macS kdfS streamS geom A
+  have h2 := keyedIdeal_sub_reject_le kem cipher macS kdfS streamS geom hmactag A
+    (fun ch o c rest km =>
+      (hview ch o c (withMAC rest km)).trans (hview ch o c (withMAC rest default)).symm)
+    (fun ch o c u u' => (hfin ch o c u).trans (hfin ch o c u').symm)
+  have h3 := keyedReject_eq_prg kem cipher macS kdfS streamS geom A viewU finU hview hfin
+  rw [h3] at h2
+  have t1 := abs_sub_le
+    (Pr{let x ← (keyedReal cipher macS kdfS streamS geom A)}[x = true]).toReal
+    (Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom A)}[x = true]).toReal
+    (Pr{let x ← (PRGScheme.prgIdealExperiment
+      (rejectStreamAdv kem cipher macS kdfS streamS geom A viewU finU))}[x = true]).toReal
+  have t2 := abs_sub_le
+    (Pr{let x ← (keyedIdeal cipher macS kdfS streamS geom A)}[x = true]).toReal
+    (Pr{let x ← (PRGScheme.prgRealExperiment (keystreamPRG streamS geom)
+      (rejectStreamAdv kem cipher macS kdfS streamS geom A viewU finU))}[x = true]).toReal
+    (Pr{let x ← (PRGScheme.prgIdealExperiment
+      (rejectStreamAdv kem cipher macS kdfS streamS geom A viewU finU))}[x = true]).toReal
+  linarith
+
 /-! ## The keystream of the original's layer at the relay -/
 
 /-- The adversary against the keystream generator that plays world 1 from the header keystream
