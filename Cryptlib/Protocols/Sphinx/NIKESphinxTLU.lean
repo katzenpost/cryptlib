@@ -31,14 +31,14 @@ variable (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
 
 /-- The first layer of `q`'s onion, from the forward path's first group element and its hops'
 keys. Of the randomness it reads the filler and the backward path's draws. -/
-def onionOfKeys (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
+def onionOfKeys (i : ℕ) (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
     (ks : List HopKeys) : Onion geom :=
   match nikePktFn geom (keysKs geom streamS ks.toArray) (keysTag macS ks.toArray)
       (keysEnc cipher ks.toArray) (blindElem nike a ks.toArray)
       (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient q.receiver]) r.1)
       (RSOR.path nike q.fwd [.recipient q.receiver])
       (RSOR.body nike macS kdfS streamS geom q r) with
-  | some pkt => split geom pkt
+  | some pkt => split geom (peels nike cipher streamS geom ks i pkt)
   | none => default
 
 variable {nike geom} in
@@ -53,7 +53,7 @@ theorem onionOfKeys_real (q : RSOR.Request nike geom) (r : RSOR.Randomness nike 
     (h : RSOR.layer nike cipher macS kdfS streamS geom
       (RSOR.path nike q.fwd [.recipient q.receiver]) (setKey r d).1
       (RSOR.body nike macS kdfS streamS geom q (setKey r d)) 0 = .ok pkt) :
-    onionOfKeys nike cipher macS kdfS streamS geom q r
+    onionOfKeys nike cipher macS kdfS streamS geom 0 q r
         (groupElem nike ((nike.decodePrivateKey d).getD default)
           (RSOR.hopKeys nike kdfS ((nike.decodePrivateKey d).getD default)
             (RSOR.path nike q.fwd [.recipient q.receiver])
@@ -78,6 +78,7 @@ theorem onionOfKeys_real (q : RSOR.Request nike geom) (r : RSOR.Randomness nike 
     funext fun i => (groupElem_eq_blindElem nike _ _ i).symm]
   dsimp only [setKey, RSOR.clientKey, RSOR.filler, RSOR.body, RSOR.surb] at hp ⊢
   rw [hp]
+  rfl
 
 omit cipher macS kdfS streamS in
 /-- Drawing the challenger's randomness and a secret, and putting the secret on the forward
@@ -103,7 +104,7 @@ theorem evalDistEq_setKey {δ : Type} (K : RSOR.Randomness nike geom → ProbCom
       OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 nike.privateKeySize)) (K r))
 
 /-- The first layer of `q`'s onion, with the tag of hop `j` given. -/
-def onionOfTag (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
+def onionOfTag (i : ℕ) (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
     (ks : List HopKeys) (j : ℕ) (tag : ByteArray) : Onion geom :=
   match nikePktFn geom (keysKs geom streamS ks.toArray)
       (Function.update (keysTag macS ks.toArray) j fun _ => tag)
@@ -111,7 +112,7 @@ def onionOfTag (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a :
       (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient q.receiver]) r.1) (RSOR.path nike
           q.fwd [.recipient q.receiver])
       (RSOR.body nike macS kdfS streamS geom q r) with
-  | some pkt => split geom pkt
+  | some pkt => split geom (peels nike cipher streamS geom ks i pkt)
   | none => default
 
 /-- The bytes of `q`'s onion that hop `j`'s tag covers. -/
@@ -129,13 +130,14 @@ theorem toArray_getElem!_congr {α : Type} [Inhabited α] (l l' : List α) (i : 
 /-- **The onion uses the replaced hop's MAC key for one tag only.** With the hop's keys replaced,
 the onion is the onion built from the replacement without its MAC key and the tag of
 `onionMsg` under that key. -/
-theorem onionOfKeys_tag (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike geom)
+theorem onionOfKeys_tag (i : ℕ) (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike geom)
     (a : ByteArray) (c : nike.PrivateKey) (hops : Array PathHop) (j : ℕ) (r : Rest)
     (km : Vector UInt8 32) (n : ℕ) (hj : j < n) (hjp : j < (RSOR.path nike q.fwd [.recipient
-        q.receiver]).size) :
-    onionOfKeys nike cipher macS kdfS streamS geom q rnd a
+        q.receiver]).size)
+    (hi : i ≤ j := by omega) :
+    onionOfKeys nike cipher macS kdfS streamS geom i q rnd a
         (hopKeysWith nike kdfS c hops j (restKeys r km) n)
-      = onionOfTag nike cipher macS kdfS streamS geom q rnd a
+      = onionOfTag nike cipher macS kdfS streamS geom i q rnd a
         (hopKeysWith nike kdfS c hops j (restKeys r default) n) j
         (Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector km)
           (onionMsg nike macS streamS geom q rnd a
@@ -183,13 +185,27 @@ theorem onionOfKeys_tag (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike
     · rw [Function.update_of_ne hi]
       unfold keysTag
       rw [hne i hi]
+  have htake : (hopKeysWith nike kdfS c hops j (restKeys r km) n).take i
+      = (hopKeysWith nike kdfS c hops j (restKeys r default) n).take i :=
+    List.ext_getElem? fun m => by
+      rw [List.getElem?_take, List.getElem?_take]
+      split
+      · exact (hopKeysWith_congr nike kdfS c hops j (restKeys r km) (restKeys r default) rfl
+          n).2 m (by omega)
+      · rfl
+  have hpl : peels nike cipher streamS geom (hopKeysWith nike kdfS c hops j (restKeys r km) n) i
+      = peels nike cipher streamS geom (hopKeysWith nike kdfS c hops j (restKeys r default) n) i :=
+          by
+    funext pkt
+    unfold peels
+    rw [htake]
   unfold onionOfKeys onionOfTag onionMsg
-  rw [hks, henc, hge, htag, nikePktFn_tagAt geom _ _ _ _ _ _ _ j hjp
+  rw [hpl, hks, henc, hge, htag, nikePktFn_tagAt geom _ _ _ _ _ _ _ j hjp
     (fun m => Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector km) m))]
 
 /-- The first layer of `q`'s onion, with the tag of hop `j` and its encryption of the payload
 given. -/
-def onionOfEnc (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
+def onionOfEnc (i : ℕ) (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
     (ks : List HopKeys) (j : ℕ) (tag e : ByteArray) : Onion geom :=
   match nikePktFn geom (keysKs geom streamS ks.toArray)
       (Function.update (keysTag macS ks.toArray) j fun _ => tag)
@@ -197,7 +213,7 @@ def onionOfEnc (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a :
       (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient q.receiver]) r.1) (RSOR.path nike
           q.fwd [.recipient q.receiver])
       (RSOR.body nike macS kdfS streamS geom q r) with
-  | some pkt => split geom pkt
+  | some pkt => split geom (peels nike cipher streamS geom ks i pkt)
   | none => default
 
 /-- The block of `q`'s onion that hop `j` encrypts: the payload after the hops behind it. -/
@@ -209,11 +225,11 @@ def onionBlock (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (ks 
           q.receiver]).size - 1 - j)
 
 /-- **The onion uses hop `j`'s payload key for one encryption**, of `onionBlock`. -/
-theorem onionOfTag_enc (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike geom)
+theorem onionOfTag_enc (i : ℕ) (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike geom)
     (a : ByteArray) (ks : List HopKeys) (j : ℕ) (tag : ByteArray) (hjp : j < (RSOR.path nike q.fwd
         [.recipient q.receiver]).size) :
-    onionOfTag nike cipher macS kdfS streamS geom q rnd a ks j tag
-      = onionOfEnc nike cipher macS kdfS streamS geom q rnd a ks j tag
+    onionOfTag nike cipher macS kdfS streamS geom i q rnd a ks j tag
+      = onionOfEnc nike cipher macS kdfS streamS geom i q rnd a ks j tag
         (cipher.encrypt (ks.toArray[j]!).payloadEncryption.toArray
           (Util.Bytes.ofVector (ks.toArray[j]!).headerEncryptionIV)
           (onionBlock nike cipher macS kdfS streamS geom q rnd ks j)) := by
@@ -231,14 +247,15 @@ theorem onionOfTag_enc (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike 
 /-- **These read hop `j`'s payload key nowhere else.** Two key lists that agree but for hop
 `j`'s payload key give the same onion from the encrypted block, the same bytes under hop `j`'s
 tag, and the same block for hop `j` to encrypt. -/
-theorem onion_payloadKey (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike geom)
+theorem onion_payloadKey (i : ℕ) (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike geom)
     (a : ByteArray) (ks ks' : List HopKeys) (j : ℕ) (tag e : ByteArray) (hjp : j < (RSOR.path nike
         q.fwd [.recipient q.receiver]).size)
     (hne : ∀ i, i ≠ j → ks.toArray[i]! = ks'.toArray[i]!)
     (hj : ks.toArray[j]! = { ks'.toArray[j]! with
-      payloadEncryption := (ks.toArray[j]!).payloadEncryption }) :
-    onionOfEnc nike cipher macS kdfS streamS geom q rnd a ks j tag e
-        = onionOfEnc nike cipher macS kdfS streamS geom q rnd a ks' j tag e ∧
+      payloadEncryption := (ks.toArray[j]!).payloadEncryption })
+    (hpl : peels nike cipher streamS geom ks i = peels nike cipher streamS geom ks' i := by rfl) :
+    onionOfEnc nike cipher macS kdfS streamS geom i q rnd a ks j tag e
+        = onionOfEnc nike cipher macS kdfS streamS geom i q rnd a ks' j tag e ∧
       onionMsg nike macS streamS geom q rnd a ks j
         = onionMsg nike macS streamS geom q rnd a ks' j ∧
       onionBlock nike cipher macS kdfS streamS geom q rnd ks j
@@ -271,7 +288,7 @@ theorem onion_payloadKey (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nik
       · rw [hi, Function.update_self, Function.update_self]
       · rw [Function.update_of_ne hi, Function.update_of_ne hi, hencne i hi]
     unfold onionOfEnc
-    rw [hks, htag, hge, hu]
+    rw [hks, htag, hge, hu, hpl]
   · unfold onionMsg
     rw [hks, htag, hge]
   · unfold onionBlock
@@ -279,7 +296,8 @@ theorem onion_payloadKey (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nik
 
 /-- The first layer of `q`'s onion, with hop `j`'s header keystream, tag and encryption of the
 payload given. -/
-def onionOfStream (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
+def onionOfStream (i : ℕ) (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a :
+    ByteArray)
     (ks : List HopKeys) (j : ℕ) (U tag e : ByteArray) : Onion geom :=
   match nikePktFn geom (Function.update (keysKs geom streamS ks.toArray) j U)
       (Function.update (keysTag macS ks.toArray) j fun _ => tag)
@@ -287,7 +305,7 @@ def onionOfStream (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (
       (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient q.receiver]) r.1) (RSOR.path nike
           q.fwd [.recipient q.receiver])
       (RSOR.body nike macS kdfS streamS geom q r) with
-  | some pkt => split geom pkt
+  | some pkt => split geom (peels nike cipher streamS geom ks i pkt)
   | none => default
 
 /-- The bytes of `q`'s onion that hop `j`'s tag covers, with its header keystream given. -/
@@ -300,15 +318,16 @@ def onionMsgStream (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) 
 /-- **The onion reads hop `j`'s header key and IV through its keystream only.** Two key lists
 that agree but for those give the same onion, tagged bytes and block, once the keystream is
 handed over. -/
-theorem onion_streamKey (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike geom)
+theorem onion_streamKey (i : ℕ) (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike geom)
     (a : ByteArray) (ks ks' : List HopKeys) (j : ℕ) (tag e : ByteArray) (hjp : j < (RSOR.path nike
         q.fwd [.recipient q.receiver]).size)
     (hne : ∀ i, i ≠ j → ks.toArray[i]! = ks'.toArray[i]!)
     (hj : ks.toArray[j]! = { ks'.toArray[j]! with
       headerEncryption := (ks.toArray[j]!).headerEncryption
-      headerEncryptionIV := (ks.toArray[j]!).headerEncryptionIV }) :
-    onionOfEnc nike cipher macS kdfS streamS geom q rnd a ks j tag e
-        = onionOfStream nike cipher macS kdfS streamS geom q rnd a ks' j
+      headerEncryptionIV := (ks.toArray[j]!).headerEncryptionIV })
+    (hpl : peels nike cipher streamS geom ks i = peels nike cipher streamS geom ks' i := by rfl) :
+    onionOfEnc nike cipher macS kdfS streamS geom i q rnd a ks j tag e
+        = onionOfStream nike cipher macS kdfS streamS geom i q rnd a ks' j
           (keysKs geom streamS ks.toArray j) tag e ∧
       onionMsg nike macS streamS geom q rnd a ks j
         = onionMsgStream nike macS streamS geom q rnd a ks' j (keysKs geom streamS ks.toArray j) ∧
@@ -344,7 +363,7 @@ theorem onion_streamKey (q : RSOR.Request nike geom) (rnd : RSOR.Randomness nike
       · rw [hi, Function.update_self, Function.update_self]
       · rw [Function.update_of_ne hi, Function.update_of_ne hi, hencne i hi]
     unfold onionOfEnc onionOfStream
-    rw [hu, htag, hge]
+    rw [hu, htag, hge, hpl]
     rw [hks]
     simp only [Function.update_self]
   · unfold onionMsg onionMsgStream
@@ -397,7 +416,7 @@ def forwardView (names : Role → Name) {pk : RSOR.Key nike} (ch : ForwardCh nik
     streamS geom hvalid hmactag h16 names pk)
     (r : RSOR.Randomness nike geom) (a : ByteArray) (ks : List HopKeys) :
     Protocols.RSOR.World 𝒮 :=
-  { onion := onionOfKeys nike cipher macS kdfS streamS geom ch.c.req r a ks }
+  { onion := onionOfKeys nike cipher macS kdfS streamS geom 0 ch.c.req r a ks }
 
 /-- The adversary on the key game for world 0. -/
 abbrev forwardAdv (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
@@ -548,7 +567,7 @@ def forwardViewT (names : Role → Name) {A : (Protocols.RSOR.forwardUnlinkable 
     (x : Rest × PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
     (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (RSOR.Randomness nike geom) A)
     (tag : Vector UInt8 macS.tagSize) : Protocols.RSOR.World 𝒮 :=
-  { onion := onionOfTag nike cipher macS kdfS streamS geom x.2.c.req x.2.o
+  { onion := onionOfTag nike cipher macS kdfS streamS geom 0 x.2.c.req x.2.o
       (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
           (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names x.2) (forwardKeys0 nike cipher
           macS kdfS streamS geom hvalid hmactag h16 names x).toArray 0)
@@ -593,7 +612,7 @@ theorem forward_ideal_sub_only_le (names : Role → Name) (A : (Protocols.RSOR.f
   have hsz := RSOR.path_size nike x.2.c.req.fwd [.recipient x.2.c.req.receiver]
   unfold drawView forwardView forwardViewT forwardMsg forwardKeys0
   refine congrArg (fun o => ({ onion := o } : Protocols.RSOR.World 𝒮)) ?_
-  exact onionOfKeys_tag nike cipher macS kdfS streamS geom x.2.c.req x.2.o _ _ _ _ x.1 km _
+  exact onionOfKeys_tag nike cipher macS kdfS streamS geom 0 x.2.c.req x.2.o _ _ _ _ x.1 km _
     (by
       show (x.2.c.pos : ℕ) < (drawHops nike cipher macS kdfS streamS geom hvalid hmactag h16
           (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
@@ -723,7 +742,7 @@ def forwardPay (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S
         < (drawHops nike cipher macS kdfS streamS geom hvalid hmactag h16
             (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
             kdfS streamS geom hvalid hmactag h16 names) x.2.2.2.2).size then
-      A.guess x.2.2.2.2.st (onionOfEnc nike cipher macS kdfS streamS geom x.2.2.2.2.c.req
+      A.guess x.2.2.2.2.st (onionOfEnc nike cipher macS kdfS streamS geom 0 x.2.2.2.2.c.req
         x.2.2.2.2.o
         (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
             (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names x.2.2.2.2)
@@ -828,7 +847,7 @@ theorem forwardPay_run (names : Role → Name) (A : (Protocols.RSOR.forwardUnlin
               kp)).toArray[(D.c.pos : ℕ)]!).payloadEncryption } := by
     rw [hj, hj0]
     rfl
-  have hpk := fun (a tag e : ByteArray) => onion_payloadKey nike cipher macS kdfS streamS geom
+  have hpk := fun (a tag e : ByteArray) => onion_payloadKey nike cipher macS kdfS streamS geom 0
     D.c.req D.o a _ _ (D.c.pos : ℕ) tag e hjp hne hK
   have hmsg : forwardMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike
       cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D) kp) = forwardMsg
@@ -996,12 +1015,12 @@ theorem forwardPay_run (names : Role → Name) (A : (Protocols.RSOR.forwardUnlin
         geom.forwardPayloadLength)) _ _ _ _ _ hs hr hp hrp) ?_
   refine Eq.trans ?_ (ite_eq_left hlt).symm
   refine congrArg (A.guess D.st) ?_
-  refine (onionOfKeys_tag nike cipher macS kdfS streamS geom D.c.req D.o _ _ _ _ (payRest nike
+  refine (onionOfKeys_tag nike cipher macS kdfS streamS geom 0 D.c.req D.o _ _ _ _ (payRest nike
       cipher macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D) kp).1 km _ hlt
     hjp).trans ?_
-  refine (onionOfTag_enc nike cipher macS kdfS streamS geom D.c.req D.o _ _ _ _ hjp).trans ?_
+  refine (onionOfTag_enc nike cipher macS kdfS streamS geom 0 D.c.req D.o _ _ _ _ hjp).trans ?_
   refine ((hpk _ _ _).1).trans ?_
-  refine congrArg₂ (fun t e => onionOfEnc nike cipher macS kdfS streamS geom D.c.req D.o _
+  refine congrArg₂ (fun t e => onionOfEnc nike cipher macS kdfS streamS geom 0 D.c.req D.o _
     (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike cipher
         macS kdfS streamS geom hvalid hmactag h16 names (iv, km, he, seed, D) default)) (D.c.pos :
         ℕ) t e) ?_ ?_
@@ -1317,7 +1336,7 @@ def strRun (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 
         < (drawHops nike cipher macS kdfS streamS geom hvalid hmactag h16
             (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher macS
             kdfS streamS geom hvalid hmactag h16 names) x.2.2).size then
-      A.guess x.2.2.st (onionOfStream nike cipher macS kdfS streamS geom x.2.2.c.req x.2.2.o
+      A.guess x.2.2.st (onionOfStream nike cipher macS kdfS streamS geom 0 x.2.2.c.req x.2.2.o
         (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
             (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names x.2.2)
           (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (payRest nike
@@ -1416,7 +1435,7 @@ theorem strRun_eq (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable
               default)).toArray[(D.c.pos : ℕ)]!).headerEncryptionIV } := by
     rw [hj1, hj2]
     rfl
-  have hsk := fun (a tag e : ByteArray) => onion_streamKey nike cipher macS kdfS streamS geom
+  have hsk := fun (a tag e : ByteArray) => onion_streamKey nike cipher macS kdfS streamS geom 0
     D.c.req D.o a _ _ (D.c.pos : ℕ) tag e hjp hne hK
   have hU : Util.Bytes.ofVector ((KEMSphinx.keystreamPRG streamS geom).gen (he, iv))
       = streamS.keystream (Util.Bytes.ofVector he) (Util.Bytes.ofVector iv)
@@ -1519,7 +1538,7 @@ theorem strRun_eq (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable
           < (drawHops nike cipher macS kdfS streamS geom hvalid hmactag h16
               (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (forwardPlace nike cipher
               macS kdfS streamS geom hvalid hmactag h16 names) D).size then
-        A.guess D.st (onionOfStream nike cipher macS kdfS streamS geom D.c.req D.o
+        A.guess D.st (onionOfStream nike cipher macS kdfS streamS geom 0 D.c.req D.o
           (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
               (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names D) (forwardKeys0 nike cipher
               macS kdfS streamS geom hvalid hmactag h16 names (payRest nike cipher macS kdfS

@@ -635,7 +635,9 @@ layer at the relay, and the original, whose next layer and reply the relay hands
 needs its own key replacement and its own MAC, payload and keystream steps; the KEM proof
 calls the second the hidden layer. So far there is only the common ground: a later layer of a
 sender's packet is its first layer peeled by the keys of the hops in front (`layer_peels`,
-`peels`). The definitions of world 0 above are written for the adversary's own request and an
+`peels`), and the onion functions and their lemmas take a layer index, so they serve the layer
+at the relay as well as the first (world 0 uses layer 0). The definitions of world 0 above are
+written for the adversary's own request and an
 empty patch; they have to be restated for any request and patch before world 1 can use them.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
