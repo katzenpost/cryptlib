@@ -56,7 +56,7 @@ theorem procWith_mac (keysOf : ByteArray → Except String HopKeys) (pkt : ByteA
           geom.routingInfoLength)))).data
         = (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength) ((2 + nike.publicKeySize +
             geom.routingInfoLength) + macLength)).data := by
-  unfold procWith unwrapNIKEWith at h
+  unfold procWith unwrapNIKEWith unwrapNIKEDec at h
   dsimp only at h
   by_cases h1 : pkt.size < 2 + nike.publicKeySize + geom.routingInfoLength + macLength
   · rw [dite_eq_left h1] at h; cases h
@@ -106,7 +106,7 @@ theorem procWith_const (t : HopKeys) (km : Vector UInt8 32) (pkt : ByteArray) :
       = procWith nike cipher (Primitives.MAC.MAC.const (macS.mac (ofVector t.headerMAC)
           (pkt.extract 0 (2 + nike.publicKeySize + geom.routingInfoLength)))) streamS geom
         (fun _ => .ok { t with headerMAC := km }) pkt := by
-  unfold procWith unwrapNIKEWith
+  unfold procWith unwrapNIKEWith unwrapNIKEDec
   rfl
 
 /-- The keys a relay derives for a group element. -/
@@ -123,7 +123,7 @@ theorem procWith_keysOf (keysOf : ByteArray → Except String HopKeys) (pkt : By
     procWith nike cipher macS streamS geom keysOf pkt
       = procWith nike cipher macS streamS geom
         (fun _ => keysOf (pkt.extract 2 (2 + nike.publicKeySize))) pkt := by
-  unfold procWith unwrapNIKEWith
+  unfold procWith unwrapNIKEWith unwrapNIKEDec
   rfl
 
 /-- The relay handed the keys `t` for the element `a` answers a packet with that element by `t`,

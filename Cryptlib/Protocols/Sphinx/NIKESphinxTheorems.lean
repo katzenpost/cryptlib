@@ -1785,11 +1785,12 @@ def unwrapNIKE (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
-/-- `unwrapNIKE` with the hop's keys had from its group element by `keysOf`, in place of the
-relay's private key and the KDF. A game that holds the keys for one group element answers
-with this. -/
-def unwrapNIKEWith (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
+/-- `unwrapNIKE` with the hop's keys had from its group element by `keysOf`, and its payload
+decrypted by `dec`, in place of the relay's private key, the KDF and the payload cipher. A game
+that holds the keys for one group element, or decrypts one payload itself, answers with this. -/
+def unwrapNIKEDec (nike : NIKE) (macS : MAC)
     (streamS : StreamCipher) (geom : Geometry) (keysOf : ByteArray → Except String HopKeys)
+    (dec : HopKeys → ByteArray → ByteArray) (hdec : ∀ k b, (dec k b).size = b.size)
     (pkt : ByteArray) :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size))
@@ -1849,16 +1850,14 @@ def unwrapNIKEWith (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     rw [ByteArray.size_extract]
     omega
   let decPayload :=
-    if rawPayload.size > 0 then cipher.decrypt keys.payloadEncryption.toArray (ofVector
-        keys.headerEncryptionIV) rawPayload
+    if rawPayload.size > 0 then dec keys rawPayload
     else rawPayload
   have hdec : decPayload.size = rawPayload.size := by
     show (if rawPayload.size > 0
-          then cipher.decrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV)
-              rawPayload
+          then dec keys rawPayload
           else rawPayload).size = rawPayload.size
     split
-    · exact cipher.decrypt_size _ _ _
+    · exact hdec _ _
     · rfl
 
   match nextNode with
@@ -1895,6 +1894,17 @@ def unwrapNIKEWith (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
+/-- `unwrapNIKE` with the hop's keys had from its group element by `keysOf`, in place of the
+relay's private key and the KDF. -/
+def unwrapNIKEWith (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
+    (streamS : StreamCipher) (geom : Geometry) (keysOf : ByteArray → Except String HopKeys)
+    (pkt : ByteArray) :
+    Except String
+      (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) :=
+  unwrapNIKEDec nike macS streamS geom keysOf
+    (fun k b => cipher.decrypt k.payloadEncryption.toArray (ofVector k.headerEncryptionIV) b)
+    (fun _ _ => cipher.decrypt_size _ _ _) pkt
+
 /-- A relay unwraps with the keys its private key gives for the packet's group element. -/
 theorem unwrapNIKE_eq_unwrapNIKEWith (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (privKey pkt : ByteArray) :
@@ -1903,7 +1913,7 @@ theorem unwrapNIKE_eq_unwrapNIKEWith (nike : NIKE) (cipher : WideBlockCipher) (m
           let sk ← nikeDecodePrivateKey nike privKey
           let ss ← nikeDH nike sk ge
           pure (deriveHopKeys kdfS ss)) pkt := by
-  unfold unwrapNIKE unwrapNIKEWith
+  unfold unwrapNIKE unwrapNIKEWith unwrapNIKEDec
   simp only [bind_assoc, pure_bind]
 
 set_option maxHeartbeats 1000000 in

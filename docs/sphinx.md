@@ -583,7 +583,8 @@ The second shared step is the payload cipher's (`Protocols/RSORPayload.lean`, `P
 one-query game of the payload cipher, for any scheme of the RSOR games. It rests on
 `viaDec_decOnce`, which was already stated for any scheme. Not yet used: world 0 of NIKE
 Sphinx after its MAC step has still to be written as such a game, and KEM Sphinx has its own
-copy (`KEMSphinxPayload`).
+copy (`KEMSphinxPayload`). For that, the NIKE relay's unwrap takes the payload decryption as a
+function (`unwrapNIKEDec`); the form with a cipher is defined from it, so the body exists once.
 
 Not proved yet for TLU→ of NIKE Sphinx: world 1 and the original's hidden layer as views; the
 MAC, keystream and payload cipher steps on the replaced keys; the last comparison of the two
