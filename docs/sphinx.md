@@ -718,6 +718,14 @@ for it:
      (`onionMsgStream_shift`), and then the onions shown are one packet
      (`onionOfStream_shift`: the header's state at the relay is read off those bytes,
      `nikeHdrTrace_at_msg`). Not yet applied to the games' runs.
+     The two relays are brought to one form, `fwdRelay`: under one header the relay forwards a
+     given header with the block it decrypts, and does not reply. World 0's relay, which
+     answers that header from its tag and keystream (`hdrRelay`), is that form on the next
+     layer's header (`hdrRelay_eq_fwdRelay`). World 1's relay with its patch, the random
+     payload drawn first, is that form on the original's next layer
+     (`hdrRelay_patchDrawn_eq`), when it would not reply to the replacement. World 1's relay
+     behind its two filters is one relay answering by cases (`first_viaOracle_run`). These
+     use `split_append` of `KEMSphinxTLUFinal.lean`, which this file now imports.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).

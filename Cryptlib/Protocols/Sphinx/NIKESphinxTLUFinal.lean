@@ -4,6 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLUNext
+import Cryptlib.Protocols.Sphinx.KEMSphinxTLUFinal
 
 namespace Cryptlib.Protocols.Sphinx.NIKESphinx
 
@@ -900,6 +901,138 @@ variable (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
   (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
 
 local notation "𝒮" => sphinx nike cipher macS kdfS streamS geom hvalid hmactag h16
+
+/-- **A relay behind two filters is one relay that answers by cases.** The packets `chal` picks
+are answered by `f`, the rest by `g`, and the game is the honest relays' with the relay answering
+so. -/
+theorem first_viaOracle_run (chal : ByteArray → Bool) (f g : ByteArray → ProcResult)
+    (sk : Role → nike.PrivateKey) (patch : Protocols.RSOR.Patch 𝒮) {α : Type}
+    (oa : OracleComp (Protocols.RSOR.oracleSpec 𝒮) α) (log : Protocols.RSOR.Log 𝒮) :
+    simulateQ (relayImpl g) (simulateQ (Relay.first chal f)
+        ((simulateQ (viaOracle nike cipher macS kdfS streamS geom hvalid hmactag h16 .relay sk
+          patch) oa).run' log))
+      = (simulateQ (Protocols.RSOR.oracle (m := ProbComp)
+          (fun h o => pure (if h = Role.relay then
+              stepOf geom (if chal (join o) = true then f (join o) else g (join o))
+            else RSOR.proc nike cipher macS kdfS streamS geom (sk h) o))
+          (fun h msg o => pure (if h = Role.relay then
+              replyOf cipher geom msg (if chal (join o) = true then f (join o) else g (join o))
+            else RSOR.reply nike cipher macS kdfS streamS geom (sk h) msg o))
+          patch) oa).run' log := by
+  rw [← QueryImpl.simulateQ_compose, Relay.relayImpl_comp_first]
+  simp only [StateT.run', simulateQ_map]
+  exact congrArg (fun x => (·.1) <$> x)
+    (viaOracle_relayImpl nike cipher macS kdfS streamS geom hvalid hmactag h16 .relay
+      (fun pkt => if chal pkt = true then f pkt else g pkt) sk patch oa log)
+
+/-- The honest relays, the relay answering the header `Hv` from the tag `T`, the keystream `U`
+and the keys `t`, with its block decrypted by `D`. Other headers, and the other relays, are
+answered by `procO` and `replyO`. -/
+def hdrRelay (procO : Role → Onion geom → Option (Protocols.RSOR.Scheme.Step 𝒮))
+    (replyO : Role → Msg geom → Onion geom → Option (Name × Onion geom)) {n : ℕ}
+    (T : Vector UInt8 n) (U : ByteArray) (t : HopKeys) (Hv : Vector UInt8 geom.headerLength)
+    (D : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+      → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (patch : Protocols.RSOR.Patch 𝒮) :
+    QueryImpl (Protocols.RSOR.oracleSpec 𝒮) (StateT (Protocols.RSOR.Log 𝒮) ProbComp) :=
+  Protocols.RSOR.withDec (S := 𝒮) Role.relay Hv (fun o => o.2)
+    (fun o y => stepOf geom (procD nike (Primitives.MAC.MAC.const T) (constStream U) geom
+      (fun _ => .ok t) (fun _ _ => y) (join o)))
+    (fun msg o y => replyOf cipher geom msg (procD nike (Primitives.MAC.MAC.const T)
+      (constStream U) geom (fun _ => .ok t) (fun _ _ => y) (join o)))
+    procO replyO D patch
+
+/-- The honest relays, the relay answering the header `Hv` by forwarding to `name` the header
+`Lh` with the block decrypted by `D`, and not replying. -/
+def fwdRelay (procO : Role → Onion geom → Option (Protocols.RSOR.Scheme.Step 𝒮))
+    (replyO : Role → Msg geom → Onion geom → Option (Name × Onion geom))
+    (Hv : Protocols.RSOR.Scheme.Header 𝒮) (name : Name) (Lh : ByteArray)
+    (D : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+      → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)) :
+    QueryImpl (Protocols.RSOR.oracleSpec 𝒮) (StateT (Protocols.RSOR.Log 𝒮) ProbComp) :=
+  Protocols.RSOR.oracle (S := 𝒮) (m := ProbComp)
+    (fun h o => pure (if h = Role.relay ∧ o.1 = Hv then
+        some (.forward name (split geom (Lh ++ Util.Bytes.ofVector (D o.2))))
+      else procO h o))
+    (fun h m o => pure (if h = Role.relay ∧ o.1 = Hv then none else replyO h m o)) {}
+
+/-- **World 0's relay before the end of the path, in closed form.** A relay that answers the
+header of layer `i` of a header function, from that layer's tag and keystream, forwards the
+header of layer `i + 1` with the block it decrypts, and does not reply. -/
+theorem hdrRelay_eq_fwdRelay (procO : Role → Onion geom → Option (Protocols.RSOR.Scheme.Step 𝒮))
+    (replyO : Role → Msg geom → Onion geom → Option (Name × Onion geom)) {n : ℕ}
+    (T : Vector UInt8 n) (U : ByteArray) (t : HopKeys) (Hv : Vector UInt8 geom.headerLength)
+    (D : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+      → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray)
+    (filler : ByteArray) (path : Array PathHop) (i : ℕ)
+    (hi : i + 1 < path.size) (hn : path.size ≤ geom.nrHops)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hks : ∀ k, (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (htag : ∀ m x, (tag m x).size = macLength) (hge : (ge i).size = nike.publicKeySize)
+    (hcmd : path[i]!.commands = [])
+    (hT : (nikeHdrTrace geom ks tag ge filler path (path.size - i)).isSome)
+    (hksi : ks i = U) (htagi : tag i (hdrMsg geom ks tag ge filler path i) = Util.Bytes.ofVector T)
+    (hblind : nikeBlind nike (ge i) t.blindingFactor = ge (i + 1))
+    (hHv : Util.Bytes.ofVector Hv = layerHdr geom ks tag ge filler path i) :
+    hdrRelay nike cipher macS kdfS streamS geom hvalid hmactag h16 procO replyO T U t Hv D {}
+      = fwdRelay nike cipher macS kdfS streamS geom hvalid hmactag h16 procO replyO Hv
+        path[i + 1]!.id (layerHdr geom ks tag ge filler path (i + 1)) D := by
+  obtain ⟨hnnh, hper, hrouting, -⟩ := id hvalid
+  refine congrArg₂ (fun p r => Protocols.RSOR.oracle (S := 𝒮) (m := ProbComp) p r {})
+    (funext fun h => funext fun o => congrArg pure ?_)
+    (funext fun h => funext fun m => funext fun o => congrArg pure ?_)
+  · by_cases hc : h = Role.relay ∧ o.1 = Hv
+    · exact Eq.trans (ite_eq_left hc) (Eq.trans (stepOf_layerHdr nike geom T U t (D o.2) ks tag ge
+        filler path i o hi hnnh (by omega) hrouting hn hfill hks htag hge hcmd hT hksi htagi hblind
+        (by rw [hc.2]; exact hHv) (by omega)) (Eq.symm (ite_eq_left hc)))
+    · exact Eq.trans (ite_eq_right hc) (Eq.symm (ite_eq_right hc))
+  · by_cases hc : h = Role.relay ∧ o.1 = Hv
+    · exact Eq.trans (ite_eq_left hc) (Eq.trans (replyOf_layerHdr nike geom cipher m T U t (D o.2)
+        ks tag ge filler path i o hi hnnh (by omega) hrouting hn hfill hks htag hge hcmd hT hksi
+        htagi hblind (by rw [hc.2]; exact hHv) (by omega)) (Eq.symm (ite_eq_left hc)))
+    · exact Eq.trans (ite_eq_right hc) (Eq.symm (ite_eq_right hc))
+
+/-- **World 1's patched relay before the end of the path, in the same form.** Whatever the
+relay would answer under the replacement's header, the patch forwards the original's next
+layer: with its own payload for the unchanged block, with the random block `g` otherwise. -/
+theorem hdrRelay_patchDrawn_eq {pk : RSOR.Key nike} {keys : Role → RSOR.Key nike × nike.PrivateKey}
+    (names : Role → Name)
+    (c : Protocols.RSOR.ForwardChallenge (S := 𝒮)
+      (honAt nike cipher macS kdfS streamS geom hvalid hmactag h16 .relay names pk keys))
+    (hn : c.pos + 1 < c.req.fwd.hops.length) (r : RSOR.Randomness nike geom) (mine : Onion geom)
+    (g pl : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (procO : Role → Onion geom → Option (Protocols.RSOR.Scheme.Step 𝒮))
+    (replyO : Role → Msg geom → Onion geom → Option (Name × Onion geom)) {n : ℕ}
+    (T : Vector UInt8 n) (U : ByteArray) (t : HopKeys)
+    (D : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+      → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (Lh : ByteArray) (hLh : Lh.size = geom.headerLength)
+    (hrep : ∀ (m : Msg geom) (o : Onion geom), o.1 = mine.1 →
+      replyOf cipher geom m (procD nike (Primitives.MAC.MAC.const T) (constStream U) geom
+        (fun _ => .ok t) (fun _ _ => D o.2) (join o)) = none) :
+    hdrRelay nike cipher macS kdfS streamS geom hvalid hmactag h16 procO replyO T U t mine.1 D
+        (c.patchDrawn (split geom (Lh ++ Util.Bytes.ofVector pl)) r mine g)
+      = fwdRelay nike cipher macS kdfS streamS geom hvalid hmactag h16 procO replyO mine.1
+        c.req.fwd.hops[c.pos.val + 1].name Lh (fun y => if y = mine.2 then pl else g) := by
+  refine Protocols.RSOR.oracle_pure_patch (S := 𝒮) _ _ _ _ _ (fun h o => ?_) (fun h m o => ?_)
+  · unfold Protocols.RSOR.ForwardChallenge.patchDrawn
+    dsimp only
+    by_cases hc : h = Role.relay ∧ o.1 = mine.1
+    · refine congrArg pure (Eq.trans (ite_eq_left hc) (Eq.trans (dite_eq_left hn)
+        (Eq.trans (congrArg (fun z => some (Protocols.RSOR.Step.forward _ z)) ?_)
+          (Eq.symm (ite_eq_left hc)))))
+      rw [KEMSphinx.split_append geom _ _ hLh, KEMSphinx.split_append geom _ _ hLh]
+      by_cases ho : o.2 = mine.2
+      · exact (ite_eq_left ho).trans (Prod.ext rfl (ite_eq_left ho).symm)
+      · exact (ite_eq_right ho).trans (Prod.ext rfl (ite_eq_right ho).symm)
+    · exact congrArg pure (Eq.trans (ite_eq_right hc) (Eq.trans (ite_eq_right hc)
+        (Eq.symm (ite_eq_right hc))))
+  · unfold Protocols.RSOR.ForwardChallenge.patchDrawn Protocols.RSOR.ForwardChallenge.patchWith
+    refine Eq.trans (ite_eq_right fun hx => absurd hx.2.2 (by omega)) ?_
+    by_cases hc : h = Role.relay ∧ o.1 = mine.1
+    · exact Eq.trans (ite_eq_left hc) (Eq.trans (hrep m o hc.2) (Eq.symm (ite_eq_left hc)))
+    · exact Eq.trans (ite_eq_right hc) (Eq.symm (ite_eq_right hc))
 
 /-- The hops' keys of world 0 after its steps: the sender's, the honest relay's replaced by
 its blinding seed alone. -/
