@@ -1894,6 +1894,20 @@ def unwrapNIKEDec (nike : NIKE) (macS : MAC)
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
+/-- The relay decrypts one block: the packet's payload. -/
+theorem unwrapNIKEDec_congr (nike : NIKE) (macS : MAC) (streamS : StreamCipher) (geom : Geometry)
+    (keysOf : ByteArray → Except String HopKeys) (dec dec' : HopKeys → ByteArray → ByteArray)
+    (hdec : ∀ k b, (dec k b).size = b.size) (hdec' : ∀ k b, (dec' k b).size = b.size)
+    (pkt : ByteArray)
+    (h : ∀ k, dec k (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength + macLength)
+        pkt.size)
+      = dec' k (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength + macLength)
+        pkt.size)) :
+    unwrapNIKEDec nike macS streamS geom keysOf dec hdec pkt
+      = unwrapNIKEDec nike macS streamS geom keysOf dec' hdec' pkt := by
+  unfold unwrapNIKEDec
+  simp only [h]
+
 /-- `unwrapNIKE` with the hop's keys had from its group element by `keysOf`, in place of the
 relay's private key and the KDF. -/
 def unwrapNIKEWith (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)

@@ -109,6 +109,58 @@ theorem procWith_const (t : HopKeys) (km : Vector UInt8 32) (pkt : ByteArray) :
   unfold procWith unwrapNIKEWith unwrapNIKEDec
   rfl
 
+/-- Decryption of the blocks of `L` bytes by `D`; a block of another length is left as it is. -/
+def blockDec {L : ℕ} (D : HopKeys → Vector UInt8 L → Vector UInt8 L) (k : HopKeys)
+    (b : ByteArray) : ByteArray :=
+  if b.size = L then ofVector (D k (Util.Bytes.toVecN L b)) else b
+
+omit nike cipher macS kdfS streamS geom in
+theorem blockDec_size {L : ℕ} (D : HopKeys → Vector UInt8 L → Vector UInt8 L) (k : HopKeys)
+    (b : ByteArray) : (blockDec D k b).size = b.size := by
+  unfold blockDec
+  split
+  · next h => rw [Util.Bytes.size_ofVector, h]
+  · rfl
+
+/-- What a relay returns for a packet, its keys had by `keysOf` and its payload, when it has
+`L` bytes, decrypted by `D`. -/
+def procD {L : ℕ} (keysOf : ByteArray → Except String HopKeys)
+    (D : HopKeys → Vector UInt8 L → Vector UInt8 L) (pkt : ByteArray) : ProcResult :=
+  match unwrapNIKEDec nike macS streamS geom keysOf (blockDec D) (blockDec_size D) pkt with
+  | .ok (p, t, c, f) => some (p, t, c, f.map ofVector)
+  | .error _ => none
+
+/-- A relay decrypts one block: its answer reads `D` on the packet's payload only. -/
+theorem procD_congr {L : ℕ} (keysOf : ByteArray → Except String HopKeys)
+    (D D' : HopKeys → Vector UInt8 L → Vector UInt8 L) (pkt : ByteArray)
+    (h : ∀ k, D k (Util.Bytes.toVecN L (pkt.extract (2 + nike.publicKeySize +
+        geom.routingInfoLength + Constants.macLength) pkt.size))
+      = D' k (Util.Bytes.toVecN L (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength +
+          Constants.macLength) pkt.size))) :
+    procD nike macS streamS geom keysOf D pkt = procD nike macS streamS geom keysOf D' pkt := by
+  unfold procD
+  rw [unwrapNIKEDec_congr nike macS streamS geom keysOf (blockDec D) (blockDec D') _ _ pkt
+    fun k => by unfold blockDec; rw [h k]]
+
+/-- **A relay with a cipher is a relay that decrypts by the cipher**, on a packet whose payload
+has `L` bytes. -/
+theorem procWith_eq_procD {L : ℕ} (keysOf : ByteArray → Except String HopKeys) (pkt : ByteArray)
+    (hL : (pkt.extract (2 + nike.publicKeySize + geom.routingInfoLength + Constants.macLength)
+        pkt.size).size = L) :
+    procWith nike cipher macS streamS geom keysOf pkt
+      = procD nike macS streamS geom keysOf
+        (fun k y => Util.Bytes.toVecN L (cipher.decrypt k.payloadEncryption.toArray
+          (ofVector k.headerEncryptionIV) (ofVector y))) pkt := by
+  unfold procWith unwrapNIKEWith procD
+  rw [unwrapNIKEDec_congr nike macS streamS geom keysOf _ (blockDec fun k y =>
+    Util.Bytes.toVecN L (cipher.decrypt k.payloadEncryption.toArray
+      (ofVector k.headerEncryptionIV) (ofVector y))) _ (blockDec_size _) pkt fun k => by
+    unfold blockDec
+    rw [ite_eq_left hL]
+    dsimp only
+    rw [Util.Bytes.ofVector_toVecN _ hL,
+      Util.Bytes.ofVector_toVecN _ (by rw [cipher.decrypt_size, hL])]]
+
 /-- The keys a relay derives for a group element. -/
 def relayKeys (sk : nike.PrivateKey) (ge : ByteArray) : Except String HopKeys :=
   deriveHopKeys kdfS <$> nikeDH nike sk ge
