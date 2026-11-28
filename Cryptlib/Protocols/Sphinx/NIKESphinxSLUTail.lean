@@ -126,7 +126,7 @@ def backPost0 {names : Role → Name} {A : (Protocols.RSOR.backwardWith W).Adver
     backFnRun0 nike cipher macS kdfS streamS geom hvalid hmactag h16 W ((s.2.1, default, s.2.2.1) :
         PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith
         W) .relay names (RSOR.Randomness nike geom × (Vector UInt8 (geom.payloadTagLength +
-        geom.forwardPayloadLength))) A) s.2.2.2.1 s.2.2.2.2
+        geom.forwardPayloadLength))) A) (fun y => if y = s.2.2.2.1 then s.2.2.1.o.2 else s.2.2.2.2)
       (spliceAt (drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16
           (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS
           geom hvalid hmactag h16 W names) s.2.2.1) (Function.update (keysKs geom streamS
@@ -264,13 +264,16 @@ theorem backPost0_real {names : Role → Name} {A : (Protocols.RSOR.backwardWith
       hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS
       streamS geom hvalid hmactag h16 W names) x.2.2).size).toArray 0 :=
     groupElem_zero nike _ _ _
-  have hx : ∀ (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray),
-      backFnRun0 nike cipher macS kdfS streamS geom hvalid hmactag h16 W x u v ks tag ge =
+  have hx : ∀ (dec : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength) → Vector
+      UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)) (ks : ℕ → ByteArray) (tag : ℕ →
+      ByteArray → ByteArray)
+      (ge : ℕ → ByteArray),
+      backFnRun0 nike cipher macS kdfS streamS geom hvalid hmactag h16 W x dec ks tag ge =
           backFnRun0 nike cipher macS kdfS streamS geom hvalid hmactag h16 W ((x.1, default, x.2.2)
           : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16
           (Protocols.RSOR.backwardWith W) .relay names (RSOR.Randomness nike geom × (Vector UInt8
-          (geom.payloadTagLength + geom.forwardPayloadLength))) A) u v ks tag ge :=
-    fun _ _ _ => rfl
+          (geom.payloadTagLength + geom.forwardPayloadLength))) A) dec ks tag ge :=
+    fun _ _ _ _ => rfl
   rw [backRun0_fnMac nike cipher macS kdfS streamS geom hvalid hmactag h16 W x U u v k hk hn hT]
   unfold backPost0
   refine Eq.trans ?_ (ite_eq_right hne).symm
