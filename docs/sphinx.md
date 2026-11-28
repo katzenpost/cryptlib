@@ -828,7 +828,13 @@ for it:
      blinding factor is not read), and world 1's patched relay is that for the original's
      recipient and decryption (`hdrRelay_patchWith_last`), when for the unchanged block both
      decryptions begin with the zero tag and the original's carries its message and reply,
-     and for a changed block neither begins with the zero tag. Not yet applied to the draws.
+     and for a changed block neither begins with the zero tag. Applied to world 0: on a draw
+     at the end of the path it is the game against `lastRelay` for the original's recipient
+     (`strRun_fwd0_last`, `hdrRelay_onion_last`, `hdrMsg_size_last`), when the path's last hop
+     builds; the relay's blinding seed is not read. The exit relay's reply to the sender's
+     payload is the first layer of the reply onion when the request's two paths build
+     (`replyOf_body`, from `reply_spec` of the correctness proof). Not yet applied to world
+     1's draws.
      The last comparison is in seven files, so that no file is large to build:
      `NIKESphinxTLUFn.lean` (the hops' functions, no games), `NIKESphinxTLURelay.lean`,
      `NIKESphinxTLUBlind.lean`, `NIKESphinxTLUWorld1.lean`, `NIKESphinxTLUJoin.lean`,
