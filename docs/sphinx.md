@@ -1023,7 +1023,12 @@ blinding factor (`tailOf`), or from a fresh secret over the rest of the path (`f
 World 0 gives an adversary on it (`backDropAdv`), and replacing what lies after the relay by a
 fresh start costs that adversary's advantage and the chance that the reply's header does not
 build from the relay's layer on (`back0E_sub_back0F_le`, the event `backBadT`, not bounded).
-The world it leaves (`back0F`) is not yet shown to be world 1 with the reply-like onion. On the backward path the comparison is to follow TLU→'s last
+The world it leaves (`back0F`) is not yet shown to be world 1 with the reply-like onion. Towards
+that, the reply-like onion is in closed form (`NIKESphinxSLUSwap.lean`): the header of a layer
+of a sender's header-only packet is `layerHdr` on the sender's hop keys (`layer_fst_closed`),
+so the onion sent on and the header that goes with it are the first and the last layer header
+of a packet over the rest of the backward path (`replySwap_fst`, `replySwap_snd`), when that
+packet builds. On the backward path the comparison is to follow TLU→'s last
 one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
