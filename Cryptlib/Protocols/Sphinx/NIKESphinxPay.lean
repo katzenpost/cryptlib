@@ -707,6 +707,224 @@ theorem propPay_exp_false_evalDistEq_prg (place : {pk : RSOR.Key nike} → PropC
     EvalDistEq.bind_right _ fun u => EvalDistEq.bind_right _ fun v => of_eq ?_
   exact hrun iv km he seed D u v
 
+/-- Those draws as draws of the payload game, with no header key or IV. -/
+def propStrPay {Oth : Type} {A : P.Adversary} (x : PropStrX nike cipher macS kdfS streamS geom
+    hvalid hmactag h16 P ρ names Oth A) : PropPayX nike cipher macS kdfS streamS geom hvalid
+    hmactag h16 P ρ names Oth A :=
+  (default, x.1, default, x.2.1, x.2.2)
+
+/-- The honest relay's tag on the bytes `MS`, which are given from its header keystream. -/
+def propStrTag {Oth : Type} {A : P.Adversary} (MS : PropStrX nike cipher macS kdfS streamS geom
+    hvalid hmactag h16 P ρ names Oth A → KEMSphinx.Keystream geom → ByteArray)
+    (x : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A) (U :
+        KEMSphinx.Keystream geom) : Vector UInt8 macS.tagSize :=
+  macS.mac (Util.Bytes.ofVector x.1) (Util.Bytes.ofVector (Util.Bytes.toVecN (2 +
+      nike.publicKeySize + geom.routingInfoLength) (MS x U)))
+
+/-- **A game after its payload step, played from the honest relay's header keystream**: the
+relay answers one header, reads its keystream as given, decrypts the block `u` to the sender's
+and any other to `v`. The tagged bytes, the sender's block and the world are given from the
+keystream. -/
+def propStrRun (place : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom hvalid
+    hmactag h16 P ρ names pk → Array PathHop × ℕ)
+    {Oth : Type} (A : P.Adversary)
+    (MS : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        KEMSphinx.Keystream geom → ByteArray)
+    (plainS : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        KEMSphinx.Keystream geom → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (viewS : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        KEMSphinx.Keystream geom → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+        → Protocols.RSOR.World 𝒮)
+    (x : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A) (U :
+        KEMSphinx.Keystream geom) (u v : Vector UInt8 (geom.payloadTagLength +
+        geom.forwardPayloadLength)) : ProbComp Bool :=
+  (simulateQ (Protocols.RSOR.withDec (S := 𝒮) ρ
+      (Util.Bytes.toVecN _ ((Util.Bytes.ofVector (Util.Bytes.toVecN (2 + nike.publicKeySize +
+          geom.routingInfoLength) (MS x U))) ++ Util.Bytes.ofVector (propStrTag nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 P ρ names MS x U)))
+      (fun o => o.2)
+      (fun (o : Onion geom) (y : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+          => stepOf geom (procD nike
+        (Primitives.MAC.MAC.const (propStrTag nike cipher macS kdfS streamS geom hvalid hmactag h16
+            P ρ names MS x U)) (constStream (Util.Bytes.ofVector U)) geom
+        (fun _ => .ok (restKeys (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+            P ρ names (propStrPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names
+            x) default).1 default)) (fun _ _ => y) (join o)))
+      (fun (msg : Msg geom) (o : Onion geom) (y : Vector UInt8 (geom.payloadTagLength +
+          geom.forwardPayloadLength)) =>
+        replyOf cipher geom msg (procD nike
+          (Primitives.MAC.MAC.const (propStrTag nike cipher macS kdfS streamS geom hvalid hmactag
+              h16 P ρ names MS x U)) (constStream (Util.Bytes.ofVector U)) geom
+          (fun _ => .ok (restKeys (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag
+              h16 P ρ names (propStrPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
+              names x) default).1 default)) (fun _ _ => y) (join o)))
+      (fun h o => if h = ρ then
+          stepOf geom (noneAns nike cipher macS kdfS streamS geom x.2.2.k.2
+            (drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place x.2.2)
+                (join o))
+        else RSOR.proc nike cipher macS kdfS streamS geom (x.2.2.keys h).2 o)
+      (fun h msg o => if h = ρ then
+          replyOf cipher geom msg (noneAns nike cipher macS kdfS streamS geom x.2.2.k.2
+            (drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place x.2.2)
+                (join o))
+        else RSOR.reply nike cipher macS kdfS streamS geom (x.2.2.keys h).2 msg o)
+      (fun y => if y = u then plainS x U else v)
+      (viewS x U u).patch)
+    (A.guess x.2.2.st (viewS x U u).onion)).run' x.2.2.log
+
+set_option maxHeartbeats 2000000 in
+/-- **The payload game's ideal world reads the relay's header key and IV through its
+keystream only**, when its tagged bytes, block and world do. -/
+theorem propPayIdealRun_eq_strRun (place : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS
+    streamS geom hvalid hmactag h16 P ρ names pk → Array PathHop × ℕ)
+    (Oth : Type) (draw : ProbComp Oth) (A : P.Adversary) (M : Rest × PropDraw nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 P ρ names Oth A → ByteArray)
+    (plain : PropPayX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (viewE : PropPayX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength) → Protocols.RSOR.World 𝒮)
+    (MS : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        KEMSphinx.Keystream geom → ByteArray)
+    (plainS : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        KEMSphinx.Keystream geom → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (viewS : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        KEMSphinx.Keystream geom → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+        → Protocols.RSOR.World 𝒮)
+    (iv : Vector UInt8 16) (km he seed : Vector UInt8 32) (D : PropDraw nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 P ρ names Oth A)
+    (u v : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (hM : M (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names ((iv, km,
+        he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth
+        A) default) = MS ((km, seed, D) : PropStrX nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 P ρ names Oth A) ((KEMSphinx.keystreamPRG streamS geom).gen (he, iv)))
+    (hplain : plain ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 P ρ names Oth A) = plainS ((km, seed, D) : PropStrX nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 P ρ names Oth A) ((KEMSphinx.keystreamPRG streamS geom).gen
+        (he, iv)))
+    (hview : viewE ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 P ρ names Oth A) u = viewS ((km, seed, D) : PropStrX nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 P ρ names Oth A) ((KEMSphinx.keystreamPRG streamS geom).gen
+        (he, iv)) u) :
+    propPayIdealRun nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth draw
+        A M plain viewE ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 P ρ names Oth A) u v
+      = propStrRun nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place A MS
+          plainS viewS ((km, seed, D) : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 P ρ names Oth A) ((KEMSphinx.keystreamPRG streamS geom).gen (he, iv)) u v := by
+  have hU : Util.Bytes.ofVector ((KEMSphinx.keystreamPRG streamS geom).gen (he, iv))
+      = streamS.keystream (Util.Bytes.ofVector he) (Util.Bytes.ofVector iv)
+        (geom.routingInfoLength + geom.perHopRoutingInfoLength) :=
+    Util.Bytes.ofVector_toVecN _ (streamS.keystream_size _ _ _)
+  have htag : propPayTag nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names M ((iv,
+      km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names
+      Oth A) = (propStrTag nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names MS ((km,
+      seed, D) : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A)
+      ((KEMSphinx.keystreamPRG streamS geom).gen (he, iv))) := by
+    unfold propPayTag propStrTag macMsg
+    rw [hM]
+  have hhdr : propPayHeader nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names M ((iv,
+      km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names
+      Oth A)
+      = Util.Bytes.toVecN _ ((Util.Bytes.ofVector (Util.Bytes.toVecN (2 + nike.publicKeySize +
+          geom.routingInfoLength) (MS ((km, seed, D) : PropStrX nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 P ρ names Oth A) ((KEMSphinx.keystreamPRG streamS geom).gen (he,
+          iv))))) ++ Util.Bytes.ofVector (propStrTag nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 P ρ names MS ((km, seed, D) : PropStrX nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 P ρ names Oth A) ((KEMSphinx.keystreamPRG streamS geom).gen (he,
+          iv)))) := by
+    unfold propPayHeader
+    rw [htag]
+    unfold macMsg
+    rw [hM]
+  have hks : streamS.keystream
+      (Util.Bytes.ofVector (restKeys (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 P ρ names ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 P ρ names Oth A) default).1 default).headerEncryption)
+      (Util.Bytes.ofVector (restKeys (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 P ρ names ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 P ρ names Oth A) default).1 default).headerEncryptionIV)
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+      = Util.Bytes.ofVector ((KEMSphinx.keystreamPRG streamS geom).gen (he, iv)) := hU.symm
+  have hstep : (propPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth
+      draw A M plain viewE).step ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 P ρ names Oth A)
+      = (fun (o : Onion geom) (y : Vector UInt8 (geom.payloadTagLength +
+          geom.forwardPayloadLength)) => stepOf geom (procD nike
+        (Primitives.MAC.MAC.const (propStrTag nike cipher macS kdfS streamS geom hvalid hmactag h16
+            P ρ names MS ((km, seed, D) : PropStrX nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 P ρ names Oth A) ((KEMSphinx.keystreamPRG streamS geom).gen (he, iv))))
+            (constStream (Util.Bytes.ofVector ((KEMSphinx.keystreamPRG streamS geom).gen (he,
+            iv)))) geom
+        (fun _ => .ok (restKeys (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+            P ρ names (propStrPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names
+            ((km, seed, D) : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
+            names Oth A)) default).1 default)) (fun _ _ => y) (join o))) :=
+    funext fun o => funext fun y => by
+      show stepOf geom (procD nike (Primitives.MAC.MAC.const (propPayTag nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 P ρ names M ((iv, km, he, seed, D) : PropPayX nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A))) streamS geom
+        (fun _ => .ok (restKeys (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+            P ρ names ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 P ρ names Oth A) default).1 default)) (fun _ _ => y)
+        (join o)) = _
+      rw [htag, procD_stream nike _ streamS geom
+        (restKeys (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names
+            ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid hmactag h16
+            P ρ names Oth A) default).1 default) default default (fun _ => y) (join o),
+        hks]
+      rfl
+  have hrep : (propPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth
+      draw A M plain viewE).rep ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 P ρ names Oth A)
+      = (fun (msg : Msg geom) (o : Onion geom) (y : Vector UInt8 (geom.payloadTagLength +
+          geom.forwardPayloadLength)) =>
+        replyOf cipher geom msg (procD nike
+          (Primitives.MAC.MAC.const (propStrTag nike cipher macS kdfS streamS geom hvalid hmactag
+              h16 P ρ names MS ((km, seed, D) : PropStrX nike cipher macS kdfS streamS geom hvalid
+              hmactag h16 P ρ names Oth A) ((KEMSphinx.keystreamPRG streamS geom).gen (he, iv))))
+              (constStream (Util.Bytes.ofVector ((KEMSphinx.keystreamPRG streamS geom).gen (he,
+              iv)))) geom
+          (fun _ => .ok (restKeys (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag
+              h16 P ρ names (propStrPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
+              names ((km, seed, D) : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16
+              P ρ names Oth A)) default).1 default)) (fun _ _ => y) (join o))) :=
+    funext fun msg => funext fun o => funext fun y => by
+      show replyOf cipher geom msg (procD nike
+        (Primitives.MAC.MAC.const (propPayTag nike cipher macS kdfS streamS geom hvalid hmactag h16
+            P ρ names M ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 P ρ names Oth A))) streamS geom
+        (fun _ => .ok (restKeys (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+            P ρ names ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 P ρ names Oth A) default).1 default)) (fun _ _ => y)
+        (join o)) = _
+      rw [htag, procD_stream nike _ streamS geom
+        (restKeys (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names
+            ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom hvalid hmactag h16
+            P ρ names Oth A) default).1 default) default default (fun _ => y) (join o),
+        hks]
+      rfl
+  have key2 : ∀ (Hd Hd' : (𝒮).Header)
+      (step step' : (𝒮).Onion → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength) →
+          Option (𝒮).Step)
+      (rep rep' : (𝒮).Msg → (𝒮).Onion → Vector UInt8 (geom.payloadTagLength +
+          geom.forwardPayloadLength) → Option ((𝒮).Name × (𝒮).Onion))
+      (proc : Role → (𝒮).Onion → Option (𝒮).Step)
+      (reply : Role → (𝒮).Msg → (𝒮).Onion → Option ((𝒮).Name × (𝒮).Onion))
+      (pl pl' : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)) (patch patch' :
+          Protocols.RSOR.Patch 𝒮)
+      (oa oa' : OracleComp (Protocols.RSOR.oracleSpec 𝒮) Bool) (log : Protocols.RSOR.Log 𝒮),
+      Hd = Hd' → step = step' → rep = rep' → pl = pl' → patch = patch' → oa = oa' →
+      (simulateQ (Protocols.RSOR.withDec (S := 𝒮) ρ Hd (fun o => o.2) step rep proc reply
+          (fun y => if y = u then pl else v) patch) oa).run' log
+        = (simulateQ (Protocols.RSOR.withDec (S := 𝒮) ρ Hd' (fun o => o.2) step' rep'
+          proc reply (fun y => if y = u then pl' else v) patch') oa').run' log := by
+    rintro _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ rfl rfl rfl rfl rfl rfl
+    rfl
+  unfold propPayIdealRun propStrRun
+  exact key2 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ hhdr hstep hrep hplain
+    (congrArg (fun w : Protocols.RSOR.World 𝒮 => w.patch) hview)
+    (congrArg (fun w : Protocols.RSOR.World 𝒮 => A.guess D.st w.onion) hview)
+
 end PropPay
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
