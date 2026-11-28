@@ -592,6 +592,121 @@ theorem macOnly_sub_propPay_le (place : {pk : RSOR.Key nike} → PropCh nike cip
         hmactag h16 P ρ names place Oth draw A M plain viewE) hwf false]
   exact (abs_sub_le _ _ _).trans (add_le_add h1 le_rfl)
 
+/-! ## The keystream step -/
+
+/-- The draws besides the honest relay's header key and IV: its MAC key and blinding seed, and
+the game's draws. -/
+abbrev PropStrX (Oth : Type) (A : P.Adversary) :=
+  Vector UInt8 32 × Vector UInt8 32 × PropDraw nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 P ρ names Oth A
+
+/-- The payload game with the ideal cipher, on its draws. -/
+def propPayIdealRun (place : {pk : RSOR.Key nike} → PropCh nike cipher macS kdfS streamS geom
+    hvalid hmactag h16 P ρ names pk → Array PathHop × ℕ)
+    (Oth : Type) (draw : ProbComp Oth) (A : P.Adversary) (M : Rest × PropDraw nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 P ρ names Oth A → ByteArray)
+    (plain : PropPayX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (viewE : PropPayX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength) → Protocols.RSOR.World 𝒮)
+    (x : PropPayX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A) (u v :
+        Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)) : ProbComp Bool :=
+  (simulateQ (Protocols.RSOR.withDec (S := 𝒮) (propPay nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 P ρ names place Oth draw A M plain viewE).role ((propPay nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 P ρ names place Oth draw A M plain viewE).header x) (propPay
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth draw A M plain
+      viewE).key
+      ((propPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth draw A M
+          plain viewE).step x) ((propPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
+          names place Oth draw A M plain viewE).rep x) ((propPay nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 P ρ names place Oth draw A M plain viewE).proc x) ((propPay nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth draw A M plain
+          viewE).reply x)
+      (fun y => if y = u then (propPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ
+          names place Oth draw A M plain viewE).plain x else v) ((propPay nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 P ρ names place Oth draw A M plain viewE).patch x u))
+    ((propPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth draw A M
+        plain viewE).rest x u)).run' ((propPay nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 P ρ names place Oth draw A M plain viewE).log x)
+
+/-- **The adversary against the keystream generator**: it plays `run` from the keystream it
+is given. -/
+def propStreamAdv (Oth : Type) (draw : ProbComp Oth) (A : P.Adversary) (run : PropStrX nike cipher
+    macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A → KEMSphinx.Keystream geom → Vector
+    UInt8 (geom.payloadTagLength + geom.forwardPayloadLength) → Vector UInt8 (geom.payloadTagLength
+    + geom.forwardPayloadLength) → ProbComp Bool) :
+    PRGScheme.PRGAdversary (KEMSphinx.Keystream geom) := fun U => do
+  let km ← $ᵗ (Vector UInt8 32)
+  let seed ← $ᵗ (Vector UInt8 32)
+  let D ← propDrawOf nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth draw A
+  let u ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+  let v ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+  run (km, seed, D) U u v
+
+set_option maxHeartbeats 1000000 in
+/-- **The keystream step.** If the payload game with the ideal cipher reads the honest
+relay's header key and IV through its keystream only, as `run` on that keystream, it is the
+real experiment of the keystream generator for `propStreamAdv`. -/
+theorem propPay_exp_false_evalDistEq_prg (place : {pk : RSOR.Key nike} → PropCh nike cipher macS
+    kdfS streamS geom hvalid hmactag h16 P ρ names pk → Array PathHop × ℕ)
+    (Oth : Type) (draw : ProbComp Oth) (A : P.Adversary) (M : Rest × PropDraw nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 P ρ names Oth A → ByteArray)
+    (plain : PropPayX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (viewE : PropPayX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength) → Protocols.RSOR.World 𝒮)
+    (run : PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth A →
+        KEMSphinx.Keystream geom → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)
+        → Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength) → ProbComp Bool)
+    (hrun : ∀ (iv : Vector UInt8 16) (km he seed : Vector UInt8 32) (D : PropDraw nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 P ρ names Oth A)
+      (u v : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)),
+      (propPayIdealRun nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth
+          draw A M plain viewE ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 P ρ names Oth A) u v)
+        = run (km, seed, D) ((KEMSphinx.keystreamPRG streamS geom).gen (he, iv)) u v) :
+    (propPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth draw A M
+        plain viewE).exp cipher false
+      =ᵈ PRGScheme.prgRealExperiment (KEMSphinx.keystreamPRG streamS geom) (propStreamAdv nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names Oth draw A run) := by
+  have hb : ∀ {α β : Type},
+      Function.Bijective (Function.uncurry fun (a : α) (b : β) => (a, b)) :=
+    fun {_ _} => Function.bijective_id
+  have of_eq : ∀ {a b : ProbComp Bool}, a = b → a =ᵈ b := fun h => h ▸ EvalDistEq.rfl
+  have h0 : (propPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth draw
+      A M plain viewE).exp cipher false
+      = ($ᵗ (Vector UInt8 48)) >>= fun _ => ($ᵗ (Vector UInt8 16)) >>= fun iv =>
+        ($ᵗ (Vector UInt8 32)) >>= fun km => ($ᵗ (Vector UInt8 32)) >>= fun he =>
+        ($ᵗ (Vector UInt8 32)) >>= fun seed => propDrawOf nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 P ρ names Oth draw A >>= fun D =>
+        ($ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))) >>= fun u => ($ᵗ
+            (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))) >>= fun v =>
+          (propPayIdealRun nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place
+              Oth draw A M plain viewE ((iv, km, he, seed, D) : PropPayX nike cipher macS kdfS
+              streamS geom hvalid hmactag h16 P ρ names Oth A) u v) := by
+    unfold Protocols.RSOR.PayloadGame.exp propPayIdealRun
+    simp only [Bool.false_eq_true, ↓reduceIte]
+    refine bind_congr fun kp => bind_congr fun iv => ?_
+    show ((propPay nike cipher macS kdfS streamS geom hvalid hmactag h16 P ρ names place Oth draw A
+        M plain viewE).draw iv >>= fun x => _) = _
+    unfold propPay
+    simp only [bind_assoc, pure_bind]
+  rw [h0]
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+  unfold PRGScheme.prgRealExperiment propStreamAdv
+  refine EvalDistEq.trans ?_ (evalDistEq_pair_of_bijective
+    (g := fun (he : Vector UInt8 32) (iv : Vector UInt8 16) => (he, iv)) hb _)
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun km =>
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun he => ?_
+  refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.bind_right _ fun iv => EvalDistEq.bind_right _ fun km =>
+    EvalDistEq.bind_right _ fun seed => EvalDistEq.bind_right _ fun D =>
+    EvalDistEq.bind_right _ fun u => EvalDistEq.bind_right _ fun v => of_eq ?_
+  exact hrun iv km he seed D u v
+
 end PropPay
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx

@@ -963,7 +963,12 @@ key, and the world shown is some `viewE` at the encryption of some `plain` under
 the game after the MAC step differs from its payload game with an ideal cipher by a one-query
 advantage against the cipher and the chance of a draw that is not good. The TLU→ proof has its
 own copy of this step, typed to its game (`forward_only_sub_ideal_le`); it could be restated
-through the general one. SLU← uses the general step for world 0
+through the general one. The same file has the probability part of the keystream step
+(`propPay_exp_false_evalDistEq_prg`, the adversary `propStreamAdv`): if the payload game with
+the ideal cipher reads the relay's header key and IV through its keystream only, as some `run`
+on that keystream, it is the real experiment of the keystream generator. What each world's
+`run` is, and that the game reads the key so, is left to the property; SLU← does not have
+that yet. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
 nothing under it and the world does not read it (`backViewTAt_back`), so the block is one the
