@@ -110,6 +110,182 @@ theorem layerHdr_join (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray
   exact layerHdr_front nike geom ks ks' tag tag' ge ge' filler filler' path path' j (by omega)
     (by omega) h hM htj hT hT' hnnh hle hn hn' hfill hfill' htag htag' hgej (hgj ▸ hgej)
 
+omit nike cipher macS kdfS streamS hvalid hmactag h16 in
+/-- **A header whose hops' functions are spliced at hop `j`**: its layers after hop `j` are
+the layers of a header over the rest of the path, built from the spliced-in functions, with the
+long filler followed by the front of the padding as its filler. -/
+theorem layerHdr_spliceAt_drop (kf kg : ℕ → ByteArray) (tf tg : ℕ → ByteArray → ByteArray)
+    (gf gg : ℕ → ByteArray) (fil : ByteArray) (path path' : Array PathHop) (j : ℕ)
+    (hsz : path'.size + (j + 1) = path.size) (hn : path.size ≤ geom.nrHops)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
+    (hrouting : geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hfill : fil.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hkf : ∀ k, (kf k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hkg : ∀ k,
+        (kg k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (htf : ∀ i m, (tf i m).size = macLength) (htg : ∀ i m, (tg i m).size = macLength)
+    (hc : ∀ m, m < path'.size → path'[m]!.commands = path[j + m + 1]!.commands)
+    (hid : ∀ m, m + 1 < path'.size → path'[m + 1]!.id = path[j + m + 1 + 1]!.id)
+    (r : ℕ) (hr : r < path'.size) :
+    layerHdr geom kg tg gg (fil ++ frontPad geom (spliceAt j kf kg) j (path.size - 1)) path' r
+      = layerHdr geom (spliceAt j kf kg) (spliceAt j tf tg) (spliceAt j gf gg) fil path
+        (j + r + 1) := by
+  have e : ∀ {α : Type} (f g : ℕ → α), (fun m => spliceAt j f g (j + m + 1)) = g :=
+    fun f g => funext fun m => by
+      rw [spliceAt_gt j f g (j + m + 1) (by omega)]
+      congr 1
+      omega
+  have hks : ∀ k, (spliceAt j kf kg k).size = (geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) := fun k => by
+    by_cases hk : k ≤ j
+    · rw [spliceAt_le j _ _ k hk]
+      exact hkf k
+    · rw [spliceAt_gt j _ _ k (by omega)]
+      exact hkg _
+  have htag : ∀ i m, (spliceAt j tf tg i m).size = macLength := fun i m => by
+    by_cases hk : i ≤ j
+    · rw [spliceAt_le j _ _ i hk]
+      exact htf i m
+    · rw [spliceAt_gt j _ _ i (by omega)]
+      exact htg _ m
+  have h := layerHdr_drop geom (spliceAt j kf kg) (spliceAt j tf tg) (spliceAt j gf gg) fil path
+    path' j hsz hn hnnh hle hrouting hfill hks htag hc hid r hr
+  rw [e kf kg, e tf tg, e gf gg] at h
+  exact h
+
+omit nike cipher macS kdfS streamS hvalid hmactag h16 in
+/-- The mask between the tail of hop `j`'s keystream and the front of the padding `t` hops
+later: the padding in front of hop `j`, then the stretches of the later hops' keystreams that
+fall on it. It does not read hop `j`'s keystream. -/
+def frontMask (ks : ℕ → ByteArray) (j : ℕ) : ℕ → ByteArray
+  | 0 => (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else ByteArray.empty) ++
+      KEMSphinx.zeroBytes geom.perHopRoutingInfoLength
+  | t + 1 => xorBytes ((ks (j + t + 1)).extract ((geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) - (j + t + 1 + 1) * geom.perHopRoutingInfoLength)
+      ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + t + 1 + 1) *
+          geom.perHopRoutingInfoLength + (j + 1) * geom.perHopRoutingInfoLength)) (frontMask ks j t)
+
+omit nike cipher macS kdfS streamS hvalid hmactag h16 in
+theorem frontMask_size (ks : ℕ → ByteArray) (hks : ∀ k, (ks k).size = (geom.routingInfoLength +
+    geom.perHopRoutingInfoLength)) (j t : ℕ)
+    (hb : (j + t + 1) * geom.perHopRoutingInfoLength ≤ (geom.routingInfoLength +
+        geom.perHopRoutingInfoLength)) : (frontMask geom ks j t).size = (j + 1) *
+        geom.perHopRoutingInfoLength := by
+  have e1 : (j + 1) * geom.perHopRoutingInfoLength = j * geom.perHopRoutingInfoLength +
+      geom.perHopRoutingInfoLength := Nat.succ_mul _ _
+  induction t with
+  | zero =>
+    have hb0 : (j + 1) * geom.perHopRoutingInfoLength ≤ (geom.routingInfoLength +
+        geom.perHopRoutingInfoLength) := hb
+    have hprev : (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else ByteArray.empty).size = j *
+        geom.perHopRoutingInfoLength := by
+      cases j with
+      | zero => simp
+      | succ i =>
+        rw [ite_eq_left (Nat.succ_pos i), Nat.add_sub_cancel]
+        exact padAt_size geom ks hks i
+          (le_trans (Nat.mul_le_mul_right _ (Nat.le_succ _)) hb0)
+    rw [frontMask, ByteArray.size_append, hprev, KEMSphinx.zeroBytes_size, e1]
+  | succ t ih =>
+    have e2 : (j + (t + 1) + 1) * geom.perHopRoutingInfoLength = (j + t + 1) *
+        geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength := Nat.succ_mul _ _
+    have e3 : (j + 1) * geom.perHopRoutingInfoLength ≤ (j + t + 1) * geom.perHopRoutingInfoLength
+        := Nat.mul_le_mul_right _ (by omega)
+    have e4 : (j + t + 1 + 1) * geom.perHopRoutingInfoLength = (j + t + 1) *
+        geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength := Nat.succ_mul _ _
+    have hb' : (j + t + 1 + 1) * geom.perHopRoutingInfoLength ≤ (geom.routingInfoLength +
+        geom.perHopRoutingInfoLength) := hb
+    rw [frontMask, Cryptlib.Protocols.Sphinx.Common.size_xorBytes, ByteArray.size_extract, hks]
+    omega
+
+omit nike cipher macS kdfS streamS hvalid hmactag h16 in
+/-- The mask reads the keystreams of the hops other than `j` only. -/
+theorem frontMask_congr (ks ks' : ℕ → ByteArray) (j t : ℕ) (h : ∀ m, m ≠ j → ks m = ks' m) :
+    frontMask geom ks j t = frontMask geom ks' j t := by
+  induction t with
+  | zero =>
+    rw [frontMask, frontMask]
+    by_cases h0 : j > 0
+    · rw [ite_eq_left h0, ite_eq_left h0,
+        KEMSphinx.padAt_congr geom ks ks' (j - 1) fun m hm => h m (by omega)]
+    · rw [ite_eq_right h0, ite_eq_right h0]
+  | succ t ih => rw [frontMask, frontMask, ih, h (j + t + 1) (by omega)]
+
+omit nike cipher macS kdfS streamS hvalid hmactag h16 in
+/-- **The front of the padding `t` hops after hop `j` is the tail of hop `j`'s keystream under
+that mask.** -/
+theorem frontPad_mask (ks : ℕ → ByteArray) (hks : ∀ k, (ks k).size = (geom.routingInfoLength +
+    geom.perHopRoutingInfoLength)) (j t : ℕ)
+    (hb : (j + t + 1) * geom.perHopRoutingInfoLength ≤ (geom.routingInfoLength +
+        geom.perHopRoutingInfoLength)) :
+    frontPad geom ks j (j + t)
+      = xorBytes ((ks j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1)
+          * geom.perHopRoutingInfoLength) (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+          (frontMask geom ks j t) := by
+  have e1 : (j + 1) * geom.perHopRoutingInfoLength = j * geom.perHopRoutingInfoLength +
+      geom.perHopRoutingInfoLength := Nat.succ_mul _ _
+  induction t with
+  | zero =>
+    have hb0 : (j + 1) * geom.perHopRoutingInfoLength ≤ (geom.routingInfoLength +
+        geom.perHopRoutingInfoLength) := hb
+    have hs : (KEMSphinx.padAt geom ks j).size = (j + 1) * geom.perHopRoutingInfoLength :=
+      padAt_size geom ks hks j hb0
+    have hprev : (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else ByteArray.empty).size = j *
+        geom.perHopRoutingInfoLength := by
+      cases j with
+      | zero => simp
+      | succ i =>
+        rw [ite_eq_left (Nat.succ_pos i), Nat.add_sub_cancel]
+        exact padAt_size geom ks hks i
+          (le_trans (Nat.mul_le_mul_right _ (Nat.le_succ _)) hb0)
+    have hp := padAt_step geom ks hks j
+    rw [hks j] at hp
+    have hT : ((ks j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength) (geom.routingInfoLength + geom.perHopRoutingInfoLength)).size
+        = (j + 1) * geom.perHopRoutingInfoLength := by
+      rw [ByteArray.size_extract, hks]
+      omega
+    show (KEMSphinx.padAt geom ks j).extract 0 ((j + 1) * geom.perHopRoutingInfoLength) = _
+    have h1 : (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else ByteArray.empty).size ≤ ((ks
+        j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength) (geom.routingInfoLength + geom.perHopRoutingInfoLength)).size
+        := by
+      rw [hprev, hT]
+      omega
+    have h2 : ((ks j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength) (geom.routingInfoLength + geom.perHopRoutingInfoLength)).size
+        - (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else ByteArray.empty).size
+        ≤ geom.perHopRoutingInfoLength := by
+      rw [hprev, hT]
+      omega
+    rw [KEMSphinx.extract_all _ _ hs, hp, frontMask, xorBytes_pad _ _ geom.perHopRoutingInfoLength
+        h1 h2]
+  | succ t ih =>
+    have e2 : (j + (t + 1) + 1) * geom.perHopRoutingInfoLength = (j + t + 1) *
+        geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength := Nat.succ_mul _ _
+    have e3 : (j + 1) * geom.perHopRoutingInfoLength ≤ (j + t + 1) * geom.perHopRoutingInfoLength
+        := Nat.mul_le_mul_right _ (by omega)
+    have hT : ((ks j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength) (geom.routingInfoLength + geom.perHopRoutingInfoLength)).size
+        = (j + 1) * geom.perHopRoutingInfoLength := by
+      rw [ByteArray.size_extract, hks]
+      omega
+    have e4 : (j + t + 1 + 1) * geom.perHopRoutingInfoLength = (j + t + 1) *
+        geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength := Nat.succ_mul _ _
+    have hb' : (j + t + 1 + 1) * geom.perHopRoutingInfoLength ≤ (geom.routingInfoLength +
+        geom.perHopRoutingInfoLength) := hb
+    have hK : ((ks (j + t + 1)).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) -
+        (j + t + 1 + 1) * geom.perHopRoutingInfoLength)
+        ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + t + 1 + 1) *
+            geom.perHopRoutingInfoLength + (j + 1) * geom.perHopRoutingInfoLength)).size = (j + 1)
+            * geom.perHopRoutingInfoLength := by
+      rw [ByteArray.size_extract, hks]
+      omega
+    show frontPad geom ks j (j + t + 1) = _
+    rw [frontPad_succ geom ks hks j (j + t) (Nat.le_add_right j t) (by omega), ih (by omega),
+      frontMask, KEMSphinx.xorBytes_left_comm _ _ _ (hK.trans hT.symm)
+        (hT.trans (frontMask_size geom ks hks j t (by omega)).symm)]
+
 variable (W : Protocols.RSOR.BackSwap (sphinx nike cipher macS kdfS streamS geom hvalid hmactag
   h16))
 

@@ -1048,7 +1048,11 @@ has begun in `NIKESphinxSLUJoin.lean` with one fact: the forwarding relay answer
 once, so the block it hands on in world 0 is one uniform block (`fwdRelay_fresh`,
 `backFnRun0_fresh`). It also has the lemma that joins two headers at the relay: they are the
 same up to the relay when what the relay's keystream head masks comes out the same
-(`layerHdr_join`). The split of the draws and the comparison itself are not done. On the backward path the comparison is to follow TLU→'s last
+(`layerHdr_join`); the lemma for the other side of the relay, that with the hops' functions
+spliced there the long header's later layers are a short header's layers
+(`layerHdr_spliceAt_drop`); and the front of the padding as the tail of the relay's keystream
+under a mask that does not read that keystream (`frontMask`, `frontPad_mask`,
+`frontMask_congr`). The split of the draws and the comparison itself are not done. On the backward path the comparison is to follow TLU→'s last
 one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
