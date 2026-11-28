@@ -664,6 +664,119 @@ noncomputable def blindAdvantage (B : BlindAdversary nike) : ℝ :=
 
 end Blind
 
+/-! ## The padding after the relay, from the tail of its keystream -/
+
+section Pad
+
+/-- XOR with a mask followed by zero bytes changes the bytes under the mask only. -/
+theorem xorBytes_pad (X p : ByteArray) (z : ℕ) (hs : p.size ≤ X.size)
+    (hz : X.size - p.size ≤ z) :
+    xorBytes X (p ++ KEMSphinx.zeroBytes z)
+      = xorBytes (X.extract 0 p.size) p ++ X.extract p.size X.size := by
+  have h1 : (X.extract 0 p.size).size = p.size := by
+    rw [ByteArray.size_extract]
+    omega
+  have h2 : (X.extract p.size X.size).size ≤ (KEMSphinx.zeroBytes z).size := by
+    rw [ByteArray.size_extract, KEMSphinx.zeroBytes_size]
+    omega
+  conv_lhs => rw [← Util.Bytes.append_extract X p.size hs]
+  rw [Cryptlib.Protocols.Sphinx.Common.xorBytes_append _ _ _ _ h1 h2,
+    KEMSphinx.xorBytes_zeroBytes]
+
+variable (geom : Geometry)
+
+/-- The padding in front of hop `j` has `j` hops' length. -/
+theorem padFront_size (ks : ℕ → ByteArray) (hks : ∀ k, (ks k).size = (geom.routingInfoLength +
+    geom.perHopRoutingInfoLength)) (j : ℕ)
+    (hj : (j + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength) :
+    (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else ByteArray.empty).size = j *
+        geom.perHopRoutingInfoLength := by
+  by_cases hp : j > 0
+  · rw [ite_eq_left hp, padAt_size geom ks hks (j - 1) (by
+        rw [show j - 1 + 1 = j by omega]
+        have : j * geom.perHopRoutingInfoLength ≤ (j + 1) * geom.perHopRoutingInfoLength :=
+          Nat.mul_le_mul_right _ (Nat.le_succ j)
+        omega), show j - 1 + 1 = j by omega]
+  · rw [ite_eq_right hp, show j = 0 by omega, Nat.zero_mul]
+    rfl
+
+/-- **The padding after a hop, from the tail of its keystream.** If the tail of hop `j`'s
+keystream is the padding another header has after hop `j`, with this header's padding in front
+masked in, then the two paddings after hop `j` are the same. -/
+theorem padAt_of_tail (ks ksI : ℕ → ByteArray)
+    (hks : ∀ k, (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hksI : ∀ k,
+        (ksI k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (j : ℕ)
+    (hj : (j + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength)
+    (htail : (ks j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength) (ks j).size
+      = xorBytes (KEMSphinx.padAt geom ksI j)
+        ((if j > 0 then KEMSphinx.padAt geom ks (j - 1) else ByteArray.empty) ++
+            KEMSphinx.zeroBytes geom.perHopRoutingInfoLength)) :
+    KEMSphinx.padAt geom ks j = KEMSphinx.padAt geom ksI j := by
+  have hI := padAt_size geom ksI hksI j (by omega)
+  have h0 : (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else ByteArray.empty).size = j *
+      geom.perHopRoutingInfoLength :=
+    padFront_size geom ks hks j hj
+  have hsucc : (j + 1) * geom.perHopRoutingInfoLength
+      = j * geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength := Nat.succ_mul _ _
+  rw [padAt_step geom ks hks j, htail,
+    xorBytes_pad _ _ _ (by rw [hI, h0]; omega) (by rw [hI, h0]; omega)]
+  have hQ : (xorBytes ((KEMSphinx.padAt geom ksI j).extract 0 (if j > 0 then KEMSphinx.padAt geom
+      ks (j - 1) else ByteArray.empty).size) (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else
+      ByteArray.empty)).size
+      = (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else ByteArray.empty).size := by
+    rw [Cryptlib.Protocols.Sphinx.Common.size_xorBytes, ByteArray.size_extract, hI, h0]
+    omega
+  have e1 := Util.Bytes.extract_append_left
+    (xorBytes ((KEMSphinx.padAt geom ksI j).extract 0 (if j > 0 then KEMSphinx.padAt geom ks (j -
+        1) else ByteArray.empty).size) (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else
+        ByteArray.empty))
+    ((KEMSphinx.padAt geom ksI j).extract (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else
+        ByteArray.empty).size (KEMSphinx.padAt geom ksI j).size)
+  have e2 := Util.Bytes.extract_append_right
+    (xorBytes ((KEMSphinx.padAt geom ksI j).extract 0 (if j > 0 then KEMSphinx.padAt geom ks (j -
+        1) else ByteArray.empty).size) (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else
+        ByteArray.empty))
+    ((KEMSphinx.padAt geom ksI j).extract (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else
+        ByteArray.empty).size (KEMSphinx.padAt geom ksI j).size)
+  rw [hQ] at e1 e2
+  rw [ByteArray.size_append, hQ, e1, e2, Cryptlib.Protocols.Sphinx.Common.xorBytes_xorBytes,
+    Util.Bytes.append_extract _ _ (by rw [hI, h0]; omega)]
+
+/-- **The same, from the tail of the other header's keystream**: the tail of hop `j`'s
+keystream is the other's, with the two paddings in front masked in. -/
+theorem padAt_of_tails (ks ksI : ℕ → ByteArray)
+    (hks : ∀ k, (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hksI : ∀ k,
+        (ksI k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (j : ℕ)
+    (hj : (j + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength)
+    (htail : (ks j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength) (ks j).size
+      = xorBytes ((ksI j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j +
+          1) * geom.perHopRoutingInfoLength) (ksI j).size)
+        (xorBytes ((if j > 0 then KEMSphinx.padAt geom ksI (j - 1) else ByteArray.empty) ++
+            KEMSphinx.zeroBytes geom.perHopRoutingInfoLength) ((if j > 0 then KEMSphinx.padAt geom
+            ks (j - 1) else ByteArray.empty) ++ KEMSphinx.zeroBytes geom.perHopRoutingInfoLength)))
+            :
+    KEMSphinx.padAt geom ks j = KEMSphinx.padAt geom ksI j := by
+  have h0 := padFront_size geom ks hks j hj
+  have hI := padFront_size geom ksI hksI j hj
+  have hsucc : (j + 1) * geom.perHopRoutingInfoLength
+      = j * geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength := Nat.succ_mul _ _
+  have ht : ((ksI j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+      geom.perHopRoutingInfoLength) (ksI j).size).size
+      = j * geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength := by
+    rw [ByteArray.size_extract, hksI]
+    omega
+  refine padAt_of_tail geom ks ksI hks hksI j hj ?_
+  rw [htail, ← KEMSphinx.xorBytes_assoc _ _ _
+    (by rw [ht, ByteArray.size_append, hI, KEMSphinx.zeroBytes_size])
+    (by rw [ByteArray.size_append, ByteArray.size_append, hI, h0])]
+  refine congrArg (fun X => xorBytes X _) ?_
+  rw [padAt_step geom ksI hksI j, xorBytes_pad _ _ _ (by rw [ht, hI]; omega)
+    (by rw [ht, hI]; omega)]
+
+end Pad
+
 /-! ## The original and the replacement at the relay's hop -/
 
 section Shift

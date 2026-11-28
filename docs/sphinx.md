@@ -772,7 +772,10 @@ for it:
      padding. It rests on: two packets are one when the bytes under the relay's tag agree
      (`nikePktFn_shift`, from `nikePktFn_front`), the first layer is the packet
      (`layerFn_zero`), and a layer that builds is its header and block (`layerFn_eq`,
-     `split_append_bytes`). Not yet proved: that `world0E` is world 0 for the right `E`; the
+     `split_append_bytes`). For its padding condition: two headers have the same padding
+     after a hop when the tail of the one's keystream at that hop is the other's with the two
+     paddings in front masked in (`padAt_of_tails`, `padAt_of_tail`, `xorBytes_pad`,
+     `padFront_size`). Not yet proved: that `world0E` is world 0 for the right `E`; the
      conditions of `fnRun_eq_short` on the draws of `world0B` and world 1 (the keystream
      relabelling); the end of the path.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
