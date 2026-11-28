@@ -179,29 +179,180 @@ theorem frontPad_unmask (ks : ℕ → ByteArray) (hks : ∀ k, (ks k).size = (ge
   exact Cryptlib.Protocols.Sphinx.Common.xorBytes_xorBytes _ _
 
 omit geom in
+/-- A stretch of bytes is its first part and the rest. -/
+theorem extract_split (K : ByteArray) (a q : ℕ) (hK : a + q ≤ K.size) :
+    K.extract 0 (a + q) = K.extract 0 a ++ K.extract a (a + q) := by
+  apply ByteArray.ext_getElem
+  · simp only [ByteArray.size_append, ByteArray.size_extract]
+    omega
+  · intro i h1 h2
+    simp only [ByteArray.size_extract] at h1
+    rw [ByteArray.getElem_extract]
+    by_cases hi : i < a
+    · rw [ByteArray.getElem_append_left (by simp only [ByteArray.size_extract]; omega),
+        ByteArray.getElem_extract]
+    · rw [ByteArray.getElem_append_right (by simp only [ByteArray.size_extract]; omega),
+        ByteArray.getElem_extract]
+      simp only [ByteArray.size_extract]
+      congr 1
+      omega
+
+omit geom in
 /-- A mask over two parts is a mask over each. -/
 theorem xorBytes_split (X Q K : ByteArray) (a q : ℕ) (hX : X.size = a) (hK : a + q ≤ K.size) :
     xorBytes (X ++ Q) (K.extract 0 (a + q))
       = xorBytes X (K.extract 0 a) ++ xorBytes Q (K.extract a (a + q)) := by
-  have hsplit : K.extract 0 (a + q) = K.extract 0 a ++ K.extract a (a + q) := by
-    apply ByteArray.ext_getElem
-    · simp only [ByteArray.size_append, ByteArray.size_extract]
-      omega
-    · intro i h1 h2
-      simp only [ByteArray.size_extract] at h1
-      rw [ByteArray.getElem_extract]
-      by_cases hi : i < a
-      · rw [ByteArray.getElem_append_left (by simp only [ByteArray.size_extract]; omega),
-          ByteArray.getElem_extract]
-      · rw [ByteArray.getElem_append_right (by simp only [ByteArray.size_extract]; omega),
-          ByteArray.getElem_extract]
-        simp only [ByteArray.size_extract]
-        congr 1
-        omega
-  rw [hsplit]
+  rw [extract_split K a q hK]
   exact KEMSphinx.xorBytes_append _ _ _ _ (by
     rw [hX, ByteArray.size_extract]
     omega)
+
+/-- **One step of a header over the rest of a path.** At hop `j + r + 1` of the long path,
+which is hop `r` of the rest: masking the routing information with the front of the padding
+behind it by the hop's longer stretch of keystream gives the long header's routing
+information with the front of the padding of the hop before; and that front, followed by the
+rest's own padding, is the long header's padding. -/
+theorem drop_step (ks : ℕ → ByteArray) (hks : ∀ k, (ks k).size = (geom.routingInfoLength +
+    geom.perHopRoutingInfoLength)) (j r : ℕ)
+    (X : ByteArray) (hb : (j + r + 1 + 1) * geom.perHopRoutingInfoLength ≤ (geom.routingInfoLength
+        + geom.perHopRoutingInfoLength))
+    (hX : X.size = (geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + r + 1 + 1) *
+        geom.perHopRoutingInfoLength) :
+    xorBytes (X ++ frontPad geom ks j (j + r + 1))
+        ((ks (j + r + 1)).extract 0 ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (r +
+            1) * geom.perHopRoutingInfoLength))
+      = xorBytes X ((ks (j + r + 1)).extract 0 ((geom.routingInfoLength +
+          geom.perHopRoutingInfoLength) - (j + r + 1 + 1) * geom.perHopRoutingInfoLength))
+        ++ frontPad geom ks j (j + r)
+    ∧ frontPad geom ks j (j + r)
+        ++ (if r > 0 then padAt geom (fun i => ks (j + 1 + i)) (r - 1) else ByteArray.empty)
+      = padAt geom ks (j + r) := by
+  have e1 : (j + r + 1 + 1) * geom.perHopRoutingInfoLength = (r + 1) * geom.perHopRoutingInfoLength
+      + (j + 1) * geom.perHopRoutingInfoLength := by
+    rw [show j + r + 1 + 1 = (r + 1) + (j + 1) by omega, Nat.add_mul]
+  have e2 : (j + r + 1 + 1) * geom.perHopRoutingInfoLength = (j + r + 1) *
+      geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength := Nat.succ_mul _ _
+  have hs : (padAt geom ks (j + r)).size = (j + r + 1) * geom.perHopRoutingInfoLength :=
+    padAt_size geom ks hks (j + r) (by omega)
+  have hk := hks (j + r + 1)
+  refine ⟨?_, ?_⟩
+  · rw [show (geom.routingInfoLength + geom.perHopRoutingInfoLength) - (r + 1) *
+      geom.perHopRoutingInfoLength = ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j
+      + r + 1 + 1) * geom.perHopRoutingInfoLength) + (j + 1) * geom.perHopRoutingInfoLength by
+      omega,
+      xorBytes_split X _ _ _ _ hX (by rw [hk]; omega),
+      frontPad_unmask geom ks hks j (j + r) (Nat.le_add_right j r) hb]
+  · unfold frontPad
+    cases r with
+    | zero =>
+      rw [ite_eq_right (lt_irrefl 0), ByteArray.append_empty]
+      exact KEMSphinx.extract_all _ _ hs
+    | succ m =>
+      have e3 : (j + (m + 1) + 1) * geom.perHopRoutingInfoLength = (j + 1) *
+          geom.perHopRoutingInfoLength + (m + 1) * geom.perHopRoutingInfoLength := by
+        rw [show j + (m + 1) + 1 = (j + 1) + (m + 1) by omega, Nat.add_mul]
+      have hd := padAt_drop geom ks hks j m (by
+        rw [show j + 1 + m + 1 = j + (m + 1) + 1 by omega]
+        omega)
+      rw [show j + 1 + m = j + (m + 1) by omega, e3] at hd
+      rw [ite_eq_left (Nat.succ_pos m), Nat.add_sub_cancel, ← hd,
+        ← extract_split _ _ _ (by rw [hs]; omega)]
+      exact KEMSphinx.extract_all _ _ (by rw [hs]; omega)
+
+/-- **A hop's fragment on the rest of a path is its fragment on the path.** -/
+theorem nikeFragment_drop (path path' : Array PathHop) (j : ℕ)
+    (hsz : path'.size + (j + 1) = path.size) (mac : ByteArray) (r : ℕ) (hr : r < path'.size)
+    (hc : path'[r]!.commands = path[j + r + 1]!.commands)
+    (hid : r + 1 < path'.size → path'[r + 1]!.id = path[j + r + 1 + 1]!.id) :
+    nikeFragment geom path' mac r = nikeFragment geom path mac (j + r + 1) := by
+  have hb : (r == path'.size - 1) = (j + r + 1 == path.size - 1) := by
+    rw [Bool.eq_iff_iff, beq_iff_eq, beq_iff_eq]
+    omega
+  unfold nikeFragment
+  rw [hb, hc]
+  cases hbb : (j + r + 1 == path.size - 1) with
+  | true => rfl
+  | false =>
+    have hne := beq_eq_false_iff_ne.mp hbb
+    rw [hid (by omega)]
+
+set_option maxHeartbeats 1000000 in
+/-- **A header over the rest of a path.** Built from the last hop back, the header over the
+hops after hop `j`, with the long filler followed by the front of the padding as its filler,
+has at each step the long header's routing information followed by the front of the padding
+that far, and the long header's tag. -/
+theorem nikeHdrTrace_drop (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (fil : ByteArray) (path path' : Array PathHop) (j : ℕ)
+    (hsz : path'.size + (j + 1) = path.size) (hn : path.size ≤ geom.nrHops)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
+    (hrouting : geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hfill : fil.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hks : ∀ k, (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (htag : ∀ i
+        m, (tag i m).size = macLength)
+    (hc : ∀ m, m < path'.size → path'[m]!.commands = path[j + m + 1]!.commands)
+    (hid : ∀ m, m + 1 < path'.size → path'[m + 1]!.id = path[j + m + 1 + 1]!.id)
+    (t : ℕ) (ht : t ≤ path'.size) :
+    nikeHdrTrace geom (fun m => ks (j + m + 1)) (fun m => tag (j + m + 1))
+        (fun m => ge (j + m + 1)) (fil ++ frontPad geom ks j (path.size - 1)) path' t
+      = (nikeHdrTrace geom ks tag ge fil path t).map
+        (fun s => (s.1 ++ frontPad geom ks j (path.size - 1 - t), s.2)) := by
+  induction t with
+  | zero =>
+    have hgt : geom.nrHops > path'.size := by omega
+    have hfe : (if geom.nrHops > path.size then fil else ByteArray.empty) = fil := by
+      by_cases h : geom.nrHops > path.size
+      · exact ite_eq_left h
+      · rw [ite_eq_right h]
+        have h0 : fil.size = 0 := by
+          rw [hfill, show geom.nrHops - path.size = 0 by omega, Nat.zero_mul]
+        exact (ByteArray.ext (Array.eq_empty_of_size_eq_zero h0)).symm
+    show some ((if geom.nrHops > path'.size then _ else ByteArray.empty), ByteArray.empty)
+      = Option.map _ (some ((if geom.nrHops > path.size then fil else ByteArray.empty),
+        ByteArray.empty))
+    rw [ite_eq_left hgt, hfe]
+    rfl
+  | succ t ih =>
+    obtain ⟨k, hk⟩ : ∃ k, geom.nrHops = path.size + k := ⟨geom.nrHops - path.size, by omega⟩
+    obtain ⟨r, hr⟩ : ∃ r, path'.size = t + 1 + r := ⟨path'.size - (t + 1), by omega⟩
+    have hps : path.size = t + 1 + r + (j + 1) := by omega
+    have hi : path.size - 1 - t = j + r + 1 := by omega
+    have hm : path'.size - 1 - t = r := by omega
+    have hi1 : path.size - 1 - (t + 1) = j + r := by omega
+    have f1 : geom.perHopRoutingInfoLength + (k + t) * geom.perHopRoutingInfoLength + (j + r + 1 +
+        1) * geom.perHopRoutingInfoLength = (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+        := by
+      rw [hrouting, hk, hps]
+      ring
+    have hb : (j + r + 1 + 1) * geom.perHopRoutingInfoLength ≤ (geom.routingInfoLength +
+        geom.perHopRoutingInfoLength) := by omega
+    have hfm : ∀ m : ℕ, (fun m => ks (j + m + 1)) m = ks (j + m + 1) := fun _ => rfl
+    have hpad : padAt geom (fun m => ks (j + m + 1)) = padAt geom (fun i => ks (j + 1 + i)) :=
+      congrArg (padAt geom) (funext fun m => by rw [Nat.add_right_comm])
+    rw [nikeHdrTrace, nikeHdrTrace, ih (by omega)]
+    cases hl : nikeHdrTrace geom ks tag ge fil path t with
+    | none => rfl
+    | some s =>
+      have hs1 := (nikeHdrTrace_size geom ks tag ge fil path hnnh hle hfill htag t s hl).1
+      rw [show geom.nrHops - path.size = k by omega] at hs1
+      have hfr := nikeFragment_drop geom path path' j hsz s.2 r (by omega)
+        (hc r (by omega)) (fun h => hid r h)
+      simp only [Option.map_some, hi, hm, hi1, hfr, hpad]
+      cases hf : nikeFragment geom path s.2 (j + r + 1) with
+      | error e => rfl
+      | ok frag =>
+        have hfs := nikeFragment_size geom path s.2 (j + r + 1) hnnh hle frag hf
+        have hX : (frag ++ s.1).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j
+            + r + 1 + 1) * geom.perHopRoutingInfoLength := by
+          rw [ByteArray.size_append, hfs, hs1]
+          omega
+        obtain ⟨d1, d2⟩ := drop_step geom ks hks j r (frag ++ s.1) hb hX
+        rw [ByteArray.append_assoc] at d1
+        simp only [Option.map_some, d1, ite_eq_left (Nat.succ_pos (j + r)), Nat.add_sub_cancel]
+        refine congrArg some (Prod.ext rfl ?_)
+        show tag (j + r + 1) _ = tag (j + r + 1) _
+        rw [← ByteArray.append_assoc (c := frontPad geom ks j (j + r)),
+          ByteArray.append_assoc (b := frontPad geom ks j (j + r)), d2]
 
 end Shift
 

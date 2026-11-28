@@ -1034,8 +1034,12 @@ filler is the long filler followed by the front of the padding. Of that only the
 byte-level lemma is proved (`padAt_drop` in `NIKESphinxSLUShift.lean`): the padding after a
 later hop, past the first hops' length, is the padding of the later hops by themselves. The front
 of the padding follows the hops' keystreams one hop at a time (`frontPad`, `frontPad_succ`,
-`frontPad_unmask`), and a mask over two parts is a mask over each (`xorBytes_split`). The
-header-trace lemma built on these is not proved yet. On the backward path the comparison is to follow TLU→'s last
+`frontPad_unmask`), and a mask over two parts is a mask over each (`xorBytes_split`). On
+these rests the header-trace lemma (`nikeHdrTrace_drop`, with `drop_step` and
+`nikeFragment_drop`): built from the last hop back, the header over the hops after hop `j`,
+with the long filler followed by the front of the padding as its filler, has at each step the
+long header's routing information followed by the front of the padding that far, and the long
+header's tag. It is not yet turned into equalities of layer headers, nor used on the draws. On the backward path the comparison is to follow TLU→'s last
 one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
