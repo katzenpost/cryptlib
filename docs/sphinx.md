@@ -800,7 +800,11 @@ for it:
      for fixed game draws before the end of the path, world 1 differs from that game by at
      most the chance of a draw that is not good (`finRest_sub_le`, `finGood`). This uses
      `abs_prEvent_bind_sub_le_bad_dist` of `KEMSphinxSLURelay.lean`, which this file now
-     imports; the lemma is general and would sit better in a shared file.
+     imports; the lemma is general and would sit better in a shared file. The joined keystream
+     is uniform: it reads the head of the replacement's keystream under a mask of the tail of
+     the other, and that tail under a fixed mask (`finComb_eq`, `padMask_congr`), so by
+     `evalDistEq_headTail` the blinding adversary's game on it is its game on one uniform
+     keystream, and the draws it does not read drop out (`finRest_comb_evalDistEq`).
      Not yet proved: that `world0E` is world 0 for the right `E`; the
      two games over their draws (that the joined keystream and the relabelled draws are
      uniform, by `evalDistEq_headTail`); `finNoReply`; the end of the path.
