@@ -775,7 +775,191 @@ theorem padAt_of_tails (ks ksI : ℕ → ByteArray)
   rw [padAt_step geom ksI hksI j, xorBytes_pad _ _ _ (by rw [ht, hI]; omega)
     (by rw [ht, hI]; omega)]
 
+/-- The mask between the tails of two keystreams of hop `j` that makes the paddings after hop
+`j` agree: the two paddings in front, each followed by a hop's length of zero bytes. -/
+def padMask (ks ksI : ℕ → ByteArray) (j : ℕ) : ByteArray :=
+  xorBytes ((if j > 0 then KEMSphinx.padAt geom ksI (j - 1) else ByteArray.empty) ++
+      KEMSphinx.zeroBytes geom.perHopRoutingInfoLength)
+    ((if j > 0 then KEMSphinx.padAt geom ks (j - 1) else ByteArray.empty) ++ KEMSphinx.zeroBytes
+        geom.perHopRoutingInfoLength)
+
+/-- **A keystream for hop `j` whose tail is another header's, masked, gives that header's
+padding after hop `j`**, whatever its head `X`. -/
+theorem padAt_comb (ks ksI : ℕ → ByteArray)
+    (hks : ∀ k, (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hksI : ∀ k,
+        (ksI k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (j : ℕ)
+    (hj : (j + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength) (X : ByteArray)
+    (hX : X.size = ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength)) :
+    KEMSphinx.padAt geom (Function.update ks j
+        (X ++ xorBytes ((ksI j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) -
+            (j + 1) * geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j))) j
+      = KEMSphinx.padAt geom ksI j := by
+  have ht : (xorBytes ((ksI j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) -
+      (j + 1) * geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j)).size
+      = (j + 1) * geom.perHopRoutingInfoLength := by
+    rw [Cryptlib.Protocols.Sphinx.Common.size_xorBytes, ByteArray.size_extract, hksI]
+    omega
+  have hks' : ∀ k, ((Function.update ks j
+      (X ++ xorBytes ((ksI j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j
+          + 1) * geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j))) k).size
+      = (geom.routingInfoLength + geom.perHopRoutingInfoLength) := fun k => by
+    by_cases hk : k = j
+    · rw [hk, Function.update_self, ByteArray.size_append, hX, ht]
+      omega
+    · rw [Function.update_of_ne hk]
+      exact hks k
+  have hfront : (if j > 0 then KEMSphinx.padAt geom (Function.update ks j
+      (X ++ xorBytes ((ksI j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j
+          + 1) * geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j))) (j - 1)
+      else ByteArray.empty)
+      = (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else ByteArray.empty) := by
+    by_cases hp : j > 0
+    · rw [ite_eq_left hp, ite_eq_left hp]
+      exact padAt_congr_rest geom _ _ hks' hks (j - 1)
+        (fun i hi => Function.update_of_ne (by omega) _ _)
+        (by rw [Function.update_of_ne (by omega)])
+    · rw [ite_eq_right hp, ite_eq_right hp]
+  refine padAt_of_tails geom _ ksI hks' hksI j hj ?_
+  rw [hfront, Function.update_self]
+  have e := Util.Bytes.extract_append_right X
+    (xorBytes ((ksI j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j))
+  rw [hX] at e
+  rw [ByteArray.size_append, hX, e]
+  rfl
+
 end Pad
+
+/-! ## The relay's keystream that joins the two worlds -/
+
+section Comb
+
+variable (nike : NIKE) (geom : Geometry)
+
+/-- **The keystream of the relay in world 0 that matches world 1.** Its tail is the tail of
+the keystream `ksI j`, masked so that the padding after the relay is that of `ksI`. Its head
+is the head of `U`, shifted by the difference between the content `X` and what the relay's
+keystream masks in the header of `ks`. -/
+def combStream (ks ksI : ℕ → ByteArray) (j : ℕ) (U X : ByteArray)
+    (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray) (filler : ByteArray)
+    (path : Array PathHop) : ByteArray :=
+  (xorBytes (U.extract 0 ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+      geom.perHopRoutingInfoLength)) (xorBytes X (hopContent nike geom (Function.update ks j
+      (KEMSphinx.zeroBytes ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+      geom.perHopRoutingInfoLength) ++ (xorBytes ((ksI j).extract ((geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength) (ksI j).size)
+      (padMask geom ks ksI j)))) tag ge filler path j))) ++ (xorBytes ((ksI j).extract
+      ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+      geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j))
+
+/-- **With the joining keystream, the bytes under the relay's tag are those of a header that
+ends at the relay**, and the hops in front are the same. -/
+theorem hdrMsg_comb (ks ksI ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ge ge' : ℕ → ByteArray) (filler filler' : ByteArray) (path path' : Array PathHop) (j : ℕ)
+    (hi : j + 1 < path.size) (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
+    (hrouting : geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hn : path.size ≤ geom.nrHops)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hks : ∀ k, (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hksI : ∀ k,
+        (ksI k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (hks' : ∀ k, (ks' k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (htag : ∀
+        m x, (tag m x).size = macLength)
+    (hcmd : path[j]!.commands = []) (hT : pathBuilds geom path (path.size - j))
+    (hge1 : (ge (j + 1)).size = nike.publicKeySize) (hi' : j + 1 = path'.size) (F' : ByteArray)
+    (hF' : nikeFragment geom path' ByteArray.empty j = .ok F')
+    (hX' : (F' ++ (if geom.nrHops > path'.size then filler' else ByteArray.empty)).size =
+        ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength))
+    (hge : ge j = ge' j) (hfront : ∀ m < j, ks m = ks' m) :
+    hdrMsg geom (Function.update ks j
+        (combStream nike geom ks ksI j (ks' j) (F' ++ (if geom.nrHops > path'.size then filler'
+            else ByteArray.empty)) tag ge filler path)) tag ge filler path j
+      = hdrMsg geom ks' tag' ge' filler' path' j := by
+  have hjp : (j + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength := by
+    rw [hrouting]
+    exact (Nat.mul_comm _ _).le.trans (Nat.mul_le_mul_left _ (by omega))
+  have hHD : (xorBytes ((ks' j).extract 0 ((geom.routingInfoLength + geom.perHopRoutingInfoLength)
+      - (j + 1) * geom.perHopRoutingInfoLength)) (xorBytes (F' ++ (if geom.nrHops > path'.size then
+      filler' else ByteArray.empty)) (hopContent nike geom (Function.update ks j
+      (KEMSphinx.zeroBytes ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+      geom.perHopRoutingInfoLength) ++ (xorBytes ((ksI j).extract ((geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength) (ksI j).size)
+      (padMask geom ks ksI j)))) tag ge filler path j))).size = ((geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength) := by
+    rw [Cryptlib.Protocols.Sphinx.Common.size_xorBytes, ByteArray.size_extract, hks']
+    omega
+  have hTL : (xorBytes ((ksI j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) -
+      (j + 1) * geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j)).size = (j + 1)
+      * geom.perHopRoutingInfoLength := by
+    rw [Cryptlib.Protocols.Sphinx.Common.size_xorBytes, ByteArray.size_extract, hksI]
+    omega
+  have hksU : ∀ k, ((Function.update ks j ((xorBytes ((ks' j).extract 0 ((geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength)) (xorBytes (F' ++ (if
+      geom.nrHops > path'.size then filler' else ByteArray.empty)) (hopContent nike geom
+      (Function.update ks j (KEMSphinx.zeroBytes ((geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength) ++ (xorBytes ((ksI
+      j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+      geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j)))) tag ge filler path
+      j))) ++ (xorBytes ((ksI j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) -
+      (j + 1) * geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j)))) k).size =
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength) := fun k => by
+    by_cases hk : k = j
+    · rw [hk, Function.update_self, ByteArray.size_append, hHD, hTL]
+      omega
+    · rw [Function.update_of_ne hk]
+      exact hks k
+  have hpadU := padAt_comb geom ks ksI hks hksI j hjp (xorBytes ((ks' j).extract 0
+      ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+      geom.perHopRoutingInfoLength)) (xorBytes (F' ++ (if geom.nrHops > path'.size then filler'
+      else ByteArray.empty)) (hopContent nike geom (Function.update ks j (KEMSphinx.zeroBytes
+      ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+      geom.perHopRoutingInfoLength) ++ (xorBytes ((ksI j).extract ((geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength) (ksI j).size)
+      (padMask geom ks ksI j)))) tag ge filler path j))) hHD
+  have hpadZ := padAt_comb geom ks ksI hks hksI j hjp (KEMSphinx.zeroBytes ((geom.routingInfoLength
+      + geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength))
+    (KEMSphinx.zeroBytes_size _)
+  have hcont := hopContent_congr nike geom
+    (Function.update ks j (KEMSphinx.zeroBytes ((geom.routingInfoLength +
+        geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength) ++ (xorBytes ((ksI
+        j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j))))
+    (Function.update ks j ((xorBytes ((ks' j).extract 0 ((geom.routingInfoLength +
+        geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength)) (xorBytes (F' ++
+        (if geom.nrHops > path'.size then filler' else ByteArray.empty)) (hopContent nike geom
+        (Function.update ks j (KEMSphinx.zeroBytes ((geom.routingInfoLength +
+        geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength) ++ (xorBytes ((ksI
+        j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+        geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j)))) tag ge filler path
+        j))) ++ (xorBytes ((ksI j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength)
+        - (j + 1) * geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j)))) tag tag
+        ge ge filler path j hi
+    (fun i hij => ⟨by rw [Function.update_of_ne (by omega), Function.update_of_ne (by omega)],
+      rfl, rfl⟩) (hpadZ.trans hpadU.symm)
+  unfold combStream
+  refine hdrMsg_shift nike geom _ tag ge filler path j hi hnnh hle hrouting hn hfill hksU htag
+    hcmd ((nikeHdrTrace_isSome geom _ _ _ _ _ _ _ _ path _).trans hT) hge1 ks' tag' ge' filler'
+    path' hi' F' hF' hX' hks' hge
+    (fun m hm => (Function.update_of_ne (by omega) _ _).trans (hfront m hm)) ?_
+  rw [Function.update_self]
+  have e := Util.Bytes.extract_append_left (xorBytes ((ks' j).extract 0 ((geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength)) (xorBytes (F' ++ (if
+      geom.nrHops > path'.size then filler' else ByteArray.empty)) (hopContent nike geom
+      (Function.update ks j (KEMSphinx.zeroBytes ((geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength) ++ (xorBytes ((ksI
+      j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+      geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j)))) tag ge filler path
+      j))) (xorBytes ((ksI j).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j
+      + 1) * geom.perHopRoutingInfoLength) (ksI j).size) (padMask geom ks ksI j))
+  rw [hHD] at e
+  rw [e]
+  exact congrArg (fun c => xorBytes ((ks' j).extract 0 ((geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) - (j + 1) * geom.perHopRoutingInfoLength)) (xorBytes (F' ++ (if
+      geom.nrHops > path'.size then filler' else ByteArray.empty)) c)) hcont
+
+end Comb
 
 /-! ## The original and the replacement at the relay's hop -/
 

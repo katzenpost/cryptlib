@@ -775,7 +775,14 @@ for it:
      `split_append_bytes`). For its padding condition: two headers have the same padding
      after a hop when the tail of the one's keystream at that hop is the other's with the two
      paddings in front masked in (`padAt_of_tails`, `padAt_of_tail`, `xorBytes_pad`,
-     `padFront_size`). Not yet proved: that `world0E` is world 0 for the right `E`; the
+     `padFront_size`). The relay's keystream in world 0 that matches world 1 is `combStream`:
+     its tail is the tail of world 1's keystream for the original's next layer under a fixed
+     mask of the hops in front (`padMask`), so the paddings after the relay agree
+     (`padAt_comb`); its head is the head of world 1's keystream for the replacement, shifted
+     by the difference of what the two mask, so the bytes under the relay's tag agree
+     (`hdrMsg_comb`, from `hdrMsg_shift` and `hopContent_congr`). This is the form
+     `evalDistEq_headTail` of the KEM proof joins into one uniform keystream.
+     Not yet proved: that `world0E` is world 0 for the right `E`; the
      conditions of `fnRun_eq_short` on the draws of `world0B` and world 1 (the keystream
      relabelling); the end of the path.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
