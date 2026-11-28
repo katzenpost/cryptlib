@@ -920,7 +920,13 @@ were built:
    answered with a random payload in world 1 and with the ideal cipher's other block in world
    0; these have to be matched as well.
 
-SLU← and STI↔ are not started for NIKE Sphinx.
+SLU← for NIKE Sphinx is started (`NIKESphinxSLU.lean`): the reply block in the sender's payload
+is the header of the first layer on the backward path (`surb_fst`), and a reply layer has the
+header of the layer on the backward path (`formBack_fst`), as for KEM Sphinx. The games with
+any onion sent on in world 1 (`backwardWith`, in `KEMSphinxSLU.lean`) are stated for any scheme
+and will be used as they are. Nothing else of SLU← is proved for NIKE Sphinx; the plan is the
+order of the KEM proof above, with the blinding game once more for the hops after the relay on
+the backward path. STI↔ is not started for NIKE Sphinx.
 
 ## How the bounds are built
 
