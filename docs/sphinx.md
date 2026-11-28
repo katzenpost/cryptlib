@@ -931,7 +931,13 @@ exit relay, the backward path's otherwise. The adversary's first layer is writte
 function of the backward path's first group element and hop keys, which enter through the
 reply block in the sender's payload (`backOnionOfKeys`, `backHdrOfKeys`, `bodyH`, `body_eq`); on
 the sender's own keys it is the sender's onion when the reply's first layer builds
-(`backOnionOfKeys_real`). Nothing else of SLU← is proved for NIKE Sphinx; the plan is the
+(`backOnionOfKeys_real`). The layers of the reply's packet over the backward path are written
+from the same keys (`backLayerOfKeys`, `backLayerOfKeys_real`), and with them world 0 around
+the honest relay's keys (`backView0`, `backPlace`, the adversary `backAdv0` on the key game):
+at the exit the relay's layer is the last of the forward path; on the backward path its keys
+enter the adversary's onion through the reply block, and the header the sender refuses
+through the reply's last layer. That this view on the sender's own keys is world 0, and the
+reduction to the key game, are not proved yet. Nothing else of SLU← is proved for NIKE Sphinx; the plan is the
 order of the KEM proof above, with the blinding game once more for the hops after the relay on
 the backward path. STI↔ is not started for NIKE Sphinx.
 
