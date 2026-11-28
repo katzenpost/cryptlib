@@ -979,7 +979,11 @@ at the exit by the onion with that hop's keystream given, on the backward path b
 forms with the keystream substituted, including the header of the last layer, which the
 sender refuses. Its payload game with the ideal cipher reads the relay's header key and IV
 through the keystream only (`backPay0_ideal_eq`), so it is the real experiment of the
-keystream generator (`backward0_pay_evalDistEq_prg`). World 1 does not have this step yet. SLU← uses the general step for world 0
+keystream generator (`backward0_pay_evalDistEq_prg`). World 1 has the same step in
+`NIKESphinxSLUStream1.lean` (`backward1_pay_evalDistEq_prg`, `backViewS1`); there the
+keystream enters the relay's own reply layer, or at the exit its own forward layer. The three
+steps are not yet chained into one bound per world, and the two worlds played from a uniform
+keystream are not yet compared. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
 nothing under it and the world does not read it (`backViewTAt_back`), so the block is one the
