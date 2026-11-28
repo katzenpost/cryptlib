@@ -782,6 +782,13 @@ for it:
      by the difference of what the two mask, so the bytes under the relay's tag agree
      (`hdrMsg_comb`, from `hdrMsg_shift` and `hopContent_congr`). This is the form
      `evalDistEq_headTail` of the KEM proof joins into one uniform keystream.
+     World 1 on a draw is written in the terms of `fnRun_eq_short` (`finRun_layerFn`): the
+     relay's header is the replacement's layer at the relay, the layer forwarded is the
+     original's next layer from its own keys, and the relay's other answers are world 0's,
+     because the element that reaches the relay is the same in the two worlds
+     (`drawElem_fwd1`). Its conditions on the draw: the replacement's path builds, its body
+     has a payload's length, the bytes under the relay's tag have their length, and the relay
+     would not reply to the replacement (`finNoReply`).
      Not yet proved: that `world0E` is world 0 for the right `E`; the
      conditions of `fnRun_eq_short` on the draws of `world0B` and world 1 (the keystream
      relabelling); the end of the path.
