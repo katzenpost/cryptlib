@@ -818,10 +818,13 @@ for it:
      and a changed payload is decrypted to a uniform block, which the relay refuses unless it
      begins with the zero tag. That last case is a carried event. Not yet applied to the end
      of the path.
-     The last comparison is in seven files, so that no file is large to build:
+     So the draws that are not good for `fin_fixed_fwd_le` are events on the draws alone
+     (`finGood`): a path does not build, a body does not have a payload's length, or that
+     block begins with the zero tag.
+     The last comparison is in six files, so that no file is large to build:
      `NIKESphinxTLUFn.lean` (the hops' functions, no games), `NIKESphinxTLURelay.lean`,
-     `NIKESphinxTLUBlind.lean`, `NIKESphinxTLUWorld1.lean`, `NIKESphinxTLUJoin.lean`,
-     `NIKESphinxTLUDraws.lean` and `NIKESphinxTLUFinal.lean`.
+     `NIKESphinxTLUBlind.lean`, `NIKESphinxTLUWorld1.lean`, `NIKESphinxTLUJoin.lean` and
+     `NIKESphinxTLUDraws.lean`.
      Not yet proved: that `world0E` is world 0 for the right `E`; the
      two games over their draws (that the joined keystream and the relabelled draws are
      uniform, by `evalDistEq_headTail`); `finNoReply`; the end of the path.

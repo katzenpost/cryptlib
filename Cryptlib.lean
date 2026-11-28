@@ -132,7 +132,6 @@ import Cryptlib.Protocols.Sphinx.NIKESphinxTLUBlind
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLUWorld1
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLUJoin
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLUDraws
-import Cryptlib.Protocols.Sphinx.NIKESphinxTLUFinal
 import Cryptlib.Protocols.Sphinx.RelayMac
 import Cryptlib.Protocols.RSORPayload
 import Cryptlib.Protocols.Sphinx.Schemes
