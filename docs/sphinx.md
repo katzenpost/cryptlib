@@ -793,7 +793,10 @@ for it:
      before the end of the path; handed the tail of the original's path from the original's
      own secret, with the joined keystream for the relay (`finComb`) and a block `g` for a
      changed payload, the blinding adversary plays exactly the game `finRun_layerFn` gives for
-     world 1. Its conditions: both paths build and both bodies have a payload's length.
+     world 1. Its conditions: both paths build and both bodies have a payload's length. So
+     world 1 on such a draw, when the relay would not reply to the replacement, is the
+     blinding adversary's game on the joined keystream with `g` drawn
+     (`finOwnRun_blindPost`).
      Not yet proved: that `world0E` is world 0 for the right `E`; the
      two games over their draws (that the joined keystream and the relabelled draws are
      uniform, by `evalDistEq_headTail`); `finNoReply`; the end of the path.
