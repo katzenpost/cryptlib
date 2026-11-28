@@ -973,7 +973,13 @@ the sender's block and the world shown are given from the keystream. Those three
 the property; SLU← does not have them yet. Towards them, `NIKESphinxSLUStream.lean` writes the reply
 packet's headers in closed form: the header of each layer is `layerHdr` on the hops'
 keystreams, tags and group elements (`backHdrFn`, `backLayerOfTag_fst`), and the reply
-block's header is the first of them (`backHdrBytes`, `backHdrOfTag_eq`). SLU← uses the general step for world 0
+block's header is the first of them (`backHdrBytes`, `backHdrOfTag_eq`). With that, world 0
+is written from the honest relay's header keystream (`backMS0`, `backPlainS0`, `backViewS0`):
+at the exit by the onion with that hop's keystream given, on the backward path by the closed
+forms with the keystream substituted, including the header of the last layer, which the
+sender refuses. Its payload game with the ideal cipher reads the relay's header key and IV
+through the keystream only (`backPay0_ideal_eq`), so it is the real experiment of the
+keystream generator (`backward0_pay_evalDistEq_prg`). World 1 does not have this step yet. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
 nothing under it and the world does not read it (`backViewTAt_back`), so the block is one the
