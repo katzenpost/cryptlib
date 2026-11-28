@@ -924,7 +924,10 @@ SLU← for NIKE Sphinx is started (`NIKESphinxSLU.lean`): the reply block in the
 is the header of the first layer on the backward path (`surb_fst`), and a reply layer has the
 header of the layer on the backward path (`formBack_fst`), as for KEM Sphinx. The games with
 any onion sent on in world 1 (`backwardWith`, in `KEMSphinxSLU.lean`) are stated for any scheme
-and will be used as they are. Nothing else of SLU← is proved for NIKE Sphinx; the plan is the
+and will be used as they are. Both worlds are written as their draws with the secret of the
+honest relay's path drawn apart (`backward_play_false_evalDistEq`,
+`backward_play_true_evalDistEq`, `relayKey`): the forward path's secret when the relay is the
+exit relay, the backward path's otherwise. Nothing else of SLU← is proved for NIKE Sphinx; the plan is the
 order of the KEM proof above, with the blinding game once more for the hops after the relay on
 the backward path. STI↔ is not started for NIKE Sphinx.
 
