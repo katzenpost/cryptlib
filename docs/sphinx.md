@@ -965,7 +965,9 @@ advantage against the cipher and the chance of a draw that is not good. The TLU�
 own copy of this step, typed to its game (`forward_only_sub_ideal_le`); it could be restated
 through the general one. SLU← does not use the general step yet; two lemmas it needs on the
 backward path are in place (`peels_append_hdr`, `hdrPeels_congr`: a peeled packet's header
-does not read the payload or the hops' payload keys). Nothing
+does not read the payload or the hops' payload keys), and from them that a packet's header and
+its later layers' headers do not read the hops' encryptions (`nikePktFn_hdr_enc`,
+`nikePktFn_peels_fst`). Nothing
 else of SLU← is proved for NIKE Sphinx; the plan is the
 order of the KEM proof above, with the blinding game once more for the hops after the relay on
 the backward path. STI↔ is not started for NIKE Sphinx.

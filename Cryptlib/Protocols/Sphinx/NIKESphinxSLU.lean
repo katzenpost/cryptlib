@@ -417,6 +417,98 @@ theorem hdrPeels_congr (ks ks' : List HopKeys) (i : ℕ) (H : ByteArray)
   unfold hdrPeels
   rw [e, e, List.map_take, List.map_take, hmap]
 
+include hvalid in
+/-- **A packet's header does not read the hops' encryptions.** -/
+theorem nikePktFn_hdr_enc (ks : ℕ → ByteArray) (tag enc enc' : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (fil : ByteArray) (path : Array PathHop) (payload : ByteArray)
+    (hn : path.size ≤ geom.nrHops) (hpos : 0 < path.size)
+    (hfill : fil.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (htag : ∀ m x, (tag m x).size = macLength) (hge : (ge 0).size = nike.publicKeySize) :
+    (match nikePktFn geom ks tag enc ge fil path payload with
+      | some pkt => pkt.extract 0 geom.headerLength
+      | none => ByteArray.empty)
+      = (match nikePktFn geom ks tag enc' ge fil path payload with
+        | some pkt => pkt.extract 0 geom.headerLength
+        | none => ByteArray.empty) := by
+  obtain ⟨hnnh, hper, hrouting, hhdr, -⟩ := id hvalid
+  unfold nikePktFn
+  by_cases hb : payload.size = geom.forwardPayloadLength
+  · rw [ite_eq_left hb, ite_eq_left hb]
+    cases hs : nikeHdrTrace geom ks tag ge fil path path.size with
+    | none => rfl
+    | some s =>
+      have hH := hdr_size geom nike.publicKeySize ks tag ge fil path hnnh (by omega) hrouting hn
+          hpos
+        hfill htag hge s hs
+      have hsz : (v0AD ++ ge 0 ++ s.1 ++ s.2).size = geom.headerLength := by
+        rw [hH]
+        exact hhdr.symm
+      have hx : ∀ B : ByteArray,
+          (v0AD ++ ge 0 ++ s.1 ++ s.2 ++ B).extract 0 geom.headerLength
+            = v0AD ++ ge 0 ++ s.1 ++ s.2 := fun B => by
+        have := Util.Bytes.extract_append_left (v0AD ++ ge 0 ++ s.1 ++ s.2) B
+        rwa [hsz] at this
+      exact (hx _).trans (hx _).symm
+  · rw [ite_eq_right hb, ite_eq_right hb]
+
+include hvalid h16 in
+/-- **A later layer's header does not read the hops' payload keys.** -/
+theorem nikePktFn_peels_fst (K K' : List HopKeys) (i : ℕ) (hi : i ≤ K.length)
+    (hi' : i ≤ K'.length)
+    (hK : ∀ m : ℕ, (K[m]?).map (fun k : HopKeys => (k.headerEncryption, k.headerEncryptionIV,
+        k.blindingFactor)) = (K'[m]?).map (fun k : HopKeys => (k.headerEncryption,
+        k.headerEncryptionIV, k.blindingFactor)))
+    (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (fil : ByteArray) (path : Array PathHop) (payload : ByteArray)
+    (hn : path.size ≤ geom.nrHops) (hpos : 0 < path.size)
+    (hfill : fil.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (htag : ∀ m x, (tag m x).size = macLength) (hge : (ge 0).size = nike.publicKeySize) :
+    (match nikePktFn geom ks tag (keysEnc cipher K.toArray) ge fil path payload with
+      | some pkt => split geom (peels nike cipher streamS geom K i pkt)
+      | none => default).1
+      = (match nikePktFn geom ks tag (keysEnc cipher K'.toArray) ge fil path payload with
+        | some pkt => split geom (peels nike cipher streamS geom K' i pkt)
+        | none => default).1 := by
+  obtain ⟨hnnh, hper, hrouting, hhdr, -⟩ := id hvalid
+  unfold nikePktFn
+  by_cases hb : payload.size = geom.forwardPayloadLength
+  · rw [ite_eq_left hb, ite_eq_left hb]
+    cases hs : nikeHdrTrace geom ks tag ge fil path path.size with
+    | none => rfl
+    | some s =>
+      have hH := hdr_size geom nike.publicKeySize ks tag ge fil path hnnh (by omega) hrouting hn
+          hpos
+        hfill htag hge s hs
+      have hz : (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray).size =
+          geom.payloadTagLength := Array.size_replicate
+      have hE : ∀ K₀ : List HopKeys, 0 < ((List.range' 0 path.size).foldl
+          (fun b iRev => keysEnc cipher K₀.toArray (path.size - 1 - iRev) b)
+          ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)).size := fun K₀ => by
+        have e := encTrace_keysEnc_size cipher K₀.toArray path.size ((⟨Array.replicate
+            geom.payloadTagLength 0⟩ : ByteArray) ++ payload) path.size
+        unfold encTrace at e
+        rw [e, ByteArray.size_append, hz, hb]
+        omega
+      obtain ⟨P1, -, e1, s1⟩ := peels_append_hdr nike cipher streamS geom K _ _ hH (hE K) i hi
+      obtain ⟨P2, -, e2, s2⟩ := peels_append_hdr nike cipher streamS geom K' _ _ hH (hE K') i hi'
+      have hsz : (hdrPeels nike streamS geom K' i (v0AD ++ ge 0 ++ s.1 ++ s.2)).size
+          = geom.headerLength := by
+        rw [s2]
+        exact hhdr.symm
+      have hsp : ∀ B : ByteArray,
+          (split geom (hdrPeels nike streamS geom K' i (v0AD ++ ge 0 ++ s.1 ++ s.2) ++ B)).1
+            = Util.Bytes.toVecN _ (hdrPeels nike streamS geom K' i
+              (v0AD ++ ge 0 ++ s.1 ++ s.2)) := fun B => by
+        have := Util.Bytes.extract_append_left
+          (hdrPeels nike streamS geom K' i (v0AD ++ ge 0 ++ s.1 ++ s.2)) B
+        rw [hsz] at this
+        exact congrArg (Util.Bytes.toVecN _) this
+      show (split geom (peels nike cipher streamS geom K i _)).1
+        = (split geom (peels nike cipher streamS geom K' i _)).1
+      rw [e1, e2, hdrPeels_congr nike streamS geom K K' i _ hK]
+      exact (hsp _).trans (hsp _).symm
+  · rw [ite_eq_right hb, ite_eq_right hb]
+
 /-! ## The reply's packet, with one hop's tag given -/
 
 /-- The bytes of the reply's packet over the backward path that hop `j`'s tag covers. -/
