@@ -298,6 +298,11 @@ def pathBuilds (path : Array PathHop) (n : ℕ) : Prop :=
   (nikeHdrTrace geom (fun _ => ByteArray.empty) (fun _ _ => ByteArray.empty)
     (fun _ => ByteArray.empty) ByteArray.empty path n).isSome = true
 
+omit nike in
+instance (path : Array PathHop) (n : ℕ) : Decidable (pathBuilds geom path n) := by
+  unfold pathBuilds
+  infer_instance
+
 set_option maxHeartbeats 2000000 in
 /-- **What a relay answers for a layer before the last, in the games' form.** A relay that
 holds the layer's tag and keystream, and is handed the payload's decryption `y`, forwards the
@@ -440,6 +445,35 @@ theorem hopKeysWith_cut (c : nike.PrivateKey) (hops hops' : Array PathHop) (j : 
 
 end Cut
 
+section Front
+
+variable (nike : NIKE) (kdfS : KDF)
+
+/-- The keys of the hops before hop `j` do not read the keys put at hop `j`. -/
+theorem hopKeysWith_front (c : nike.PrivateKey) (hops : Array PathHop) (j : ℕ) (t t' : HopKeys)
+    (m : ℕ) (hm : m ≤ j) :
+    hopKeysWith nike kdfS c hops j t m = hopKeysWith nike kdfS c hops j t' m := by
+  induction m with
+  | zero => rfl
+  | succ m ih =>
+    have hne : ¬ m = j := by omega
+    rw [hopKeysWith, hopKeysWith, ih (by omega)]
+    simp only [hne, ↓reduceIte]
+
+/-- So a hop before hop `j` has the same keys whatever is put at hop `j`. -/
+theorem hopKeysWith_getElem!_lt (c : nike.PrivateKey) (hops : Array PathHop) (j : ℕ)
+    (t t' : HopKeys) (n i : ℕ) (hi : i < j) (hn : j ≤ n) :
+    (hopKeysWith nike kdfS c hops j t n).toArray[i]!
+      = (hopKeysWith nike kdfS c hops j t' n).toArray[i]! := by
+  have h : ∀ s, (hopKeysWith nike kdfS c hops j s n)[i]?
+      = (hopKeysWith nike kdfS c hops j s j)[i]? := fun s => by
+    rw [← hopKeysWith_take_le nike kdfS c hops j s j n hn]
+    simp [hi]
+  exact toArray_getElem!_congr _ _ i ((h t).trans ((congrArg (·[i]?)
+    (hopKeysWith_front nike kdfS c hops j t t' j le_rfl)).trans (h t').symm))
+
+end Front
+
 /-! ## The blinding game
 
 The hops after the honest relay get their keys from the sender's secret and the relay's
@@ -515,6 +549,13 @@ theorem spliceAt_le {α : Type} (j : ℕ) (f g : ℕ → α) (i : ℕ) (hi : i �
 theorem spliceAt_gt {α : Type} (j : ℕ) (f g : ℕ → α) (i : ℕ) (hi : j < i) :
     spliceAt j f g i = g (i - (j + 1)) :=
   ite_eq_right (by omega)
+
+theorem spliceAt_congr_le {α : Type} (j : ℕ) (f f' g : ℕ → α) (h : ∀ i, i ≤ j → f i = f' i) :
+    spliceAt j f g = spliceAt j f' g := by
+  funext i
+  by_cases hi : i ≤ j
+  · rw [spliceAt_le j _ _ i hi, spliceAt_le j _ _ i hi, h i hi]
+  · rw [spliceAt_gt j _ _ i (by omega), spliceAt_gt j _ _ i (by omega)]
 
 /-- **Functions that are the hops' keys' after hop `j`, spliced with the keys' after hop `j`,
 are themselves.** -/
@@ -1836,6 +1877,91 @@ theorem strRun_fwd0_fn (names : Role → Name)
   rw [ite_eq_left hlt, hon]
   rfl
 
+/-! ## The blinding adversary of world 0 -/
+
+/-- **What world 0 does with the hops after the relay.** On the draws of world 0 besides the
+relay's blinding seed (the relay's keystream and MAC key, the game's draws, the two blocks) and
+on what lies after the relay, `tail`: before the end of a path whose header builds, the game
+from the hops' functions, those after the relay from `tail`; at the end of the path, `E`. -/
+def blindPost (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (E : KEMSphinx.Keystream geom × Vector UInt8 32 × (PropDraw nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (fwd0 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth A) × (Vector UInt8
+        (geom.payloadTagLength + geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength
+        + geom.forwardPayloadLength)) → ProbComp Bool) (s : KEMSphinx.Keystream geom × Vector UInt8
+        32 × (PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (fwd0 nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names).Oth A) × (Vector UInt8 (geom.payloadTagLength +
+        geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength +
+        geom.forwardPayloadLength))) (tail : ByteArray × List HopKeys) : ProbComp Bool :=
+  if (s.2.2.1.c.pos : ℕ) + 1 < s.2.2.1.c.req.fwd.hops.length then
+    if pathBuilds geom (RSOR.path nike s.2.2.1.c.req.fwd [.recipient s.2.2.1.c.req.receiver])
+        ((RSOR.path nike s.2.2.1.c.req.fwd [.recipient s.2.2.1.c.req.receiver]).size -
+        s.2.2.1.c.pos) then
+      fnRun nike cipher macS kdfS streamS geom hvalid hmactag h16 A ((forwardPay nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names) A).proc (strPay nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (A
+          := A) (s.2.1, default, s.2.2.1)))
+        ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher
+            macS kdfS streamS geom hvalid hmactag h16 names) A).reply (strPay nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 names) (A := A) (s.2.1, default, s.2.2.1)))
+        s.2.2.1.st s.2.2.1.log s.2.2.1.c.req s.2.2.1.o s.2.2.1.c.pos s.2.1 s.2.2.2.1 s.2.2.2.2
+        (spliceAt s.2.2.1.c.pos (Function.update (keysKs geom streamS (hopKeysWith nike kdfS
+            ((nike.decodePrivateKey s.2.2.1.d).getD default) (RSOR.path nike s.2.2.1.c.req.fwd
+            [.recipient s.2.2.1.c.req.receiver]) s.2.2.1.c.pos (restKeys ((default, default,
+            default), default) default) (RSOR.path nike s.2.2.1.c.req.fwd [.recipient
+            s.2.2.1.c.req.receiver]).size).toArray)
+          s.2.2.1.c.pos (Util.Bytes.ofVector s.1)) (keysKs geom streamS tail.2.toArray))
+        (spliceAt s.2.2.1.c.pos (keysTag macS (hopKeysWith nike kdfS ((nike.decodePrivateKey
+            s.2.2.1.d).getD default) (RSOR.path nike s.2.2.1.c.req.fwd [.recipient
+            s.2.2.1.c.req.receiver]) s.2.2.1.c.pos (restKeys ((default, default, default), default)
+            default) (RSOR.path nike s.2.2.1.c.req.fwd [.recipient
+            s.2.2.1.c.req.receiver]).size).toArray) (keysTag macS tail.2.toArray))
+        (spliceAt s.2.2.1.c.pos (keysEnc cipher (hopKeysWith nike kdfS ((nike.decodePrivateKey
+            s.2.2.1.d).getD default) (RSOR.path nike s.2.2.1.c.req.fwd [.recipient
+            s.2.2.1.c.req.receiver]) s.2.2.1.c.pos (restKeys ((default, default, default), default)
+            default) (RSOR.path nike s.2.2.1.c.req.fwd [.recipient
+            s.2.2.1.c.req.receiver]).size).toArray) (keysEnc cipher tail.2.toArray))
+        (spliceAt s.2.2.1.c.pos (blindElem nike (groupElem nike ((nike.decodePrivateKey
+            s.2.2.1.d).getD default) (hopKeysWith nike kdfS ((nike.decodePrivateKey s.2.2.1.d).getD
+            default) (RSOR.path nike s.2.2.1.c.req.fwd [.recipient s.2.2.1.c.req.receiver])
+            s.2.2.1.c.pos (restKeys ((default, default, default), default) default) (RSOR.path nike
+            s.2.2.1.c.req.fwd [.recipient s.2.2.1.c.req.receiver]).size).toArray 0) (hopKeysWith
+            nike kdfS ((nike.decodePrivateKey s.2.2.1.d).getD default) (RSOR.path nike
+            s.2.2.1.c.req.fwd [.recipient s.2.2.1.c.req.receiver]) s.2.2.1.c.pos (restKeys
+            ((default, default, default), default) default) (RSOR.path nike s.2.2.1.c.req.fwd
+            [.recipient s.2.2.1.c.req.receiver]).size).toArray)
+          (blindElem nike tail.1 tail.2.toArray))
+    else pure false
+  else E s
+
+/-- **The adversary on the blinding game that world 0 gives.** It draws what world 0 draws
+besides the relay's blinding seed, names the sender's secret, the path and the relay's place,
+and plays `blindPost` on what it is given. -/
+def blindAdv (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
+    (E : KEMSphinx.Keystream geom × Vector UInt8 32 × (PropDraw nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (fwd0 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth A) × (Vector UInt8
+        (geom.payloadTagLength + geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength
+        + geom.forwardPayloadLength)) → ProbComp Bool) : BlindAdversary nike where
+  St := KEMSphinx.Keystream geom × Vector UInt8 32 × (PropDraw nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (fwd0 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names).Oth A) × (Vector UInt8
+      (geom.payloadTagLength + geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength +
+      geom.forwardPayloadLength))
+  pre := do
+    let U ← $ᵗ (KEMSphinx.Keystream geom)
+    let km ← $ᵗ (Vector UInt8 32)
+    let D ← forwardDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) A
+    let u ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    let v ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    return (((nike.decodePrivateKey D.d).getD default,
+      RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver], D.c.pos), (U, km, D, u, v))
+  post := blindPost nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E
+
 /-- The hops' keys of world 0 after its steps: the sender's, the honest relay's replaced by
 its blinding seed alone. -/
 theorem fwd0_keys (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary)
@@ -1914,6 +2040,128 @@ theorem fwd1_keys (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable
     x.2.2.c.pos (restKeys ((default, default, default), x.2.1) default) _ = _
   rw [hmod]
   exact congrArg (hopKeysWith nike kdfS _ _ _ _) (congrArg Array.size hmod)
+
+set_option maxHeartbeats 4000000 in
+/-- **Handed the path's own tail, the blinding adversary plays world 0**, on a draw before the
+end of a path whose header builds. -/
+theorem blindPost_real (names : Role → Name)
+    (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) (E : KEMSphinx.Keystream geom ×
+        Vector UInt8 32 × (PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (fwd0 nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names).Oth A) × (Vector UInt8 (geom.payloadTagLength +
+        geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength +
+        geom.forwardPayloadLength)) → ProbComp Bool)
+    (U : KEMSphinx.Keystream geom) (km seed : Vector UInt8 32) (D : PropDraw nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+        (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth A) (u v : Vector
+        UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (hj : (D.c.pos : ℕ) + 1 < D.c.req.fwd.hops.length)
+    (hT : pathBuilds geom (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]) ((RSOR.path
+        nike D.c.req.fwd [.recipient D.c.req.receiver]).size - D.c.pos)) :
+    blindPost nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E (U, km, D, u, v)
+        (tailOf nike kdfS ((nike.decodePrivateKey D.d).getD default) (RSOR.path nike D.c.req.fwd
+        [.recipient D.c.req.receiver]) D.c.pos seed)
+      = strRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names) A (km, seed, D) U u v := by
+  have hpos : (D.c.pos : ℕ) < (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]).size :=
+    lt_of_lt_of_eq D.c.pos.isLt (RSOR.path_size nike D.c.req.fwd _).symm
+  have hlt : ∀ i, i < (D.c.pos : ℕ) → (hopKeysWith nike kdfS ((nike.decodePrivateKey D.d).getD
+      default) (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]) D.c.pos (restKeys
+      ((default, default, default), seed) default) (RSOR.path nike D.c.req.fwd [.recipient
+      D.c.req.receiver]).size).toArray[i]! = (hopKeysWith nike kdfS ((nike.decodePrivateKey
+      D.d).getD default) (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]) D.c.pos
+      (restKeys ((default, default, default), default) default) (RSOR.path nike D.c.req.fwd
+      [.recipient D.c.req.receiver]).size).toArray[i]! := fun i hi =>
+    hopKeysWith_getElem!_lt nike kdfS _ _ _ _ _ _ i hi hpos.le
+  have hat : ∀ s : HopKeys, (hopKeysWith nike kdfS ((nike.decodePrivateKey D.d).getD default)
+      (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]) D.c.pos s (RSOR.path nike
+      D.c.req.fwd [.recipient D.c.req.receiver]).size).toArray[
+      (D.c.pos : ℕ)]! = s := fun s =>
+    toArray_getElem!_of_getElem? _ _ _ (hopKeysWith_getElem nike kdfS _ _ _ _ _ hpos)
+  have e1 : ∀ i, i ≤ (D.c.pos : ℕ) →
+      Function.update (keysKs geom streamS (hopKeysWith nike kdfS ((nike.decodePrivateKey D.d).getD
+          default) (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]) D.c.pos (restKeys
+          ((default, default, default), seed) default) (RSOR.path nike D.c.req.fwd [.recipient
+          D.c.req.receiver]).size).toArray) D.c.pos (Util.Bytes.ofVector U) i
+        = Function.update (keysKs geom streamS (hopKeysWith nike kdfS ((nike.decodePrivateKey
+            D.d).getD default) (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]) D.c.pos
+            (restKeys ((default, default, default), default) default) (RSOR.path nike D.c.req.fwd
+            [.recipient D.c.req.receiver]).size).toArray) D.c.pos (Util.Bytes.ofVector U) i :=
+    fun i hi => by
+      by_cases he : i = (D.c.pos : ℕ)
+      · rw [he, Function.update_self, Function.update_self]
+      · rw [Function.update_of_ne he, Function.update_of_ne he]
+        unfold keysKs
+        rw [hlt i (by omega)]
+  have e2 : ∀ i, i ≤ (D.c.pos : ℕ) → keysTag macS (hopKeysWith nike kdfS ((nike.decodePrivateKey
+      D.d).getD default) (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]) D.c.pos
+      (restKeys ((default, default, default), seed) default) (RSOR.path nike D.c.req.fwd
+      [.recipient D.c.req.receiver]).size).toArray i = keysTag macS (hopKeysWith nike kdfS
+      ((nike.decodePrivateKey D.d).getD default) (RSOR.path nike D.c.req.fwd [.recipient
+      D.c.req.receiver]) D.c.pos (restKeys ((default, default, default), default) default)
+      (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]).size).toArray i :=
+    fun i hi => by
+      funext m
+      unfold keysTag
+      by_cases he : i = (D.c.pos : ℕ)
+      · rw [he, hat, hat]
+        rfl
+      · rw [hlt i (by omega)]
+  have e3 : ∀ i, i ≤ (D.c.pos : ℕ) →
+      keysEnc cipher (hopKeysWith nike kdfS ((nike.decodePrivateKey D.d).getD default) (RSOR.path
+          nike D.c.req.fwd [.recipient D.c.req.receiver]) D.c.pos (restKeys ((default, default,
+          default), seed) default) (RSOR.path nike D.c.req.fwd [.recipient
+          D.c.req.receiver]).size).toArray i = keysEnc cipher (hopKeysWith nike kdfS
+          ((nike.decodePrivateKey D.d).getD default) (RSOR.path nike D.c.req.fwd [.recipient
+          D.c.req.receiver]) D.c.pos (restKeys ((default, default, default), default) default)
+          (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]).size).toArray i := fun i hi =>
+          by
+    funext m
+    unfold keysEnc
+    by_cases he : i = (D.c.pos : ℕ)
+    · rw [he, hat, hat]
+      rfl
+    · rw [hlt i (by omega)]
+  have e4 : ∀ i, i ≤ (D.c.pos : ℕ) →
+      blindElem nike (groupElem nike ((nike.decodePrivateKey D.d).getD default) (hopKeysWith nike
+          kdfS ((nike.decodePrivateKey D.d).getD default) (RSOR.path nike D.c.req.fwd [.recipient
+          D.c.req.receiver]) D.c.pos (restKeys ((default, default, default), seed) default)
+          (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]).size).toArray 0) (hopKeysWith
+          nike kdfS ((nike.decodePrivateKey D.d).getD default) (RSOR.path nike D.c.req.fwd
+          [.recipient D.c.req.receiver]) D.c.pos (restKeys ((default, default, default), seed)
+          default) (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]).size).toArray i
+        = blindElem nike (groupElem nike ((nike.decodePrivateKey D.d).getD default) (hopKeysWith
+            nike kdfS ((nike.decodePrivateKey D.d).getD default) (RSOR.path nike D.c.req.fwd
+            [.recipient D.c.req.receiver]) D.c.pos (restKeys ((default, default, default), default)
+            default) (RSOR.path nike D.c.req.fwd [.recipient D.c.req.receiver]).size).toArray 0)
+            (hopKeysWith nike kdfS ((nike.decodePrivateKey D.d).getD default) (RSOR.path nike
+            D.c.req.fwd [.recipient D.c.req.receiver]) D.c.pos (restKeys ((default, default,
+            default), default) default) (RSOR.path nike D.c.req.fwd [.recipient
+            D.c.req.receiver]).size).toArray i := fun i hi =>
+    blindElem_congr_lt nike (Util.Bytes.ofVector (nike.encodePublicKey (nike.derivePublicKey
+      ((nike.decodePrivateKey D.d).getD default)))) _ _ i fun n hn =>
+      congrArg HopKeys.blindingFactor (hlt n (by omega))
+  have hrun := strRun_fwd0_fn nike cipher macS kdfS streamS geom hvalid hmactag h16 names A (km,
+      seed, D) U u v hj hT
+  rw [fwd0_keys nike cipher macS kdfS streamS geom hvalid hmactag h16 names A (km, seed, D)] at hrun
+  have htail := fnRun_tailOf nike cipher macS kdfS streamS geom hvalid hmactag h16 A
+    ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) A).proc (strPay nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) (A := A) (km, seed, D)))
+    ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) A).reply (strPay nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) (A := A) (km, seed, D)))
+    D.st D.log D.c.req D.o D.c.pos km u v ((nike.decodePrivateKey D.d).getD default) (RSOR.path
+        nike D.c.req.fwd [.recipient D.c.req.receiver]) seed (restKeys ((default, default,
+        default), seed) default) (Util.Bytes.ofVector U)
+    hpos rfl
+  rw [spliceAt_congr_le _ _ _ _ e1, spliceAt_congr_le _ _ _ _ e2, spliceAt_congr_le _ _ _ _ e3,
+    spliceAt_congr_le _ _ _ _ e4] at htail
+  unfold blindPost
+  rw [ite_eq_left hj, ite_eq_left hT]
+  exact (hrun.trans htail).symm
 
 end Final
 

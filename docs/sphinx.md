@@ -752,7 +752,14 @@ for it:
      through `tailOf` (`fnRun_tailOf`). The one condition left on a draw of world 0 is that
      the path's header builds through the relay's layer (`pathBuilds`), which depends on the
      path alone (`nikeHdrTrace_isSome`); the length of the bytes under the relay's tag follows
-     from it (`hdrMsg_size`). The reduction itself is not written.
+     from it (`hdrMsg_size`). The adversary on the blinding game is `blindAdv`: it draws what
+     world 0 draws besides the relay's blinding seed, names the sender's secret, the path and
+     the relay's place, and plays the game from the hops' functions with those after the relay
+     taken from what it is handed (`blindPost`); at the end of the path it plays a game `E`
+     left open. Handed the path's own tail it plays world 0's run, on a draw before the end of
+     a path whose header builds (`blindPost_real`; the hops in front do not read the relay's
+     blinding seed, `hopKeysWith_front`). Not yet proved: the blinding game's two sides as
+     games over world 0's draws, and the side with an independent secret against world 1.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).
