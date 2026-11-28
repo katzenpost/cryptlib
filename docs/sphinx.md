@@ -789,9 +789,14 @@ for it:
      (`drawElem_fwd1`). Its conditions on the draw: the replacement's path builds, its body
      has a payload's length, the bytes under the relay's tag have their length, and the relay
      would not reply to the replacement (`finNoReply`).
+     The two are joined on a draw (`blindPost_comb`): take a draw of world 1's last game
+     before the end of the path; handed the tail of the original's path from the original's
+     own secret, with the joined keystream for the relay (`finComb`) and a block `g` for a
+     changed payload, the blinding adversary plays exactly the game `finRun_layerFn` gives for
+     world 1. Its conditions: both paths build and both bodies have a payload's length.
      Not yet proved: that `world0E` is world 0 for the right `E`; the
-     conditions of `fnRun_eq_short` on the draws of `world0B` and world 1 (the keystream
-     relabelling); the end of the path.
+     two games over their draws (that the joined keystream and the relabelled draws are
+     uniform, by `evalDistEq_headTail`); `finNoReply`; the end of the path.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).
