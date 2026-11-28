@@ -953,7 +953,8 @@ for world 0 (`backward0_keyGame_sub_macOnly_le`): the reply's packet, like the f
 uses the replaced hop's MAC key for one tag only (`nikePktFn_restKeys`, `peels_restKeys`,
 `backOnionOfKeys_tag`, `backLayerOfKeys_tag`, `backView0_tag`), so the relay may answer the
 element of its place under the challenge's header only, at the cost of a forgery and the
-chance that the bytes its tag covers do not have a header's length. Nothing
+chance that the bytes its tag covers do not have a header's length. World 1 has the same
+step (`backward1_keyGame_sub_macOnly_le`, `backView1_tag`). Nothing
 else of SLU← is proved for NIKE Sphinx; the plan is the
 order of the KEM proof above, with the blinding game once more for the hops after the relay on
 the backward path. STI↔ is not started for NIKE Sphinx.
