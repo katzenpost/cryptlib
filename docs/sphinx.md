@@ -970,7 +970,9 @@ nothing under it and the world does not read it (`backViewTAt_back`), so the blo
 challenger draws (`backPlain0`, `backViewE0`). The draws not covered are those on which the
 bytes under the relay's tag do not have a header's length or do not carry the element of its
 place, or at the exit the block does not have a payload's length (`backGoodP0`, not bounded).
-World 1 does not have this step yet. Two lemmas it needs on the
+World 1 has the same step in `NIKESphinxSLUPay.lean` (`backward1_macOnly_sub_pay_le`,
+`backGoodP1` not bounded); at the exit its block is carried by the first layer and by the
+relay's own forward layer, and on the backward path there is none. Two lemmas the step needs on the
 backward path are in place (`peels_append_hdr`, `hdrPeels_congr`: a peeled packet's header
 does not read the payload or the hops' payload keys), and from them that a packet's header and
 its later layers' headers do not read the hops' encryptions (`nikePktFn_hdr_enc`,

@@ -137,6 +137,7 @@ import Cryptlib.Protocols.Sphinx.NIKESphinxTLUExit
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLUExitDraws
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLUFinal
 import Cryptlib.Protocols.Sphinx.NIKESphinxSLU
+import Cryptlib.Protocols.Sphinx.NIKESphinxSLUPay
 import Cryptlib.Protocols.Sphinx.RelayMac
 import Cryptlib.Protocols.RSORPayload
 import Cryptlib.Protocols.Sphinx.Schemes
