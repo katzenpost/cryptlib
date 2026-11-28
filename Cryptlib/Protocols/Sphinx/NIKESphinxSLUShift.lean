@@ -112,6 +112,97 @@ theorem padAt_drop (ks : ℕ → ByteArray) (hks : ∀ k, (ks k).size = (geom.ro
       omega
     · congr 1 <;> omega
 
+/-- The front of the padding after hop `i`: its first `j + 1` hops' length. -/
+def frontPad (ks : ℕ → ByteArray) (j i : ℕ) : ByteArray :=
+  (padAt geom ks i).extract 0 ((j + 1) * geom.perHopRoutingInfoLength)
+
+/-- **The front of the padding after a hop** is the front of the padding after the hop before,
+masked by that many bytes of the hop's keystream from where its tail begins. -/
+theorem frontPad_succ (ks : ℕ → ByteArray) (hks : ∀ k, (ks k).size = (geom.routingInfoLength +
+    geom.perHopRoutingInfoLength)) (j i : ℕ)
+    (hi : j ≤ i) (hb : (i + 1 + 1) * geom.perHopRoutingInfoLength ≤ (geom.routingInfoLength +
+        geom.perHopRoutingInfoLength)) :
+    frontPad geom ks j (i + 1)
+      = xorBytes ((ks (i + 1)).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) -
+          (i + 1 + 1) * geom.perHopRoutingInfoLength)
+          ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1 + 1) *
+              geom.perHopRoutingInfoLength + (j + 1) * geom.perHopRoutingInfoLength))
+        (frontPad geom ks j i) := by
+  have e1 : (i + 1 + 1) * geom.perHopRoutingInfoLength = (i + 1) * geom.perHopRoutingInfoLength +
+      geom.perHopRoutingInfoLength := Nat.succ_mul _ _
+  have e2 : (j + 1) * geom.perHopRoutingInfoLength ≤ (i + 1) * geom.perHopRoutingInfoLength :=
+      Nat.mul_le_mul_right _ (by omega)
+  have hs : (padAt geom ks i).size = (i + 1) * geom.perHopRoutingInfoLength := padAt_size geom ks
+      hks i (by omega)
+  have hk := hks (i + 1)
+  unfold frontPad
+  rw [padAt, Util.Bytes.extract_append_of_le _ _ (by
+      rw [Cryptlib.Protocols.Sphinx.Common.size_xorBytes, ByteArray.size_extract,
+        ByteArray.size_extract, hs, hk]
+      omega),
+    KEMSphinx.xorBytes_extract _ _ _ _ (by
+      rw [ByteArray.size_extract, ByteArray.size_extract, hs, hk]
+      omega) (by
+      rw [hs]
+      exact e2)]
+  simp only [ByteArray.extract_extract, hs]
+  congr 1
+  congr 1
+  omega
+
+/-- So masking it again gives back the front of the padding after the hop before. -/
+theorem frontPad_unmask (ks : ℕ → ByteArray) (hks : ∀ k, (ks k).size = (geom.routingInfoLength +
+    geom.perHopRoutingInfoLength)) (j i : ℕ)
+    (hi : j ≤ i) (hb : (i + 1 + 1) * geom.perHopRoutingInfoLength ≤ (geom.routingInfoLength +
+        geom.perHopRoutingInfoLength)) :
+    xorBytes (frontPad geom ks j (i + 1)) ((ks (i + 1)).extract ((geom.routingInfoLength +
+        geom.perHopRoutingInfoLength) - (i + 1 + 1) * geom.perHopRoutingInfoLength)
+        ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1 + 1) *
+            geom.perHopRoutingInfoLength + (j + 1) * geom.perHopRoutingInfoLength))
+      = frontPad geom ks j i := by
+  have e1 : (i + 1 + 1) * geom.perHopRoutingInfoLength = (i + 1) * geom.perHopRoutingInfoLength +
+      geom.perHopRoutingInfoLength := Nat.succ_mul _ _
+  have e2 : (j + 1) * geom.perHopRoutingInfoLength ≤ (i + 1) * geom.perHopRoutingInfoLength :=
+      Nat.mul_le_mul_right _ (by omega)
+  have hs : (padAt geom ks i).size = (i + 1) * geom.perHopRoutingInfoLength := padAt_size geom ks
+      hks i (by omega)
+  have hsz : ((ks (i + 1)).extract ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i +
+      1 + 1) * geom.perHopRoutingInfoLength)
+      ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1 + 1) *
+          geom.perHopRoutingInfoLength + (j + 1) * geom.perHopRoutingInfoLength)).size = (frontPad
+          geom ks j i).size := by
+    unfold frontPad
+    rw [ByteArray.size_extract, ByteArray.size_extract, hs, hks]
+    omega
+  rw [frontPad_succ geom ks hks j i hi hb,
+    Cryptlib.Protocols.Sphinx.Common.xorBytes_comm_of_size_eq _ _ hsz]
+  exact Cryptlib.Protocols.Sphinx.Common.xorBytes_xorBytes _ _
+
+omit geom in
+/-- A mask over two parts is a mask over each. -/
+theorem xorBytes_split (X Q K : ByteArray) (a q : ℕ) (hX : X.size = a) (hK : a + q ≤ K.size) :
+    xorBytes (X ++ Q) (K.extract 0 (a + q))
+      = xorBytes X (K.extract 0 a) ++ xorBytes Q (K.extract a (a + q)) := by
+  have hsplit : K.extract 0 (a + q) = K.extract 0 a ++ K.extract a (a + q) := by
+    apply ByteArray.ext_getElem
+    · simp only [ByteArray.size_append, ByteArray.size_extract]
+      omega
+    · intro i h1 h2
+      simp only [ByteArray.size_extract] at h1
+      rw [ByteArray.getElem_extract]
+      by_cases hi : i < a
+      · rw [ByteArray.getElem_append_left (by simp only [ByteArray.size_extract]; omega),
+          ByteArray.getElem_extract]
+      · rw [ByteArray.getElem_append_right (by simp only [ByteArray.size_extract]; omega),
+          ByteArray.getElem_extract]
+        simp only [ByteArray.size_extract]
+        congr 1
+        omega
+  rw [hsplit]
+  exact KEMSphinx.xorBytes_append _ _ _ _ (by
+    rw [hX, ByteArray.size_extract]
+    omega)
+
 end Shift
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx

@@ -1032,7 +1032,10 @@ packet builds. What remains for the identification is that a header over the who
 backward path is, from the relay's next hop on, a header over the rest of the path whose
 filler is the long filler followed by the front of the padding. Of that only the first
 byte-level lemma is proved (`padAt_drop` in `NIKESphinxSLUShift.lean`): the padding after a
-later hop, past the first hops' length, is the padding of the later hops by themselves. On the backward path the comparison is to follow TLU→'s last
+later hop, past the first hops' length, is the padding of the later hops by themselves. The front
+of the padding follows the hops' keystreams one hop at a time (`frontPad`, `frontPad_succ`,
+`frontPad_unmask`), and a mask over two parts is a mask over each (`xorBytes_split`). The
+header-trace lemma built on these is not proved yet. On the backward path the comparison is to follow TLU→'s last
 one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
