@@ -250,6 +250,43 @@ theorem replyOf_body (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom
   rw [hfirst]
   rfl
 
+/-- **Two headers that end at the same hop have the same bytes under that hop's tag**, when the
+hops in front are the same and the head of the one's keystream is the other's, shifted by the
+difference of what the two mask. -/
+theorem hdrMsg_shift_last (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ge ge' : ℕ → ByteArray) (filler filler' : ByteArray) (path path' : Array PathHop) (i : ℕ)
+    (hi : i + 1 = path.size) (hi' : i + 1 = path'.size) (F F' : ByteArray)
+    (hF : nikeFragment geom path ByteArray.empty i = .ok F)
+    (hF' : nikeFragment geom path' ByteArray.empty i = .ok F')
+    (hX : (F ++ (if geom.nrHops > path.size then filler else ByteArray.empty)).size =
+        ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+        geom.perHopRoutingInfoLength)) (hX' : (F' ++ (if geom.nrHops > path'.size then filler' else
+        ByteArray.empty)).size = ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1)
+        * geom.perHopRoutingInfoLength))
+    (hks' : ∀ k, (ks' k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hge : ge
+        i = ge' i) (hfront : ∀ m < i, ks m = ks' m)
+    (hshift : (ks i).extract 0 ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+        geom.perHopRoutingInfoLength)
+      = xorBytes ((ks' i).extract 0 ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i +
+          1) * geom.perHopRoutingInfoLength)) (xorBytes (F' ++ (if geom.nrHops > path'.size then
+          filler' else ByteArray.empty)) (F ++ (if geom.nrHops > path.size then filler else
+          ByteArray.empty)))) :
+    hdrMsg geom ks tag ge filler path i = hdrMsg geom ks' tag' ge' filler' path' i := by
+  have hp : (if i > 0 then KEMSphinx.padAt geom ks (i - 1) else ByteArray.empty)
+      = (if i > 0 then KEMSphinx.padAt geom ks' (i - 1) else ByteArray.empty) := by
+    by_cases hj : i > 0
+    · rw [ite_eq_left hj, ite_eq_left hj]
+      exact KEMSphinx.padAt_congr geom ks ks' (i - 1) fun m hm => hfront m (by omega)
+    · rw [ite_eq_right hj, ite_eq_right hj]
+  have hsz : ((ks' i).extract 0 ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1)
+      * geom.perHopRoutingInfoLength)).size = ((geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) - (i + 1) * geom.perHopRoutingInfoLength) := by
+    rw [ByteArray.size_extract, hks']
+    omega
+  rw [hdrMsg_last geom ks tag ge filler path i hi F hF,
+    hdrMsg_last geom ks' tag' ge' filler' path' i hi' F' hF', hshift,
+    KEMSphinx.xorBytes_shift _ _ _ (hX.trans hX'.symm) (hsz.trans hX.symm), hge, hp]
+
 /-- **The bytes under the tag of the last layer have their length.** -/
 theorem hdrMsg_size_last (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
     (ge : ℕ → ByteArray) (filler : ByteArray) (path : Array PathHop) (i : ℕ)
@@ -468,6 +505,1758 @@ theorem strRun_fwd0_last (names : Role → Name)
   exact congrArg (fun impl => (simulateQ impl (strGuess nike cipher macS kdfS streamS geom hvalid
       hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) A x U
       u)).run' x.2.2.log) h
+
+set_option maxHeartbeats 16000000 in
+/-- **World 1 on a draw, at the end of the path, against the last-hop relay in closed form.**
+The relay patched around the replacement's layer is the last-hop relay for the original's
+recipient, with the unchanged block decrypted to the original's payload and a changed block to
+`x.2.v`. This holds when the replacement's path builds, both bodies have a payload's length, the
+original's two paths build, and `x.2.v` does not begin with the zero tag. -/
+theorem finOwnRun_last (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) (x : KEMSphinx.Keystream geom × Next4 nike cipher macS kdfS streamS geom hvalid
+    hmactag h16 names A)
+    (hlast : (x.2.p.c.pos : ℕ) + 1 = x.2.p.c.req.fwd.hops.length)
+    (hT' : pathBuilds geom (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) (RSOR.path nike
+        ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd
+        [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+        (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.o).receiver]).size)
+    (hb : (RSOR.body nike macS kdfS streamS geom x.2.p.c.req x.2.o.1).size =
+        geom.forwardPayloadLength)
+    (hb' : (RSOR.body nike macS kdfS streamS geom ((fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.o) ((fwd1 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.o)).size = geom.forwardPayloadLength)
+    (hr : RSOR.Reliable nike cipher macS kdfS streamS geom x.2.p.c.req x.2.o.1)
+    (hv : ¬ ((Util.Bytes.ofVector x.2.v).extract 0 geom.payloadTagLength).data.all (· == 0) = true)
+        :
+    finOwnRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A x
+      = (simulateQ (lastRelay nike cipher macS kdfS streamS geom hvalid hmactag h16 ((forwardPay
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) A).proc (strPay nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names) (A := A) (x.2.km, default, (toDraw0 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2))))
+          ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names) A).reply (strPay nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names) (A := A) (x.2.km, default, (toDraw0 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 x.2).2.2)))) (finMine nike cipher macS kdfS streamS geom hvalid hmactag h16 x).1
+          x.2.p.c.req.receiver (fun y => if y = x.2.u then Util.Bytes.toVecN _ (((⟨Array.replicate
+          geom.payloadTagLength 0⟩ : ByteArray)) ++ (RSOR.body nike macS kdfS streamS geom
+          x.2.p.c.req x.2.o.1)) else x.2.v))
+        (strGuess nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+            macS kdfS streamS geom hvalid hmactag h16 names) A (next4X nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 x.2) x.2.U x.2.u)).run' x.2.p.log := by
+  obtain ⟨hnnh, hper, hrouting, hhdr, -⟩ := id hvalid
+  have had : adLength = 2 := rfl
+  have hpos : (x.2.p.c.pos : ℕ) < x.2.p.c.req.fwd.hops.length := x.2.p.c.pos.isLt
+  have hlen1 : (x.2.p.c.req.fwd.take (x.2.p.c.pos + 1)).hops.length = x.2.p.c.pos + 1 := by
+    show (List.take ((x.2.p.c.pos : ℕ) + 1) x.2.p.c.req.fwd.hops).length = x.2.p.c.pos + 1
+    rw [List.length_take]
+    omega
+  have hpos1 : (x.2.p.c.pos : ℕ) < (x.2.p.c.req.fwd.take (x.2.p.c.pos + 1)).hops.length :=
+    lt_of_lt_of_eq (Nat.lt_succ_self _) hlen1.symm
+  have hszP1 : (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).receiver]).size = x.2.p.c.pos + 1 := (RSOR.path_size nike
+      _ _).trans hlen1
+  have hP1 : (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).receiver]) = (RSOR.path nike (x.2.p.c.req.fwd.take
+      (x.2.p.c.pos + 1)) [.recipient x.2.o.2.2.1]) := rfl
+  have hnP1 : (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).receiver]).size ≤ geom.nrHops := by
+    have h2 : x.2.p.c.req.fwd.hops.length ≤ geom.nrHops := x.2.p.c.req.fwd.length_le
+    omega
+  have hfill : (RSOR.filler nike geom (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.o).1).size = (geom.nrHops - (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]).size) *
+      geom.perHopRoutingInfoLength := by
+    have hmul : (geom.nrHops - (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]).size) *
+        geom.perHopRoutingInfoLength
+        ≤ geom.routingInfoLength := by
+      rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
+      exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+    unfold RSOR.filler
+    rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+    omega
+  have hT1' : pathBuilds geom (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).receiver]) 1 :=
+    nikeHdrTrace_isSome_of_le geom _ _ _ _ (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.o).receiver]) 1 x.2.p.c.pos (by
+      rw [show 1 + (x.2.p.c.pos : ℕ) = (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+          (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.o).receiver]).size by omega]
+      exact hT')
+  obtain ⟨F0, hF0⟩ := pathBuilds_fragment geom (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) hT1'
+  rw [show (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+      (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).receiver]).size - 1 = (x.2.p.c.pos : ℕ) by omega] at hF0
+  have hks1 : ∀ k, ((Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+      x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) k).size = (geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) := fun k => by
+    by_cases hk : k = (x.2.p.c.pos : ℕ)
+    · rw [hk, Function.update_self]
+      exact Util.Bytes.size_ofVector _
+    · rw [Function.update_of_ne hk]
+      exact streamS.keystream_size _ _ _
+  have htg1 : ∀ i m, ((Function.update (keysTag macS (forwardKeys0 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+      x.2.p.c.pos fun _ => Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector x.2.km)
+      (Util.Bytes.ofVector (Util.Bytes.toVecN (2 + nike.publicKeySize + geom.routingInfoLength)
+      (hdrMsg geom (Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+      x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+      (blindElem nike (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray 0)
+      (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2)) default)).toArray) (RSOR.filler nike geom (RSOR.path nike ((fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2).2.2.o).1) (RSOR.path nike ((fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos)))))
+      i m).size = macLength := fun i m => by
+    by_cases hi : i = (x.2.p.c.pos : ℕ)
+    · rw [hi, Function.update_self]
+      exact (Util.Bytes.size_ofVector _).trans hmactag
+    · rw [Function.update_of_ne hi]
+      exact (Util.Bytes.size_ofVector _).trans hmactag
+  have hge1p : ((blindElem nike (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray 0)
+      (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2)) default)).toArray) x.2.p.c.pos).size = nike.publicKeySize :=
+    (blindElem_size nike _ _ _).trans (Util.Bytes.size_ofVector _)
+  have hcmds : (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).receiver])[(x.2.p.c.pos : ℕ)]!.commands =
+      [RoutingCommand.recipient x.2.o.2.2.1] := by
+    rw [hP1, RSOR.path_getElem! nike _ _ _ hpos1]
+    exact ite_eq_left hlen1.symm
+  have hMsz : (hdrMsg geom (Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray) (blindElem nike (groupElem nike (drawKey nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) (RSOR.filler nike geom
+      (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+      (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).1)
+      (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+      (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos).size = 2 + nike.publicKeySize +
+      geom.routingInfoLength :=
+    hdrMsg_size_last nike geom (Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+        default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2)) default)).toArray) (blindElem nike (groupElem nike (drawKey nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S :=
+        𝒮)) .relay names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2)
+        (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2)) default)).toArray 0) (forwardKeys0 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+        default)).toArray) (RSOR.filler nike geom (RSOR.path nike ((fwd1 nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).1)
+        (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+        (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos hszP1.symm hnnh (by
+        omega)
+      hrouting hnP1 hfill hks1 hge1p F0 hF0
+  have hlt := fwd_hops_pos nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2
+  have hjk : (x.2.p.c.pos : ℕ) ≤ (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).length :=
+    le_of_lt (lt_of_lt_of_eq hlt (hopKeysWith_length nike kdfS _ _ _ _ _).symm)
+  have hMINE : finMine nike cipher macS kdfS streamS geom hvalid hmactag h16 x = (layerFn nike macS
+      kdfS streamS geom ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+      (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.o) ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).rnd (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o) (Function.update (keysKs
+      geom streamS (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2)) default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U))
+      (Function.update (keysTag macS (forwardKeys0 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) x.2.p.c.pos
+      fun _ => Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector x.2.km) (Util.Bytes.ofVector
+      (Util.Bytes.toVecN (2 + nike.publicKeySize + geom.routingInfoLength) (hdrMsg geom
+      (Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) x.2.p.c.pos
+      (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) (blindElem
+      nike (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray 0)
+      (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2)) default)).toArray) (RSOR.filler nike geom (RSOR.path nike ((fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2).2.2.o).1) (RSOR.path nike ((fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos)))))
+      (Function.update (keysEnc cipher (forwardKeys0 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) x.2.p.c.pos
+      fun _ => Util.Bytes.ofVector x.2.u) (blindElem nike (groupElem nike (drawKey nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) x.2.p.c.pos) :=
+    onionOfStream_eq_layerFn nike cipher macS kdfS streamS geom x.2.p.c.pos ((fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o) ((fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.o) (groupElem nike (drawKey nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+        default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)) x.2.p.c.pos
+      (Util.Bytes.ofVector x.2.U) (Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector x.2.km)
+          (Util.Bytes.ofVector (Util.Bytes.toVecN (2 + nike.publicKeySize + geom.routingInfoLength)
+          (hdrMsg geom (Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+          (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2)) default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS
+          (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+          (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) (blindElem nike
+          (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+          default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+          (RSOR.filler nike geom (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩
+          : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2).2.2.o).1) (RSOR.path nike ((fwd1 nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.o).receiver]) x.2.p.c.pos))))) (Util.Bytes.ofVector x.2.u) hvalid
+      hmactag le_rfl (by rw [hszP1]; omega) hjk (Util.Bytes.size_ofVector _)
+      ((Util.Bytes.size_ofVector _).trans hmactag) (by rw [Util.Bytes.size_ofVector]; exact h16)
+      (Util.Bytes.size_ofVector _)
+  have hlastL := layerFn_last nike macS kdfS streamS geom hvalid ((fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o) ((fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o) (Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray) (keysEnc cipher (forwardKeys0 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+    (blindElem nike (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray 0)
+        (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2)) default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector
+        (macS.mac (Util.Bytes.ofVector x.2.km) (Util.Bytes.ofVector (Util.Bytes.toVecN (2 +
+        nike.publicKeySize + geom.routingInfoLength) (hdrMsg geom (Function.update (keysKs geom
+        streamS (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) x.2.p.c.pos
+        (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+        (blindElem nike (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray 0)
+        (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2)) default)).toArray) (RSOR.filler nike geom (RSOR.path
+        nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd
+        [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+        (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).1)
+        (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+        (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos))))) x.2.u hszP1.symm
+        hb' hT' hMsz
+    ((Util.Bytes.size_ofVector _).trans hmactag)
+  have hL : layerHdr geom (Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+      x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (Function.update (keysTag macS (forwardKeys0 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray) x.2.p.c.pos fun _ => Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector
+      x.2.km) (Util.Bytes.ofVector (Util.Bytes.toVecN (2 + nike.publicKeySize +
+      geom.routingInfoLength) (hdrMsg geom (Function.update (keysKs geom streamS (forwardKeys0 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray) (blindElem nike (groupElem nike (drawKey nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) (RSOR.filler nike geom
+      (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+      (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).1)
+      (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+      (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos))))) (blindElem nike (groupElem nike (drawKey
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S :=
+      𝒮)) .relay names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2)
+      (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2)) default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) (RSOR.filler
+      nike geom (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.o).1) (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos
+      = (hdrMsg geom (Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+          (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2)) default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS
+          (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+          (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) (blindElem nike
+          (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+          default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+          (RSOR.filler nike geom (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩
+          : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2).2.2.o).1) (RSOR.path nike ((fwd1 nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.o).receiver]) x.2.p.c.pos) ++ Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector
+          x.2.km) (Util.Bytes.ofVector (Util.Bytes.toVecN (2 + nike.publicKeySize +
+          geom.routingInfoLength) (hdrMsg geom (Function.update (keysKs geom streamS (forwardKeys0
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2)) default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U))
+          (keysTag macS (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+          (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) (blindElem nike
+          (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+          default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+          (RSOR.filler nike geom (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩
+          : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2).2.2.o).1) (RSOR.path nike ((fwd1 nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.o).receiver]) x.2.p.c.pos)))) := by
+    unfold layerHdr
+    rw [hdrMsg_update_tag geom _ _ _ _ _ x.2.p.c.pos (by rw [hszP1]; omega), Function.update_self]
+  have hm1 : (finMine nike cipher macS kdfS streamS geom hvalid hmactag h16 x).1 =
+      Util.Bytes.toVecN _ ((hdrMsg geom (Function.update (keysKs geom streamS (forwardKeys0 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray) (blindElem nike (groupElem nike (drawKey nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+      default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) (RSOR.filler nike geom
+      (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+      (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).1)
+      (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+      (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos) ++ Util.Bytes.ofVector (macS.mac
+      (Util.Bytes.ofVector x.2.km) (Util.Bytes.ofVector (Util.Bytes.toVecN (2 + nike.publicKeySize
+      + geom.routingInfoLength) (hdrMsg geom (Function.update (keysKs geom streamS (forwardKeys0
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2)) default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS
+      (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2)) default)).toArray) (blindElem nike (groupElem nike (drawKey nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay
+      names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2)) default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+      (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) (RSOR.filler
+      nike geom (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.o).1) (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+      (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos))))) := by
+    rw [hMINE, hlastL]
+  have hm2 : (finMine nike cipher macS kdfS streamS geom hvalid hmactag h16 x).2 = x.2.u := by rw
+      [hMINE, hlastL]
+  have hmineHdr : (finMine nike cipher macS kdfS streamS geom hvalid hmactag h16 x).1 =
+      Util.Bytes.toVecN _ (strMsg nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2) x.2.U
+      ++ Util.Bytes.ofVector (strTag nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+          (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 x.2) x.2.U)) := by
+    rw [hm1]
+    show Util.Bytes.toVecN _ ((hdrMsg geom (Function.update (keysKs geom streamS (forwardKeys0 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2)) default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS
+        (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2)) default)).toArray) (blindElem nike (groupElem nike
+        (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray 0)
+        (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2)) default)).toArray) (RSOR.filler nike geom (RSOR.path
+        nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd
+        [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+        (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).1)
+        (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+        (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos) ++ Util.Bytes.ofVector
+        (macS.mac (Util.Bytes.ofVector x.2.km) (Util.Bytes.ofVector (Util.Bytes.toVecN (2 +
+        nike.publicKeySize + geom.routingInfoLength) (hdrMsg geom (Function.update (keysKs geom
+        streamS (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) x.2.p.c.pos
+        (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+        (blindElem nike (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray 0)
+        (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2)) default)).toArray) (RSOR.filler nike geom (RSOR.path
+        nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd
+        [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+        (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).1)
+        (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+        (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos)))))
+      = Util.Bytes.toVecN _ (Util.Bytes.ofVector (Util.Bytes.toVecN _ (hdrMsg geom (Function.update
+          (keysKs geom streamS (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+          x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0 nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2)) default)).toArray) (blindElem nike (groupElem nike (drawKey nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮))
+          .relay names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2)
+          (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+          (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray 0) (forwardKeys0 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2)) default)).toArray) (RSOR.filler nike geom (RSOR.path nike
+          ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+          (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 x.2).2.2.o).1) (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩
+          : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos))
+        ++ Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector x.2.km) (Util.Bytes.ofVector
+            (Util.Bytes.toVecN (2 + nike.publicKeySize + geom.routingInfoLength) (hdrMsg geom
+            (Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS kdfS streamS geom
+            hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+            names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+            default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0
+            nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom
+            hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+            names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 x.2)) default)).toArray) (blindElem nike (groupElem
+            nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
+            (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS
+            geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+            h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+            nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS
+            kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+            hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+            x.2)) default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+            (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+            macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS
+            geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+            h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+            default)).toArray) (RSOR.filler nike geom (RSOR.path nike ((fwd1 nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom
+            hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag
+            h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1)
+            (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd
+            [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+            (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X
+            nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+            geom hvalid hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS
+            geom hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 x.2).2.2.o).1) (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom
+            hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+            h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+            (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+            nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient
+            ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher
+            macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+            x.2).2.2.o).receiver]) x.2.p.c.pos)))))
+    rw [Util.Bytes.ofVector_toVecN _ hMsz]
+  have hproc : ∀ o : Onion geom, o.1 = (finMine nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 x).1 →
+      procD nike (Primitives.MAC.MAC.const (strTag nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2) x.2.U)) (constStream
+          (Util.Bytes.ofVector x.2.U)) geom (fun _ => .ok (restKeys (payRest nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+          (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 x.2)) default).1 default)) (fun _ _ => (fun y
+          => if y = x.2.u then (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) A).plain (strPay
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2)) else x.2.v) o.2) (join o) = if ((Util.Bytes.ofVector ((fun y => if y =
+          x.2.u then (forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names) A).plain (strPay nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2)) else x.2.v) o.2)).extract 0 geom.payloadTagLength).data.all (· == 0) = true then
+          some (some ((Util.Bytes.ofVector ((fun y => if y = x.2.u then (forwardPay nike cipher
+              macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+              geom hvalid hmactag h16 names) A).plain (strPay nike cipher macS kdfS streamS geom
+              hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+              names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) else
+              x.2.v) o.2)).extract geom.payloadTagLength
+            (geom.payloadTagLength + geom.forwardPayloadLength)),
+            Primitives.Hash.Sha512.sha512_256 ((blindElem nike (groupElem nike (drawKey nike cipher
+                macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S :=
+                𝒮)) .relay names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+                x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+                (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike
+                cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+                streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+                hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+                h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+                default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom hvalid
+                hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+                names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+                nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher
+                macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+                geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+                hmactag h16 x.2)) default)).toArray) x.2.p.c.pos),
+            [RoutingCommand.recipient x.2.o.2.2.1], none)
+        else none := fun o ho => by
+    have ho' : Util.Bytes.ofVector o.1 = layerHdr geom (Function.update (keysKs geom streamS
+        (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2)) default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector
+        x.2.U)) (Function.update (keysTag macS (forwardKeys0 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray)
+        x.2.p.c.pos fun _ => Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector x.2.km)
+        (Util.Bytes.ofVector (Util.Bytes.toVecN (2 + nike.publicKeySize + geom.routingInfoLength)
+        (hdrMsg geom (Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+        default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2)) default)).toArray) (blindElem nike (groupElem nike (drawKey nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S :=
+        𝒮)) .relay names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2)
+        (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2)) default)).toArray 0) (forwardKeys0 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+        default)).toArray) (RSOR.filler nike geom (RSOR.path nike ((fwd1 nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).1)
+        (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+        (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos))))) (blindElem nike
+        (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray 0)
+        (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2)) default)).toArray) (RSOR.filler nike geom (RSOR.path
+        nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd
+        [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+        (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).1)
+        (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+        (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos := by
+      rw [ho, hm1, hL]
+      exact Util.Bytes.ofVector_toVecN _ (by
+        rw [ByteArray.size_append, hMsz, Util.Bytes.size_ofVector, hhdr, had, hmactag])
+    have h := procD_join_last nike geom (strTag nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2) x.2.U) (Util.Bytes.ofVector x.2.U)
+        (restKeys (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+        default).1 default) ((fun y => if y = x.2.u then (forwardPay nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names) A).plain (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2)) else x.2.v) o.2)
+      (Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+          default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (Function.update (keysTag
+          macS (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+          (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray) x.2.p.c.pos fun _ =>
+          Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector x.2.km) (Util.Bytes.ofVector
+          (Util.Bytes.toVecN (2 + nike.publicKeySize + geom.routingInfoLength) (hdrMsg geom
+          (Function.update (keysKs geom streamS (forwardKeys0 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+          default)).toArray) x.2.p.c.pos (Util.Bytes.ofVector x.2.U)) (keysTag macS (forwardKeys0
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2)) default)).toArray) (blindElem nike (groupElem nike (drawKey
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable
+          (S := 𝒮)) .relay names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2) (forwardKeys0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (payRest nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default)).toArray 0) (forwardKeys0
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2)) default)).toArray) (RSOR.filler nike geom (RSOR.path nike
+          ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys,
+          (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 x.2).2.2.o).1) (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩
+          : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver])
+          x.2.p.c.pos))))) (blindElem nike (groupElem nike (drawKey nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2) (forwardKeys0 nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2)) default)).toArray 0) (forwardKeys0 nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))
+          default)).toArray) (RSOR.filler nike geom (RSOR.path nike ((fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.o).receiver]) ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).1)
+          (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+          (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩
+          : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]) x.2.p.c.pos o hszP1.symm hnnh
+          (by omega) hrouting hnP1 hfill hks1
+      htg1 hge1p F0 hF0
+      (by
+        rw [hcmds]
+        intro c hc
+        rw [List.mem_singleton] at hc
+        rw [hc]
+        intro hcon
+        cases hcon)
+      (by rw [hcmds]; rfl) (by rw [hcmds]; rfl) (Function.update_self _ _ _)
+      (by rw [Function.update_self]; rfl) ho' (by omega)
+    rw [hcmds] at h
+    exact h
+  have hstep : ∀ o : Onion geom, o.1 = (finMine nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 x).1 →
+      stepOf geom (procD nike (Primitives.MAC.MAC.const (strTag nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2) x.2.U))
+          (constStream (Util.Bytes.ofVector x.2.U)) geom (fun _ => .ok (restKeys (payRest nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default).1 default))
+          (fun _ _ => (fun y => if y = x.2.u then (forwardPay nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names) A).plain (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x.2)) else x.2.v) o.2) (join o)) = stepOf geom
+          (lastRes geom x.2.o.2.2.1 ((fun y => if y = x.2.u then (forwardPay nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) A).plain (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) else x.2.v) o.2)) := fun o ho => by
+    rw [hproc o ho]
+    unfold lastRes
+    split
+    · exact stepOf_tag geom _ _ _ _
+    · rfl
+  have hrep : ∀ (m : Msg geom) (o : Onion geom), o.1 = (finMine nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x).1 →
+      replyOf cipher geom m (procD nike (Primitives.MAC.MAC.const (strTag nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)
+          x.2.U)) (constStream (Util.Bytes.ofVector x.2.U)) geom (fun _ => .ok (restKeys (payRest
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 names) (strPay nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) default).1 default))
+          (fun _ _ => (fun y => if y = x.2.u then (forwardPay nike cipher macS kdfS streamS geom
+          hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names) A).plain (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x.2)) else x.2.v) o.2) (join o))
+        = replyOf cipher geom m (lastRes geom x.2.o.2.2.1 ((fun y => if y = x.2.u then (forwardPay
+            nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 names) A).plain (strPay nike cipher macS kdfS streamS
+            geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+            h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) else
+            x.2.v) o.2)) := fun m o ho => by
+    rw [hproc o ho]
+    unfold lastRes
+    split
+    · exact replyOf_tag cipher geom _ _ _ _ _
+    · rfl
+  have hD1u : (fun y => if y = x.2.u then (forwardPay nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) A).plain
+      (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 x.2)) else x.2.v) x.2.u = Util.Bytes.toVecN _ (((⟨Array.replicate
+      geom.payloadTagLength 0⟩ : ByteArray)) ++ (RSOR.body nike macS kdfS streamS geom ((fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o) ((fwd1 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x.2).2.2.o))) := by
+    show (if x.2.u = x.2.u then Util.Bytes.toVecN _ (encTrace (keysEnc cipher (forwardKeys0 nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names) (payRest nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (strPay nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2)) default)).toArray) (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.o).receiver]).size
+      (((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray)) ++ (RSOR.body nike macS kdfS
+          streamS geom ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+          (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.o) ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+          names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o)))
+          ((RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req
+          (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher
+          macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩
+          : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]).size - 1 - x.2.p.c.pos)) else
+          x.2.v) = _
+    rw [ite_eq_left rfl, show (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).receiver]).size - 1 -
+        (x.2.p.c.pos : ℕ) = 0 by omega]
+    rfl
+  have hD0u : (fun y => if y = x.2.u then Util.Bytes.toVecN _ (((⟨Array.replicate
+      geom.payloadTagLength 0⟩ : ByteArray)) ++ (RSOR.body nike macS kdfS streamS geom x.2.p.c.req
+      x.2.o.1)) else x.2.v) x.2.u = Util.Bytes.toVecN _ (((⟨Array.replicate geom.payloadTagLength
+      0⟩ : ByteArray)) ++ (RSOR.body nike macS kdfS streamS geom x.2.p.c.req x.2.o.1)) :=
+      ite_eq_left rfl
+  have hu1 : ((Util.Bytes.ofVector ((fun y => if y = x.2.u then (forwardPay nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) A).plain (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2)) else x.2.v) (finMine nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x).2)).extract 0 geom.payloadTagLength).data.all (· == 0) = true := by
+    rw [hm2, hD1u]
+    exact (KEMSphinx.RSOR.zeroTag_block geom (RSOR.body nike macS kdfS streamS geom ((fwd1 nike
+        cipher
+        macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o)
+        ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).rnd (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o)) hb').1
+  have hu0 : ((Util.Bytes.ofVector ((fun y => if y = x.2.u then Util.Bytes.toVecN _
+      (((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray)) ++ (RSOR.body nike macS kdfS
+      streamS geom x.2.p.c.req x.2.o.1)) else x.2.v) (finMine nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x).2)).extract 0 geom.payloadTagLength).data.all (· == 0) = true := by
+    rw [hm2, hD0u]
+    exact (KEMSphinx.RSOR.zeroTag_block geom (RSOR.body nike macS kdfS streamS geom x.2.p.c.req
+        x.2.o.1)
+        hb).1
+  have hpl0 : (Util.Bytes.ofVector ((fun y => if y = x.2.u then Util.Bytes.toVecN _
+      (((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray)) ++ (RSOR.body nike macS kdfS
+      streamS geom x.2.p.c.req x.2.o.1)) else x.2.v) (finMine nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 x).2)).extract geom.payloadTagLength
+      (geom.payloadTagLength + geom.forwardPayloadLength) = (RSOR.body nike macS kdfS streamS geom
+          x.2.p.c.req x.2.o.1) := by
+    rw [hm2, hD0u]
+    have h := (KEMSphinx.RSOR.zeroTag_block geom (RSOR.body nike macS kdfS streamS geom x.2.p.c.req
+        x.2.o.1) hb).2
+    rw [Util.Bytes.size_ofVector] at h
+    exact h
+  have hne : ∀ y, y ≠ (finMine nike cipher macS kdfS streamS geom hvalid hmactag h16 x).2 → ¬
+      ((Util.Bytes.ofVector ((fun y => if y = x.2.u then (forwardPay nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16
+      names) A).plain (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2)) else x.2.v) y)).extract 0
+      geom.payloadTagLength).data.all (· == 0) = true ∧ ¬ ((Util.Bytes.ofVector ((fun y => if y =
+      x.2.u then Util.Bytes.toVecN _ (((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray)) ++
+      (RSOR.body nike macS kdfS streamS geom x.2.p.c.req x.2.o.1)) else x.2.v) y)).extract 0
+      geom.payloadTagLength).data.all (· == 0) = true :=
+    fun y hy => by
+      rw [hm2] at hy
+      have e1 : (fun y => if y = x.2.u then (forwardPay nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+          A).plain (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 x.2)) else x.2.v) y = x.2.v := ite_eq_right hy
+      have e0 : (fun y => if y = x.2.u then Util.Bytes.toVecN _ (((⟨Array.replicate
+          geom.payloadTagLength 0⟩ : ByteArray)) ++ (RSOR.body nike macS kdfS streamS geom
+          x.2.p.c.req x.2.o.1)) else x.2.v) y = x.2.v := ite_eq_right hy
+      rw [e1, e0]
+      exact ⟨hv, hv⟩
+  have hb0 : 0 < x.2.p.c.req.back.hops.length :=
+    List.length_pos_iff.2 fun h => by simpa [h] using x.2.p.c.sender
+  have hreply : ∀ (m : Msg geom) (out : Option (Name × Onion geom)),
+      (x.2.p.c.patchWith (next4Nxt nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2
+          (Util.Bytes.ofVector x.1) (finMine nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x)) x.2.o.1
+          (finMine nike cipher macS kdfS streamS geom hvalid hmactag h16 x)).reply Role.relay m
+              (finMine nike cipher macS kdfS streamS geom hvalid hmactag h16 x) out
+        = replyOf cipher geom m (lastRes geom x.2.p.c.req.receiver ((fun y => if y = x.2.u then
+            Util.Bytes.toVecN _ (((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray)) ++
+            (RSOR.body nike macS kdfS streamS geom x.2.p.c.req x.2.o.1)) else x.2.v) (finMine nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 x).2)) :=
+    fun m out => by
+      unfold Protocols.RSOR.ForwardChallenge.patchWith lastRes
+      rw [ite_eq_left hu0, hpl0, replyOf_body nike cipher macS kdfS streamS geom hvalid hmactag h16
+          x.2.p.c.req x.2.o.1 m hr hb0 default x.2.p.c.req.receiver]
+      exact ite_eq_left ⟨rfl, rfl, hlast⟩
+  have hPO : ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names) A).proc (strPay nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))) =
+      ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names) A).proc (strPay nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (A := A) (x.2.km, default, (toDraw0 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2)))) := by
+    funext h o
+    show (if h = Role.relay then stepOf geom (noneAns nike cipher macS kdfS streamS geom
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.2 (drawElem nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S
+            := 𝒮)) .relay names (forwardPlace nike cipher macS kdfS streamS geom hvalid hmactag h16
+            names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)) (next4X nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2)
+        (join o)) else _) = _
+    rw [drawElem_fwd1]
+    rfl
+  have hRO : ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 names) A).reply (strPay nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2))) =
+      ((forwardPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 names) A).reply (strPay nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 names) (A := A) (x.2.km, default, (toDraw0 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2)))) := by
+    funext h m o
+    show (if h = Role.relay then replyOf cipher geom m (noneAns nike cipher macS kdfS streamS geom
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.2 (drawElem nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S
+            := 𝒮)) .relay names (forwardPlace nike cipher macS kdfS streamS geom hvalid hmactag h16
+            names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)) (next4X nike
+            cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2)
+        (join o)) else _) = _
+    rw [drawElem_fwd1]
+    rfl
+  have key := hdrRelay_patchWith_last nike cipher macS kdfS streamS geom hvalid hmactag h16 names
+      x.2.p.c (by omega) x.2.o.1 (finMine nike cipher macS kdfS streamS geom hvalid hmactag h16 x)
+    (next4Nxt nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2 (Util.Bytes.ofVector x.1)
+        (finMine nike cipher macS kdfS streamS geom hvalid hmactag h16 x)) ((forwardPay nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names) A).proc (strPay nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2))) ((forwardPay nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) A).reply (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names) (next4X nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 x.2))) (strTag nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2) x.2.U)
+    (Util.Bytes.ofVector x.2.U) (restKeys (payRest nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (strPay nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2)) default).1 default) (fun y => if y = x.2.u then (forwardPay nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names) A).plain (strPay nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names (fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names)
+        (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2)) else x.2.v) (fun y =>
+        if y = x.2.u then Util.Bytes.toVecN _ (((⟨Array.replicate geom.payloadTagLength 0⟩ :
+        ByteArray)) ++ (RSOR.body nike macS kdfS streamS geom x.2.p.c.req x.2.o.1)) else x.2.v)
+        x.2.o.2.2.1 hstep hrep hu1 hu0
+    (by rw [hpl0]; exact msgOf_body nike macS kdfS streamS geom x.2.p.c.req x.2.o.1) hne hreply
+  unfold finOwnRun
+  rw [strRunP_eq, ← hmineHdr]
+  refine (congrArg (fun impl => (simulateQ impl
+    (strGuess nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd1 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 names) A (next4X nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 x.2) x.2.U x.2.u)).run' x.2.p.log) key).trans ?_
+  rw [hPO, hRO]
 
 end Final
 

@@ -833,8 +833,15 @@ for it:
      (`strRun_fwd0_last`, `hdrRelay_onion_last`, `hdrMsg_size_last`), when the path's last hop
      builds; the relay's blinding seed is not read. The exit relay's reply to the sender's
      payload is the first layer of the reply onion when the request's two paths build
-     (`replyOf_body`, from `reply_spec` of the correctness proof). Not yet applied to world
-     1's draws.
+     (`replyOf_body`, from `reply_spec` of the correctness proof). Applied to world 1: on a
+     draw at the end of the path, the relay patched around the replacement's layer is
+     `lastRelay` for the original's recipient, the unchanged block decrypted to the original's
+     payload and a changed block to a uniform block (`finOwnRun_last`), when the replacement's
+     path builds, both bodies have a payload's length, the original's two paths build, and
+     that block does not begin with the zero tag. Two headers that end at the same hop have
+     the same bytes under that hop's tag when the head of the one's keystream is the other's
+     shifted by the difference of what the two mask (`hdrMsg_shift_last`). Not yet done at the
+     end of the path: applying that shift to the draws, and the two games over their draws.
      The last comparison is in seven files, so that no file is large to build:
      `NIKESphinxTLUFn.lean` (the hops' functions, no games), `NIKESphinxTLURelay.lean`,
      `NIKESphinxTLUBlind.lean`, `NIKESphinxTLUWorld1.lean`, `NIKESphinxTLUJoin.lean`,
