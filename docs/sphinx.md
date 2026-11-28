@@ -963,7 +963,14 @@ key, and the world shown is some `viewE` at the encryption of some `plain` under
 the game after the MAC step differs from its payload game with an ideal cipher by a one-query
 advantage against the cipher and the chance of a draw that is not good. The TLU→ proof has its
 own copy of this step, typed to its game (`forward_only_sub_ideal_le`); it could be restated
-through the general one. SLU← does not use the general step yet; two lemmas it needs on the
+through the general one. SLU← uses the general step for world 0
+(`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
+onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
+nothing under it and the world does not read it (`backViewTAt_back`), so the block is one the
+challenger draws (`backPlain0`, `backViewE0`). The draws not covered are those on which the
+bytes under the relay's tag do not have a header's length or do not carry the element of its
+place, or at the exit the block does not have a payload's length (`backGoodP0`, not bounded).
+World 1 does not have this step yet. Two lemmas it needs on the
 backward path are in place (`peels_append_hdr`, `hdrPeels_congr`: a peeled packet's header
 does not read the payload or the hops' payload keys), and from them that a packet's header and
 its later layers' headers do not read the hops' encryptions (`nikePktFn_hdr_enc`,
