@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLUNext
 import Cryptlib.Protocols.Sphinx.KEMSphinxTLUFinal
+import Cryptlib.Protocols.Sphinx.KEMSphinxSLURelay
 
 namespace Cryptlib.Protocols.Sphinx.NIKESphinx
 
@@ -6338,6 +6339,135 @@ theorem finOwnRun_blindPost (names : Role → Name) (A : (Protocols.RSOR.forward
       (h default).1 hrep).trans ?_
   exact EvalDistEq.bind_right _ fun g => by
     rw [(h g).2]
+
+/-! ## The two worlds for fixed game draws, before the end of the path -/
+
+/-- The draws of world 1's last game after the game's own: the keystream of the original's
+next layer, the relay's other draws for the original, the replacement's keystream, MAC key and
+blinding seed, the challenger's draws, the replacement's secret, and the cipher's two blocks. -/
+abbrev FinRest (names : Role → Name) : Type :=
+  KEMSphinx.Keystream geom × (Vector UInt8 48 × Vector UInt8 32 × Vector UInt8 32) ×
+      KEMSphinx.Keystream geom × Vector UInt8 32 × Vector UInt8 32 × (fwd1 nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 names).Oth × Vector UInt8 nike.privateKeySize × (Vector UInt8
+      (geom.payloadTagLength + geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength +
+      geom.forwardPayloadLength))
+
+/-- The draw of `FinRest`. -/
+def finRest (names : Role → Name) : ProbComp (FinRest nike cipher macS kdfS streamS geom hvalid
+    hmactag h16 names) := do
+  let W ← $ᵗ (KEMSphinx.Keystream geom)
+  let y ← $ᵗ (Vector UInt8 48 × Vector UInt8 32 × Vector UInt8 32)
+  let U ← $ᵗ (KEMSphinx.Keystream geom)
+  let km ← $ᵗ (Vector UInt8 32)
+  let seed ← $ᵗ (Vector UInt8 32)
+  let o ← shortDraw nike geom
+  let d' ← $ᵗ (Vector UInt8 nike.privateKeySize)
+  let u ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+  let v ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+  return (W, y, U, km, seed, o, d', u, v)
+
+/-- A draw of world 1's last game, from the game's draws and the rest. -/
+def finX {names : Role → Name} {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (p : NextPre nike cipher macS kdfS streamS geom hvalid hmactag h16 names A) (r : FinRest nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 names) : KEMSphinx.Keystream geom × Next4
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 names A :=
+  (r.1, ⟨default, r.2.1, p, r.2.2.1, r.2.2.2.1, r.2.2.2.2.1, r.2.2.2.2.2.1, r.2.2.2.2.2.2.1,
+    r.2.2.2.2.2.2.2.1, r.2.2.2.2.2.2.2.2⟩)
+
+/-- **World 1's last game draws the game's draws first.** -/
+theorem finDraw_bind {δ : Type} (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary)
+    (F : KEMSphinx.Keystream geom × Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names A → ProbComp δ) :
+    (finDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= F)
+      =ᵈ (nextPre nike cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun p =>
+        finRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names >>= fun r => F (finX
+            nike cipher macS kdfS streamS geom hvalid hmactag h16 p r)) := by
+  unfold finDraw next4Rest finRest
+  simp only [bind_assoc, pure_bind]
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun W =>
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact OracleComp.EvalDistEq.bind_bind_swap _ _ _
+
+/-- The draws of world 1's last game on which the last comparison is exact before the end of
+the path: both paths build, both bodies have a payload's length, and the relay would not reply
+to the replacement. -/
+def finGood {names : Role → Name} {A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary}
+    (x : KEMSphinx.Keystream geom × Next4 nike cipher macS kdfS streamS geom hvalid hmactag h16
+        names A) : Prop :=
+  pathBuilds geom (RSOR.path nike x.2.p.c.req.fwd [.recipient x.2.p.c.req.receiver]) (RSOR.path
+      nike x.2.p.c.req.fwd [.recipient x.2.p.c.req.receiver]).size ∧ pathBuilds geom (RSOR.path
+      nike ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.o).fwd
+      [.recipient ((fwd1 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).req (⟨(next4X
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.keys, (next4X nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ : ForwardCh nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.o).receiver]) (RSOR.path nike ((fwd1 nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).fwd [.recipient ((fwd1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+      x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+      ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 x.2).2.2.o).receiver]).size
+    ∧ (RSOR.body nike macS kdfS streamS geom x.2.p.c.req x.2.o.1).size = geom.forwardPayloadLength
+        ∧ (RSOR.body nike macS kdfS streamS geom ((fwd1 nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 names).req (⟨(next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.keys, (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.c⟩ :
+        ForwardCh nike cipher macS kdfS streamS geom hvalid hmactag h16 names (next4X nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 x.2).2.2.k.1) (next4X nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 x.2).2.2.o) ((fwd1 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 names).rnd (next4X nike cipher macS kdfS streamS geom hvalid hmactag h16
+        x.2).2.2.o)).size = geom.forwardPayloadLength
+    ∧ finNoReply nike cipher macS kdfS streamS geom hvalid hmactag h16 x
+
+/-- **For fixed game draws before the end of the path, world 1 is the blinding adversary's
+game on the joined keystream**, off the draws that are not good. -/
+theorem finRest_sub_le (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) (E : KEMSphinx.Keystream geom × Vector UInt8 32 × (PropDraw nike cipher macS
+    kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+    (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth A) × (Vector UInt8
+    (geom.payloadTagLength + geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength +
+    geom.forwardPayloadLength)) → ProbComp Bool) (p : NextPre nike cipher macS kdfS streamS geom
+    hvalid hmactag h16 names A)
+    (hn : (p.c.pos : ℕ) + 1 < p.c.req.fwd.hops.length) :
+    |(Pr{let b ← (finRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names >>= fun r =>
+        finOwnRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A (finX nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 p r))}[b =
+        true]).toReal
+      - (Pr{let b ← (finRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names >>= fun r
+          => $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)) >>= fun g =>
+          blindPost nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E (finComb nike
+              cipher macS kdfS streamS geom hvalid hmactag h16 (finX nike cipher macS kdfS streamS
+              geom hvalid hmactag h16 p r), (finX nike cipher macS kdfS streamS geom hvalid hmactag
+              h16 p r).2.km, (toDraw0 nike cipher macS kdfS streamS geom hvalid hmactag h16 (next4X
+              nike cipher macS kdfS streamS geom hvalid hmactag h16 (finX nike cipher macS kdfS
+              streamS geom hvalid hmactag h16 p r).2).2.2),
+            (finX nike cipher macS kdfS streamS geom hvalid hmactag h16 p r).2.u, g) (tailOf nike
+                kdfS ((nike.decodePrivateKey (finX nike cipher macS kdfS streamS geom hvalid
+                hmactag h16 p r).2.p.d0).getD default) (RSOR.path nike (finX nike cipher macS kdfS
+                streamS geom hvalid hmactag h16 p r).2.p.c.req.fwd [.recipient (finX nike cipher
+                macS kdfS streamS geom hvalid hmactag h16 p r).2.p.c.req.receiver]) (finX nike
+                cipher macS kdfS streamS geom hvalid hmactag h16 p r).2.p.c.pos (finX nike cipher
+                macS kdfS streamS geom hvalid hmactag h16 p r).2.y.2.2))}[b = true]).toReal|
+    ≤ (Pr{let r ← (finRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names)}[¬ finGood
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 (finX nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 p r)]).toReal :=
+  KEMSphinx.abs_prEvent_bind_sub_le_bad_dist _ _ _ (fun r => ¬ finGood nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 (finX nike cipher macS kdfS streamS geom hvalid hmactag h16 p
+      r))
+    fun r hr => by
+      obtain ⟨hT, hT', hb, hb', hrep⟩ := not_not.mp hr
+      exact finOwnRun_blindPost nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E
+          (finX nike cipher macS kdfS streamS geom hvalid hmactag h16 p r) hn hT hT' hb hb' hrep
 
 end Final
 

@@ -796,7 +796,11 @@ for it:
      world 1. Its conditions: both paths build and both bodies have a payload's length. So
      world 1 on such a draw, when the relay would not reply to the replacement, is the
      blinding adversary's game on the joined keystream with `g` drawn
-     (`finOwnRun_blindPost`).
+     (`finOwnRun_blindPost`). Over the draws after the game's own (`finRest`, `finDraw_bind`),
+     for fixed game draws before the end of the path, world 1 differs from that game by at
+     most the chance of a draw that is not good (`finRest_sub_le`, `finGood`). This uses
+     `abs_prEvent_bind_sub_le_bad_dist` of `KEMSphinxSLURelay.lean`, which this file now
+     imports; the lemma is general and would sit better in a shared file.
      Not yet proved: that `world0E` is world 0 for the right `E`; the
      two games over their draws (that the joined keystream and the relabelled draws are
      uniform, by `evalDistEq_headTail`); `finNoReply`; the end of the path.
