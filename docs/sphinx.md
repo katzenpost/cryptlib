@@ -1006,7 +1006,9 @@ sent on, whatever block it is given, and the sender refuses the header that goes
 holds when the reply's header builds. So before the end of the backward path the two worlds
 differ in what the relay forwards and what the sender refuses. World 0 there is also written
 as a run on the hops' functions (`backFnRun0`, `backRun0_fn` in `NIKESphinxSLUFn.lean`), the
-form in which the hops after the relay can be replaced. Comparing the two worlds, the last
+form in which the hops after the relay can be replaced; the relay's tag is there its MAC on
+whatever the header puts under it (`backRun0_fnMac`, from `layerHdr_tagAt`: a layer's header
+uses a hop's tagging function once). Comparing the two worlds, the last
 backward hop and the exit are not done.
 
 The comparison needs one more game on the NIKE, not written yet. The reply's next layer starts
