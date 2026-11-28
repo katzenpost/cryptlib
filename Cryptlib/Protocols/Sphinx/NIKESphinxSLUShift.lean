@@ -354,6 +354,108 @@ theorem nikeHdrTrace_drop (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → 
         rw [← ByteArray.append_assoc (c := frontPad geom ks j (j + r)),
           ByteArray.append_assoc (b := frontPad geom ks j (j + r)), d2]
 
+set_option maxHeartbeats 1000000 in
+/-- **The bytes under a hop's tag in a header over the rest of a path** are those under its
+tag in the long header. -/
+theorem hdrMsg_drop (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (fil : ByteArray) (path path' : Array PathHop) (j : ℕ)
+    (hsz : path'.size + (j + 1) = path.size) (hn : path.size ≤ geom.nrHops)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
+    (hrouting : geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hfill : fil.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hks : ∀ k, (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (htag : ∀ i
+        m, (tag i m).size = macLength)
+    (hc : ∀ m, m < path'.size → path'[m]!.commands = path[j + m + 1]!.commands)
+    (hid : ∀ m, m + 1 < path'.size → path'[m + 1]!.id = path[j + m + 1 + 1]!.id)
+    (r : ℕ) (hr : r < path'.size) :
+    hdrMsg geom (fun m => ks (j + m + 1)) (fun m => tag (j + m + 1))
+        (fun m => ge (j + m + 1)) (fil ++ frontPad geom ks j (path.size - 1)) path' r
+      = hdrMsg geom ks tag ge fil path (j + r + 1) := by
+  obtain ⟨k, hk⟩ : ∃ k, geom.nrHops = path.size + k := ⟨geom.nrHops - path.size, by omega⟩
+  obtain ⟨t, ht⟩ : ∃ t, path'.size = t + 1 + r := ⟨path'.size - (r + 1), by omega⟩
+  have hps : path.size = t + 1 + r + (j + 1) := by omega
+  have hi : path.size - 1 - t = j + r + 1 := by omega
+  have ht1 : path'.size - 1 - r = t := by omega
+  have ht2 : path.size - 1 - (j + r + 1) = t := by omega
+  have f1 : geom.perHopRoutingInfoLength + (k + t) * geom.perHopRoutingInfoLength + (j + r + 1 + 1)
+      * geom.perHopRoutingInfoLength = (geom.routingInfoLength + geom.perHopRoutingInfoLength) := by
+    rw [hrouting, hk, hps]
+    ring
+  have hb : (j + r + 1 + 1) * geom.perHopRoutingInfoLength ≤ (geom.routingInfoLength +
+      geom.perHopRoutingInfoLength) := by omega
+  have hpad : padAt geom (fun m => ks (j + m + 1)) = padAt geom (fun i => ks (j + 1 + i)) :=
+    congrArg (padAt geom) (funext fun m => by rw [Nat.add_right_comm])
+  unfold hdrMsg
+  rw [ht1, ht2, nikeHdrTrace_drop geom ks tag ge fil path path' j hsz hn hnnh hle hrouting hfill
+      hks htag hc hid t (by omega)]
+  cases hl : nikeHdrTrace geom ks tag ge fil path t with
+  | none => rfl
+  | some s =>
+    have hs1 := (nikeHdrTrace_size geom ks tag ge fil path hnnh hle hfill htag t s hl).1
+    rw [show geom.nrHops - path.size = k by omega] at hs1
+    have hfr := nikeFragment_drop geom path path' j hsz s.2 r hr (hc r hr) (fun h => hid r h)
+    simp only [Option.map_some, hi, hfr, hpad]
+    cases hf : nikeFragment geom path s.2 (j + r + 1) with
+    | error e => rfl
+    | ok frag =>
+      have hfs := nikeFragment_size geom path s.2 (j + r + 1) hnnh hle frag hf
+      have hX : (frag ++ s.1).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j +
+          r + 1 + 1) * geom.perHopRoutingInfoLength := by
+        rw [ByteArray.size_append, hfs, hs1]
+        omega
+      obtain ⟨d1, d2⟩ := drop_step geom ks hks j r (frag ++ s.1) hb hX
+      rw [ByteArray.append_assoc] at d1
+      simp only [d1, ite_eq_left (Nat.succ_pos (j + r)), Nat.add_sub_cancel]
+      rw [← ByteArray.append_assoc (c := frontPad geom ks j (j + r)),
+        ByteArray.append_assoc (b := frontPad geom ks j (j + r)), d2]
+
+/-- **The header of a layer of a header over the rest of a path** is the header of that layer
+of the long header. -/
+theorem layerHdr_drop (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (fil : ByteArray) (path path' : Array PathHop) (j : ℕ)
+    (hsz : path'.size + (j + 1) = path.size) (hn : path.size ≤ geom.nrHops)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
+    (hrouting : geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hfill : fil.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hks : ∀ k, (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (htag : ∀ i
+        m, (tag i m).size = macLength)
+    (hc : ∀ m, m < path'.size → path'[m]!.commands = path[j + m + 1]!.commands)
+    (hid : ∀ m, m + 1 < path'.size → path'[m + 1]!.id = path[j + m + 1 + 1]!.id)
+    (r : ℕ) (hr : r < path'.size) :
+    layerHdr geom (fun m => ks (j + m + 1)) (fun m => tag (j + m + 1))
+        (fun m => ge (j + m + 1)) (fil ++ frontPad geom ks j (path.size - 1)) path' r
+      = layerHdr geom ks tag ge fil path (j + r + 1) := by
+  unfold layerHdr
+  rw [hdrMsg_drop geom ks tag ge fil path path' j hsz hn hnnh hle hrouting hfill hks htag hc hid r
+      hr]
+
+/-- **A header over the rest of a path builds when the long header builds.** -/
+theorem nikeHdrTrace_drop_isSome (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray)
+    (ge : ℕ → ByteArray) (fil : ByteArray) (path path' : Array PathHop) (j : ℕ)
+    (hsz : path'.size + (j + 1) = path.size) (hn : path.size ≤ geom.nrHops)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
+    (hrouting : geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hfill : fil.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hks : ∀ k, (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (htag : ∀ i
+        m, (tag i m).size = macLength)
+    (hc : ∀ m, m < path'.size → path'[m]!.commands = path[j + m + 1]!.commands)
+    (hid : ∀ m, m + 1 < path'.size → path'[m + 1]!.id = path[j + m + 1 + 1]!.id)
+    (h : (nikeHdrTrace geom ks tag ge fil path path.size).isSome) :
+    (nikeHdrTrace geom (fun m => ks (j + m + 1)) (fun m => tag (j + m + 1))
+        (fun m => ge (j + m + 1)) (fil ++ frontPad geom ks j (path.size - 1)) path'
+            path'.size).isSome := by
+  rw [nikeHdrTrace_drop geom ks tag ge fil path path' j hsz hn hnnh hle hrouting hfill hks htag hc
+      hid path'.size le_rfl]
+  have h' := nikeHdrTrace_isSome_of_le geom ks tag ge fil path path'.size (j + 1) (by
+    rw [hsz]
+    exact h)
+  obtain ⟨s, hs⟩ := Option.isSome_iff_exists.mp h'
+  rw [hs]
+  rfl
+
 end Shift
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx

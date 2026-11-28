@@ -1039,7 +1039,9 @@ these rests the header-trace lemma (`nikeHdrTrace_drop`, with `drop_step` and
 `nikeFragment_drop`): built from the last hop back, the header over the hops after hop `j`,
 with the long filler followed by the front of the padding as its filler, has at each step the
 long header's routing information followed by the front of the padding that far, and the long
-header's tag. It is not yet turned into equalities of layer headers, nor used on the draws. On the backward path the comparison is to follow TLU→'s last
+header's tag. So the bytes under each hop's tag and each layer's header are the long header's
+(`hdrMsg_drop`, `layerHdr_drop`), and the short header builds when the long one does
+(`nikeHdrTrace_drop_isSome`). These are not yet used on the draws. On the backward path the comparison is to follow TLU→'s last
 one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
