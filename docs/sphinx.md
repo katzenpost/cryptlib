@@ -764,8 +764,17 @@ for it:
      (`blindGame_false_sub_le`, the event `fwdBad0`). The side with an independent secret is
      the same game with the hops after the relay from that secret (`world0B`,
      `blindGame_true_evalDistEq`), so the two differ by `blindAdvantage` of `blindAdv` and the
-     chance of `fwdBad0` (`world0E_sub_world0B_le`). Not yet proved: that `world0E` is world 0
-     for the right `E`, and `world0B` against world 1.
+     chance of `fwdBad0` (`world0E_sub_world0B_le`). For `world0B` against world 1, the
+     comparison at the level of the hops' functions is proved (`fnRun_eq_short`): the game on
+     an onion is the game that shows the first layer of a replacement cut after the relay and
+     forwards a given next layer, when the hops in front agree, the bytes under the relay's
+     tag agree, and the next layer's functions are the onion's after the relay with the same
+     padding. It rests on: two packets are one when the bytes under the relay's tag agree
+     (`nikePktFn_shift`, from `nikePktFn_front`), the first layer is the packet
+     (`layerFn_zero`), and a layer that builds is its header and block (`layerFn_eq`,
+     `split_append_bytes`). Not yet proved: that `world0E` is world 0 for the right `E`; the
+     conditions of `fnRun_eq_short` on the draws of `world0B` and world 1 (the keystream
+     relabelling); the end of the path.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).
