@@ -936,8 +936,11 @@ from the same keys (`backLayerOfKeys`, `backLayerOfKeys_real`), and with them wo
 the honest relay's keys (`backView0`, `backPlace`, the adversary `backAdv0` on the key game):
 at the exit the relay's layer is the last of the forward path; on the backward path its keys
 enter the adversary's onion through the reply block, and the header the sender refuses
-through the reply's last layer. That this view on the sender's own keys is world 0, and the
-reduction to the key game, are not proved yet. Nothing else of SLU← is proved for NIKE Sphinx; the plan is the
+through the reply's last layer. On the sender's own keys this view is world 0, at the exit
+when the adversary's onion builds (`backView0_real_exit`) and on the backward path when the
+reply's packet builds and its last layer has at least a header's length
+(`backView0_real_back`). The reduction of world 0 to the key game is not proved yet. Nothing
+else of SLU← is proved for NIKE Sphinx; the plan is the
 order of the KEM proof above, with the blinding game once more for the hops after the relay on
 the backward path. STI↔ is not started for NIKE Sphinx.
 

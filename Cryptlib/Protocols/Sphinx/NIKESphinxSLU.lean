@@ -389,6 +389,93 @@ abbrev backAdv0 (names : Role → Name) (A : (Protocols.RSOR.backwardWith W).Adv
       (backDraw0 nike geom)
     (backView0 nike cipher macS kdfS streamS geom hvalid hmactag h16 W names) A
 
+include hvalid hmactag in
+/-- **On the backward path, the view on the sender's own keys is world 0**, from the randomness
+with the backward path's secret replaced, when the reply's packet builds and its last layer has
+at least a header's length. -/
+theorem backView0_real_back (names : Role → Name) {pk : RSOR.Key nike} (ch : PropCh nike cipher
+    macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names pk)
+    (ow : RSOR.Randomness nike geom × (Vector UInt8 (geom.payloadTagLength +
+        geom.forwardPayloadLength))) (k : ℕ) (hp : ch.c.pos.val = k + 1)
+    (d : Vector UInt8 nike.privateKeySize) (x0 : ByteArray)
+    (hx0 : RSOR.layer nike cipher macS kdfS streamS geom (RSOR.path nike ch.c.req.back [.surbReply
+        ow.1.2.2.2]) (relayKey (k + 1) ow.1 d).2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ :
+        ByteArray)
+      0 = .ok x0)
+    (hsz : ∀ pkt, RSOR.layer nike cipher macS kdfS streamS geom (RSOR.path nike ch.c.req.back
+        [.surbReply ow.1.2.2.2])
+      (relayKey (k + 1) ow.1 d).2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray)
+          (ch.c.req.back.hops.length - 1) = .ok pkt →
+        geom.headerLength ≤ pkt.size) :
+    backView0 nike cipher macS kdfS streamS geom hvalid hmactag h16 W names ch ow (groupElem nike
+        ((nike.decodePrivateKey d).getD default) (RSOR.hopKeys nike kdfS ((nike.decodePrivateKey
+        d).getD default) (RSOR.path nike ch.c.req.back [.surbReply ow.1.2.2.2]) (RSOR.path nike
+        ch.c.req.back [.surbReply ow.1.2.2.2]).size).toArray 0) (RSOR.hopKeys nike kdfS
+        ((nike.decodePrivateKey d).getD default) (RSOR.path nike ch.c.req.back [.surbReply
+        ow.1.2.2.2]) (RSOR.path nike ch.c.req.back [.surbReply ow.1.2.2.2]).size)
+      = Protocols.RSOR.BackwardChallenge.world0 ch.c (relayKey (k + 1) ow.1 d) := by
+  have hlt : ch.c.pos.val < ch.c.req.back.hops.length := ch.c.pos.isLt
+  have honion := backOnionOfKeys_real nike cipher macS kdfS streamS geom hvalid hmactag ch.c.req
+    ow.1 d k (Nat.zero_lt_of_lt hlt) x0 hx0
+  have hhdr : (RSOR.formBack nike cipher macS kdfS streamS geom ch.c.req (relayKey (k + 1) ow.1 d)
+      ch.c.req.msg ⟨ch.c.req.back.hops.length - 1,
+        Nat.sub_one_lt (Nat.ne_of_gt (Nat.zero_lt_of_lt hlt))⟩).1
+      = (backLayerOfKeys nike cipher macS streamS geom (ch.c.req.back.hops.length - 1) ch.c.req
+        ow.1 (groupElem nike ((nike.decodePrivateKey d).getD default) (RSOR.hopKeys nike kdfS
+            ((nike.decodePrivateKey d).getD default) (RSOR.path nike ch.c.req.back [.surbReply
+            ow.1.2.2.2]) (RSOR.path nike ch.c.req.back [.surbReply ow.1.2.2.2]).size).toArray 0)
+            (RSOR.hopKeys nike kdfS ((nike.decodePrivateKey d).getD default) (RSOR.path nike
+            ch.c.req.back [.surbReply ow.1.2.2.2]) (RSOR.path nike ch.c.req.back [.surbReply
+            ow.1.2.2.2]).size)).1 := by
+    rw [backLayerOfKeys_real nike cipher macS kdfS streamS geom (ch.c.req.back.hops.length - 1)
+      ch.c.req ow.1 d k x0 (by rw [RSOR.path_size]; exact Nat.sub_le _ _) hx0]
+    cases hl : RSOR.layer nike cipher macS kdfS streamS geom (RSOR.path nike ch.c.req.back
+        [.surbReply ow.1.2.2.2]) (relayKey (k + 1) ow.1 d).2.1
+        (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) (ch.c.req.back.hops.length - 1)
+            with
+    | error err =>
+      have hl' : RSOR.layer nike cipher macS kdfS streamS geom
+          (RSOR.path nike ch.c.req.back [.surbReply (relayKey (k + 1) ow.1 d).2.2.2])
+          (relayKey (k + 1) ow.1 d).2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray)
+          (ch.c.req.back.hops.length - 1) = .error err := hl
+      unfold RSOR.formBack
+      dsimp only
+      rw [hl']
+    | ok pkt =>
+      exact formBack_fst nike cipher macS kdfS streamS geom ch.c.req (relayKey (k + 1) ow.1 d)
+        ch.c.req.msg _ pkt hl (hsz pkt hl)
+  unfold backView0
+  rw [hp]
+  exact congrArg₂ (fun on (hd : Vector UInt8 geom.headerLength) =>
+    ({ onion := on
+       patch := { proc := fun (h : Role) (o : Onion geom) out =>
+        if h = .sender ∧ o.1 = hd then pure none else pure out } } : Protocols.RSOR.World 𝒮))
+    honion hhdr.symm
+
+/-- **At the exit, the view on the sender's own keys is world 0**, from the randomness with the
+forward path's secret replaced, when the adversary's onion builds. -/
+theorem backView0_real_exit (names : Role → Name) {pk : RSOR.Key nike} (ch : PropCh nike cipher
+    macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names pk)
+    (ow : RSOR.Randomness nike geom × (Vector UInt8 (geom.payloadTagLength +
+        geom.forwardPayloadLength))) (hp : ch.c.pos.val = 0) (d : Vector UInt8 nike.privateKeySize)
+    (pkt : ByteArray)
+    (hpkt : RSOR.layer nike cipher macS kdfS streamS geom (RSOR.path nike ch.c.req.fwd [.recipient
+        ch.c.req.receiver]) (setKey ow.1 d).1
+      (RSOR.body nike macS kdfS streamS geom ch.c.req (setKey ow.1 d)) 0 = .ok pkt) :
+    backView0 nike cipher macS kdfS streamS geom hvalid hmactag h16 W names ch ow (groupElem nike
+        ((nike.decodePrivateKey d).getD default) (RSOR.hopKeys nike kdfS ((nike.decodePrivateKey
+        d).getD default) (RSOR.path nike ch.c.req.fwd [.recipient ch.c.req.receiver]) (RSOR.path
+        nike ch.c.req.fwd [.recipient ch.c.req.receiver]).size).toArray 0) (RSOR.hopKeys nike kdfS
+        ((nike.decodePrivateKey d).getD default) (RSOR.path nike ch.c.req.fwd [.recipient
+        ch.c.req.receiver]) (RSOR.path nike ch.c.req.fwd [.recipient ch.c.req.receiver]).size)
+      = Protocols.RSOR.BackwardChallenge.world0 ch.c (setKey ow.1 d) := by
+  have honion := onionOfKeys_real nike cipher macS kdfS streamS geom ch.c.req ow.1 d pkt
+    ch.c.req.first hpkt
+  unfold backView0
+  rw [hp]
+  exact congrArg₂ (fun on pt => ({ onion := on, patch := pt } : Protocols.RSOR.World 𝒮))
+    honion rfl
+
 end Final
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
