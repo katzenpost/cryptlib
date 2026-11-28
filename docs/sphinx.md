@@ -758,8 +758,11 @@ for it:
      taken from what it is handed (`blindPost`); at the end of the path it plays a game `E`
      left open. Handed the path's own tail it plays world 0's run, on a draw before the end of
      a path whose header builds (`blindPost_real`; the hops in front do not read the relay's
-     blinding seed, `hopKeysWith_front`). Not yet proved: the blinding game's two sides as
-     games over world 0's draws, and the side with an independent secret against world 1.
+     blinding seed, `hopKeysWith_front`). So the blinding game's side with the sender's own
+     secret is world 0 over its draws with `E` at the end of the path (`world0E`), off the
+     draws on which the relay is before the end of a path whose header does not build
+     (`blindGame_false_sub_le`, the event `fwdBad0`). Not yet proved: that `world0E` is world
+     0 for the right `E`, and the side with an independent secret against world 1.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).
