@@ -948,7 +948,12 @@ header of the relay's own forward layer (`backView1`, `backView1_real_exit`,
 bad draws (`backward_true_sub_keyGame_le`, the event `backBad1`, not bounded). Together
 (`backwardUnlinkable_le_keyGame`): the SLU← advantage is at most the two bad-draw chances,
 the key-game advantage of each world's adversary, and the distance between the two key games
-with the relay's keys replaced. That distance is not bounded yet. Nothing
+with the relay's keys replaced. That distance is not bounded yet. The MAC step is done
+for world 0 (`backward0_keyGame_sub_macOnly_le`): the reply's packet, like the forward one,
+uses the replaced hop's MAC key for one tag only (`nikePktFn_restKeys`, `peels_restKeys`,
+`backOnionOfKeys_tag`, `backLayerOfKeys_tag`, `backView0_tag`), so the relay may answer the
+element of its place under the challenge's header only, at the cost of a forgery and the
+chance that the bytes its tag covers do not have a header's length. Nothing
 else of SLU← is proved for NIKE Sphinx; the plan is the
 order of the KEM proof above, with the blinding game once more for the hops after the relay on
 the backward path. STI↔ is not started for NIKE Sphinx.
