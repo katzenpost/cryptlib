@@ -987,7 +987,13 @@ is at most, for each world, the bad-draw chance, the key-game advantage, a forge
 tag-length chance, the payload step's bad-draw chance and one-query advantage, and the
 keystream generator's advantage, plus the distance between the two worlds played from a
 uniform header keystream at the relay, an ideal payload cipher there and one header. That
-distance is not bounded yet: it is the sender's chain and the last comparison. SLU← uses the general step for world 0
+distance is not bounded yet: it is the sender's chain and the last comparison. As for KEM Sphinx, the
+property itself is split through the onion built like a reply layer (`replySwap` for NIKE
+Sphinx, `backwardUnlinkable_le_split` in `NIKESphinxSLUSplit.lean`): the advantage is at most
+the advantage in telling the fresh forward onion from that onion in world 1 (a game at the
+honest sender, not started for NIKE Sphinx), the chained terms with that onion sent on, and
+the distance between the two worlds with it from a uniform keystream at the relay (not
+started for NIKE Sphinx). SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
 nothing under it and the world does not read it (`backViewTAt_back`), so the block is one the
