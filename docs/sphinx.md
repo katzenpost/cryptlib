@@ -804,7 +804,12 @@ for it:
      is uniform: it reads the head of the replacement's keystream under a mask of the tail of
      the other, and that tail under a fixed mask (`finComb_eq`, `padMask_congr`), so by
      `evalDistEq_headTail` the blinding adversary's game on it is its game on one uniform
-     keystream, and the draws it does not read drop out (`finRest_comb_evalDistEq`).
+     keystream, and the draws it does not read drop out (`finRest_comb_evalDistEq`). So for
+     fixed game draws before the end of the path, world 1 is world 0 with the hops after the
+     relay from an independent secret (`world0P`), off the draws that are not good
+     (`fin_fixed_fwd_le`); and `world0B` is the game's draws followed by `world0P`
+     (`world0B_evalDistEq`). Before the end of the path the comparison is complete up to
+     `finNoReply` and the events.
      Not yet proved: that `world0E` is world 0 for the right `E`; the
      two games over their draws (that the joined keystream and the relabelled draws are
      uniform, by `evalDistEq_headTail`); `finNoReply`; the end of the path.

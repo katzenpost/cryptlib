@@ -7052,6 +7052,98 @@ theorem finRest_comb_evalDistEq (names : Role → Name) (A : (Protocols.RSOR.for
       OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
   exact EvalDistEq.rfl
 
+/-- **World 0 with the hops after the relay from an independent secret, for fixed game
+draws**: the original's randomness, the sender's secret, the relay's keystream and MAC key, the
+two blocks and the relay's blinding seed, and the blinding adversary's game on the tail of the
+path from the secret `p.d0`. -/
+def world0P (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) (E :
+    KEMSphinx.Keystream geom × Vector UInt8 32 × (PropDraw nike cipher macS kdfS streamS geom
+    hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (fwd0 nike cipher
+    macS kdfS streamS geom hvalid hmactag h16 names).Oth A) × (Vector UInt8 (geom.payloadTagLength
+    + geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength +
+    geom.forwardPayloadLength)) → ProbComp Bool) (p : NextPre nike cipher macS kdfS streamS geom
+    hvalid hmactag h16 names A) :
+    ProbComp Bool := do
+  let r0 ← $ᵗ (RSOR.Randomness nike geom)
+  let d ← $ᵗ (Vector UInt8 nike.privateKeySize)
+  let U ← $ᵗ (KEMSphinx.Keystream geom)
+  let km ← $ᵗ (Vector UInt8 32)
+  let u ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+  let v ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+  let seed ← $ᵗ (Vector UInt8 32)
+  blindPost nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E (U, km, (⟨p.k, p.keys,
+      p.c, p.st, p.log, r0, d⟩ : PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (fwd0 nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 names).Oth A), u, v)
+    (tailOf nike kdfS ((nike.decodePrivateKey p.d0).getD default) (RSOR.path nike p.c.req.fwd
+        [.recipient p.c.req.receiver]) p.c.pos seed)
+
+set_option maxHeartbeats 4000000 in
+/-- `world0B` draws the game's draws and the independent secret first. -/
+theorem world0B_evalDistEq (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) (E : KEMSphinx.Keystream geom × Vector UInt8 32 × (PropDraw nike cipher macS
+    kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+    (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth A) × (Vector UInt8
+    (geom.payloadTagLength + geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength +
+    geom.forwardPayloadLength)) → ProbComp Bool) :
+    world0B nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E =ᵈ (nextPre nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 names A >>= world0P nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 names A E) := by
+  unfold world0B nextPre world0P forwardDraw propDrawOf
+  simp only [bind_assoc, pure_bind]
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+      EvalDistEq.bind_right _ fun k₂ => EvalDistEq.bind_right _ fun out => EvalDistEq.bind_right _
+      fun o => EvalDistEq.bind_right _ fun d => EvalDistEq.bind_right _ fun U =>
+      EvalDistEq.bind_right _ fun km => EvalDistEq.bind_right _ fun u => EvalDistEq.bind_right _
+      fun v => OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+      EvalDistEq.bind_right _ fun k₂ => EvalDistEq.bind_right _ fun out => EvalDistEq.bind_right _
+      fun o => EvalDistEq.bind_right _ fun d => EvalDistEq.bind_right _ fun U =>
+      EvalDistEq.bind_right _ fun km => EvalDistEq.bind_right _ fun u =>
+      OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+      EvalDistEq.bind_right _ fun k₂ => EvalDistEq.bind_right _ fun out => EvalDistEq.bind_right _
+      fun o => EvalDistEq.bind_right _ fun d => EvalDistEq.bind_right _ fun U =>
+      EvalDistEq.bind_right _ fun km => OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+      EvalDistEq.bind_right _ fun k₂ => EvalDistEq.bind_right _ fun out => EvalDistEq.bind_right _
+      fun o => EvalDistEq.bind_right _ fun d => EvalDistEq.bind_right _ fun U =>
+      OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+      EvalDistEq.bind_right _ fun k₂ => EvalDistEq.bind_right _ fun out => EvalDistEq.bind_right _
+      fun o => EvalDistEq.bind_right _ fun d => OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+      EvalDistEq.bind_right _ fun k₂ => EvalDistEq.bind_right _ fun out => EvalDistEq.bind_right _
+      fun o => OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun k => EvalDistEq.bind_right _ fun k₁ =>
+      EvalDistEq.bind_right _ fun k₂ => EvalDistEq.bind_right _ fun out =>
+      OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact EvalDistEq.rfl
+
+/-- **For fixed game draws before the end of the path, world 1 is world 0 with the hops after
+the relay from an independent secret**, off the draws that are not good. -/
+theorem fin_fixed_fwd_le (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) (E : KEMSphinx.Keystream geom × Vector UInt8 32 × (PropDraw nike cipher macS
+    kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+    (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth A) × (Vector UInt8
+    (geom.payloadTagLength + geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength +
+    geom.forwardPayloadLength)) → ProbComp Bool) (p : NextPre nike cipher macS kdfS streamS geom
+    hvalid hmactag h16 names A)
+    (hn : (p.c.pos : ℕ) + 1 < p.c.req.fwd.hops.length) :
+    |(Pr{let b ← (finRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names >>= fun r =>
+        finOwnRun nike cipher macS kdfS streamS geom hvalid hmactag h16 names A (finX nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 p r))}[b =
+        true]).toReal
+      - (Pr{let b ← (world0P nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E p)}[b
+          = true]).toReal|
+    ≤ (Pr{let r ← (finRest nike cipher macS kdfS streamS geom hvalid hmactag h16 names)}[¬ finGood
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 (finX nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 p r)]).toReal := by
+  have h1 := finRest_sub_le nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E p hn
+  rw [(finRest_comb_evalDistEq nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E p)
+      (fun b => b = true)] at h1
+  exact h1
+
 end Final
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
