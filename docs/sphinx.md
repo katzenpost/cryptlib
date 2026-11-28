@@ -996,7 +996,12 @@ the distance between the two worlds with it from a uniform keystream at the rela
 distance only the first two lemmas exist (`NIKESphinxSLURelay.lean`): a game played from the
 relay's keystream is a game against the relay in the closed form of the TLU→ proof
 (`propStrRun_eq_hdrRelay`), and a sender that refuses one header is part of the relays'
-answers (`hdrRelay_refuse`). On the backward path the comparison is to follow TLU→'s last
+answers (`hdrRelay_refuse`). With them, world 0 on the backward path before its end is a
+game against the forwarding relay (`backRun0_fwd`, from the general `hdrRelay_hdrFn`): under
+the challenge header the relay forwards the header of the reply's next layer with the block
+it decrypts, and the sender refuses the reply's last header; this holds when the reply's
+header builds up to the relay's layer. World 1's side, the comparison of the two, the last
+backward hop and the exit are not done. On the backward path the comparison is to follow TLU→'s last
 one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
