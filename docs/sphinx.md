@@ -1043,7 +1043,10 @@ header's tag. So the bytes under each hop's tag and each layer's header are the 
 (`hdrMsg_drop`, `layerHdr_drop`), and the short header builds when the long one does
 (`nikeHdrTrace_drop_isSome`). In the other direction, two headers whose bytes under the
 relay's tag agree are the same up to the relay, whatever lies after it (`layerHdr_front`).
-These are not yet used on the draws. On the backward path the comparison is to follow TLU→'s last
+These are not yet used on the draws. The comparison of the two worlds through one game
+has begun in `NIKESphinxSLUJoin.lean` with one fact: the forwarding relay answers its header
+once, so the block it hands on in world 0 is one uniform block (`fwdRelay_fresh`,
+`backFnRun0_fresh`). On the backward path the comparison is to follow TLU→'s last
 one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts

@@ -148,6 +148,7 @@ import Cryptlib.Protocols.Sphinx.NIKESphinxSLUTail
 import Cryptlib.Protocols.Sphinx.NIKESphinxSLUDrop
 import Cryptlib.Protocols.Sphinx.NIKESphinxSLUSwap
 import Cryptlib.Protocols.Sphinx.NIKESphinxSLUShift
+import Cryptlib.Protocols.Sphinx.NIKESphinxSLUJoin
 import Cryptlib.Protocols.Sphinx.RelayMac
 import Cryptlib.Protocols.RSORPayload
 import Cryptlib.Protocols.Sphinx.Schemes
