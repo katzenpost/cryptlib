@@ -981,9 +981,13 @@ sender refuses. Its payload game with the ideal cipher reads the relay's header 
 through the keystream only (`backPay0_ideal_eq`), so it is the real experiment of the
 keystream generator (`backward0_pay_evalDistEq_prg`). World 1 has the same step in
 `NIKESphinxSLUStream1.lean` (`backward1_pay_evalDistEq_prg`, `backViewS1`); there the
-keystream enters the relay's own reply layer, or at the exit its own forward layer. The three
-steps are not yet chained into one bound per world, and the two worlds played from a uniform
-keystream are not yet compared. SLU← uses the general step for world 0
+keystream enters the relay's own reply layer, or at the exit its own forward layer. The steps
+are chained in `NIKESphinxSLUChain.lean` (`backwardUnlinkable_le_stream`): the SLU← advantage
+is at most, for each world, the bad-draw chance, the key-game advantage, a forgery and the
+tag-length chance, the payload step's bad-draw chance and one-query advantage, and the
+keystream generator's advantage, plus the distance between the two worlds played from a
+uniform header keystream at the relay, an ideal payload cipher there and one header. That
+distance is not bounded yet: it is the sender's chain and the last comparison. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
 nothing under it and the world does not read it (`backViewTAt_back`), so the block is one the
