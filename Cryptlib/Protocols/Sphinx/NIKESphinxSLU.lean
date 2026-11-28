@@ -602,6 +602,143 @@ theorem backLayerOfKeys_tag (i : ℕ) (q : RSOR.Request nike geom) (r : RSOR.Ran
   rw [nikePktFn_restKeys nike cipher macS kdfS streamS geom a c hops j x km n hj _ _ _ hjp,
     peels_restKeys nike cipher kdfS streamS geom c hops j x km n hj i]
 
+/-! ## Two lists of hop keys that differ in payload keys only -/
+
+omit cipher kdfS hvalid hmactag h16 in
+/-- Their keystreams, tagging functions and blinded elements are the same. -/
+theorem keyFns_congr (K K' : List HopKeys) (hK : ∀ m : ℕ, (K[m]?).map (fun k : HopKeys =>
+    (k.headerMAC, k.headerEncryption, k.headerEncryptionIV, k.blindingFactor)) = (K'[m]?).map (fun
+    k : HopKeys => (k.headerMAC, k.headerEncryption, k.headerEncryptionIV, k.blindingFactor))) :
+    keysKs geom streamS K.toArray = keysKs geom streamS K'.toArray
+      ∧ keysTag macS K.toArray = keysTag macS K'.toArray
+      ∧ ∀ a, blindElem nike a K.toArray = blindElem nike a K'.toArray := by
+  have hfld : ∀ m : ℕ, (fun k : HopKeys => (k.headerMAC, k.headerEncryption, k.headerEncryptionIV,
+      k.blindingFactor)) (K.toArray[m]!) = (fun k : HopKeys => (k.headerMAC, k.headerEncryption,
+      k.headerEncryptionIV, k.blindingFactor)) (K'.toArray[m]!) := fun m => by
+    have h := hK m
+    have e : ∀ (L : List HopKeys), L.toArray[m]! = (L[m]?).getD default := fun L => by
+      simp only [getElem!_def, List.getElem?_toArray]
+      cases L[m]? <;> rfl
+    rw [e, e]
+    cases h1 : K[m]? <;> cases h2 : K'[m]? <;> rw [h1, h2] at h
+    · cases h
+    · cases h
+    · exact Option.some.inj h
+  refine ⟨funext fun i => ?_, funext fun i => ?_, fun a => funext fun i => ?_⟩
+  · have h := hfld i
+    simp only [Prod.mk.injEq] at h
+    unfold keysKs
+    rw [h.2.1, h.2.2.1]
+  · have h := hfld i
+    simp only [Prod.mk.injEq] at h
+    unfold keysTag
+    rw [h.1]
+  · refine blindElem_congr nike a _ _ (fun m => ?_) i
+    have h := hfld m
+    simp only [Prod.mk.injEq] at h
+    exact h.2.2.2
+
+omit cipher kdfS hvalid hmactag h16 in
+/-- The bytes a hop's tag covers in the reply's packet are the same. -/
+theorem backMsg_congr (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray)
+    (K K' : List HopKeys) (j : ℕ) (hK : ∀ m : ℕ, (K[m]?).map (fun k : HopKeys => (k.headerMAC,
+        k.headerEncryption, k.headerEncryptionIV, k.blindingFactor)) = (K'[m]?).map (fun k :
+        HopKeys => (k.headerMAC, k.headerEncryption, k.headerEncryptionIV, k.blindingFactor))) :
+    backMsg nike macS streamS geom q r a K j = backMsg nike macS streamS geom q r a K' j := by
+  obtain ⟨hks, htg, hge⟩ := keyFns_congr nike macS streamS geom K K' hK
+  unfold backMsg
+  rw [hks, htg, hge a]
+
+include hvalid hmactag in
+/-- The header of the reply's first layer is the same. -/
+theorem backHdrOfTag_congr (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a :
+    ByteArray)
+    (K K' : List HopKeys) (j : ℕ) (tag : ByteArray) (hK : ∀ m : ℕ, (K[m]?).map (fun k : HopKeys =>
+        (k.headerMAC, k.headerEncryption, k.headerEncryptionIV, k.blindingFactor)) = (K'[m]?).map
+        (fun k : HopKeys => (k.headerMAC, k.headerEncryption, k.headerEncryptionIV,
+        k.blindingFactor)))
+    (hb : 0 < q.back.hops.length) (ha : a.size = nike.publicKeySize)
+    (ht : tag.size = macLength) :
+    backHdrOfTag nike cipher macS streamS geom q r a K j tag
+      = backHdrOfTag nike cipher macS streamS geom q r a K' j tag := by
+  obtain ⟨hks, htg, hge⟩ := keyFns_congr nike macS streamS geom K K' hK
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hsz := RSOR.path_size nike q.back [.surbReply r.2.2.2]
+  have hlen : q.back.hops.length ≤ geom.nrHops := q.back.length_le
+  have hmul : (geom.nrHops - (RSOR.path nike q.back [.surbReply r.2.2.2]).size) *
+      geom.perHopRoutingInfoLength
+      ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
+    exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+  have hfill : (RSOR.filler nike geom (RSOR.path nike q.back [.surbReply r.2.2.2]) r.2.1).size
+      = (geom.nrHops - (RSOR.path nike q.back [.surbReply r.2.2.2]).size) *
+          geom.perHopRoutingInfoLength := by
+    unfold RSOR.filler
+    rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+    omega
+  have htag : ∀ (m : ℕ) (x : ByteArray),
+      ((Function.update (keysTag macS K'.toArray) j fun _ => tag) m x).size = macLength :=
+    fun m x => by
+      by_cases hm : m = j
+      · rw [hm, Function.update_self]
+        exact ht
+      · rw [Function.update_of_ne hm]
+        exact (Util.Bytes.size_ofVector _).trans hmactag
+  unfold backHdrOfTag
+  rw [hks, htg, hge a]
+  exact nikePktFn_hdr_enc nike geom hvalid _ _ _ _ _ _ _ _ (by rw [hsz]; exact hlen)
+    (by rw [hsz]; exact hb) hfill htag ha
+
+include hvalid hmactag h16 in
+/-- The header of each layer of the reply's packet is the same. -/
+theorem backLayerOfTag_fst_congr (i : ℕ) (q : RSOR.Request nike geom) (r : RSOR.Randomness nike
+    geom)
+    (a : ByteArray) (K K' : List HopKeys) (j : ℕ) (tag : ByteArray) (hK : ∀ m : ℕ, (K[m]?).map (fun
+        k : HopKeys => (k.headerMAC, k.headerEncryption, k.headerEncryptionIV, k.blindingFactor)) =
+        (K'[m]?).map (fun k : HopKeys => (k.headerMAC, k.headerEncryption, k.headerEncryptionIV,
+        k.blindingFactor)))
+    (hi : i ≤ K.length) (hi' : i ≤ K'.length)
+    (hb : 0 < q.back.hops.length) (ha : a.size = nike.publicKeySize)
+    (ht : tag.size = macLength) :
+    (backLayerOfTag nike cipher macS streamS geom i q r a K j tag).1
+      = (backLayerOfTag nike cipher macS streamS geom i q r a K' j tag).1 := by
+  obtain ⟨hks, htg, hge⟩ := keyFns_congr nike macS streamS geom K K' hK
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hsz := RSOR.path_size nike q.back [.surbReply r.2.2.2]
+  have hlen : q.back.hops.length ≤ geom.nrHops := q.back.length_le
+  have hmul : (geom.nrHops - (RSOR.path nike q.back [.surbReply r.2.2.2]).size) *
+      geom.perHopRoutingInfoLength
+      ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
+    exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+  have hfill : (RSOR.filler nike geom (RSOR.path nike q.back [.surbReply r.2.2.2]) r.2.1).size
+      = (geom.nrHops - (RSOR.path nike q.back [.surbReply r.2.2.2]).size) *
+          geom.perHopRoutingInfoLength := by
+    unfold RSOR.filler
+    rw [ByteArray.size_extract, Util.Bytes.size_ofVector]
+    omega
+  have htag : ∀ (m : ℕ) (x : ByteArray),
+      ((Function.update (keysTag macS K'.toArray) j fun _ => tag) m x).size = macLength :=
+    fun m x => by
+      by_cases hm : m = j
+      · rw [hm, Function.update_self]
+        exact ht
+      · rw [Function.update_of_ne hm]
+        exact (Util.Bytes.size_ofVector _).trans hmactag
+  have hF : ∀ m : ℕ,
+      (K[m]?).map (fun k : HopKeys => (k.headerEncryption, k.headerEncryptionIV, k.blindingFactor))
+        = (K'[m]?).map
+          (fun k : HopKeys => (k.headerEncryption, k.headerEncryptionIV, k.blindingFactor)) :=
+    fun m => by
+      have h := congrArg (Option.map
+        fun g : Vector UInt8 32 × Vector UInt8 32 × Vector UInt8 16 × ByteArray => g.2) (hK m)
+      rw [Option.map_map, Option.map_map] at h
+      exact h
+  unfold backLayerOfTag
+  rw [hks, htg, hge a]
+  exact nikePktFn_peels_fst nike cipher streamS geom hvalid h16 K K' i hi hi' hF _ _ _ _ _ _
+    (by rw [hsz]; exact hlen) (by rw [hsz]; exact hb) hfill htag ha
+
 variable (W : Protocols.RSOR.BackSwap (sphinx nike cipher macS kdfS streamS geom hvalid hmactag
     h16))
 

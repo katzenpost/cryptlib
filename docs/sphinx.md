@@ -967,7 +967,10 @@ through the general one. SLU← does not use the general step yet; two lemmas it
 backward path are in place (`peels_append_hdr`, `hdrPeels_congr`: a peeled packet's header
 does not read the payload or the hops' payload keys), and from them that a packet's header and
 its later layers' headers do not read the hops' encryptions (`nikePktFn_hdr_enc`,
-`nikePktFn_peels_fst`). Nothing
+`nikePktFn_peels_fst`). So for two lists of hop keys that differ in payload keys only, the
+bytes a tag covers in the reply's packet, the header of its first layer and the header of each
+later layer are the same (`keyFns_congr`, `backMsg_congr`, `backHdrOfTag_congr`,
+`backLayerOfTag_fst_congr`). Nothing
 else of SLU← is proved for NIKE Sphinx; the plan is the
 order of the KEM proof above, with the blinding game once more for the hops after the relay on
 the backward path. STI↔ is not started for NIKE Sphinx.
