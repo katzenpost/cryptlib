@@ -821,10 +821,18 @@ for it:
      So the draws that are not good for `fin_fixed_fwd_le` are events on the draws alone
      (`finGood`): a path does not build, a body does not have a payload's length, or that
      block begins with the zero tag.
-     The last comparison is in six files, so that no file is large to build:
+     At the end of the path the two relays have one closed form too
+     (`NIKESphinxTLUExit.lean`): `lastRelay` answers one header as the last hop for a
+     recipient, handing over what follows the zero tag of the decrypted block (`lastRes`). A
+     relay that answers the last layer of a path is that (`hdrRelay_eq_lastRelay`; its
+     blinding factor is not read), and world 1's patched relay is that for the original's
+     recipient and decryption (`hdrRelay_patchWith_last`), when for the unchanged block both
+     decryptions begin with the zero tag and the original's carries its message and reply,
+     and for a changed block neither begins with the zero tag. Not yet applied to the draws.
+     The last comparison is in seven files, so that no file is large to build:
      `NIKESphinxTLUFn.lean` (the hops' functions, no games), `NIKESphinxTLURelay.lean`,
-     `NIKESphinxTLUBlind.lean`, `NIKESphinxTLUWorld1.lean`, `NIKESphinxTLUJoin.lean` and
-     `NIKESphinxTLUDraws.lean`.
+     `NIKESphinxTLUBlind.lean`, `NIKESphinxTLUWorld1.lean`, `NIKESphinxTLUJoin.lean`,
+     `NIKESphinxTLUDraws.lean` and `NIKESphinxTLUExit.lean`.
      Not yet proved: that `world0E` is world 0 for the right `E`; the
      two games over their draws (that the joined keystream and the relabelled draws are
      uniform, by `evalDistEq_headTail`); `finNoReply`; the end of the path.
