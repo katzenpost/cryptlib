@@ -945,7 +945,10 @@ the event `backBad0`, not bounded). World 1 has the same step: its view around t
 keys carries the adversary's first layer, the header of the relay's own reply layer and the
 header of the relay's own forward layer (`backView1`, `backView1_real_exit`,
 `backView1_real_back`), and world 1 is the key game's real world against `backAdv1` off its
-bad draws (`backward_true_sub_keyGame_le`, the event `backBad1`, not bounded). Nothing
+bad draws (`backward_true_sub_keyGame_le`, the event `backBad1`, not bounded). Together
+(`backwardUnlinkable_le_keyGame`): the SLU← advantage is at most the two bad-draw chances,
+the key-game advantage of each world's adversary, and the distance between the two key games
+with the relay's keys replaced. That distance is not bounded yet. Nothing
 else of SLU← is proved for NIKE Sphinx; the plan is the
 order of the KEM proof above, with the blinding game once more for the hops after the relay on
 the backward path. STI↔ is not started for NIKE Sphinx.

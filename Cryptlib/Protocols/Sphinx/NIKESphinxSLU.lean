@@ -861,6 +861,72 @@ theorem backward_true_sub_keyGame_le (names : Role → Name) (A : (Protocols.RSO
         D.c⟩ : PropCh nike cipher macS kdfS streamS geom hvalid hmactag h16
         (Protocols.RSOR.backwardWith W) .relay names D.k.1) D.o k hk D.d x0 hx0 hszL]
 
+/-! ## Both worlds with the honest relay's keys replaced -/
+
+/-- **SLU← with the honest relay's keys replaced.** The advantage is at most the chance of a
+bad draw in each world, the advantage of each world's adversary in the key game, and the
+distance between the two key games with the relay's keys replaced. -/
+theorem backwardUnlinkable_le_keyGame (names : Role → Name) (A : (Protocols.RSOR.backwardWith
+    W).Adversary) :
+    ((Protocols.RSOR.backwardWith W).advantage names A).toReal
+      ≤ (Pr{let D ← (propDrawOf nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.backwardWith W) .relay names _ (backDraw0 nike geom) A)}[backBad0 nike
+          cipher macS kdfS streamS geom hvalid hmactag h16 W
+          D]).toReal
+        + (Pr{let D ← (propDrawOf nike cipher macS kdfS streamS geom hvalid hmactag h16
+            (Protocols.RSOR.backwardWith W) .relay names _ (swapDraw nike cipher macS kdfS streamS
+            geom hvalid hmactag h16 W) A)}[backBad1 nike cipher macS kdfS streamS geom hvalid
+            hmactag h16 W
+          D]).toReal
+        + keyAdvantage cipher macS kdfS streamS geom (backAdv0 nike cipher macS kdfS streamS geom
+            hvalid hmactag h16 W names A)
+        + keyAdvantage cipher macS kdfS streamS geom (backAdv1 nike cipher macS kdfS streamS geom
+            hvalid hmactag h16 W names A)
+        + |(Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv1 nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 W names A) false)}[x = true]).toReal
+          - (Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv0 nike cipher macS kdfS
+              streamS geom hvalid hmactag h16 W names A) false)}[x = true]).toReal| := by
+  refine (Protocols.RSOR.Property.advantage_toReal (P := (Protocols.RSOR.backwardWith W)) names
+      A).le.trans ?_
+  have h0 := backward_false_sub_keyGame_le nike cipher macS kdfS streamS geom hvalid hmactag h16 W
+      names A
+  have h1 := backward_true_sub_keyGame_le nike cipher macS kdfS streamS geom hvalid hmactag h16 W
+      names A
+  have k0 : keyAdvantage cipher macS kdfS streamS geom (backAdv0 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 W names A)
+      = |(Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv0 nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names A) true)}[x = true]).toReal
+        - (Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv0 nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 W names A) false)}[x = true]).toReal| := rfl
+  have k1 : keyAdvantage cipher macS kdfS streamS geom (backAdv1 nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 W names A)
+      = |(Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv1 nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names A) true)}[x = true]).toReal
+        - (Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv1 nike cipher macS kdfS
+            streamS geom hvalid hmactag h16 W names A) false)}[x = true]).toReal| := rfl
+  have t1 := abs_sub_le ((Pr{let x ← Protocols.RSOR.Property.play names A true}[x = true]).toReal)
+    ((Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv1 nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 W names A) true)}[x = true]).toReal)
+    ((Pr{let x ← Protocols.RSOR.Property.play names A false}[x = true]).toReal)
+  have t2 := abs_sub_le ((Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv1 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 W names A) true)}[x = true]).toReal)
+    ((Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv1 nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 W names A) false)}[x = true]).toReal)
+    ((Pr{let x ← Protocols.RSOR.Property.play names A false}[x = true]).toReal)
+  have t3 := abs_sub_le ((Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv1 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 W names A) false)}[x = true]).toReal)
+    ((Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv0 nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 W names A) false)}[x = true]).toReal)
+    ((Pr{let x ← Protocols.RSOR.Property.play names A false}[x = true]).toReal)
+  have t4 := abs_sub_le ((Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv0 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 W names A) false)}[x = true]).toReal)
+    ((Pr{let x ← (keyGame cipher macS kdfS streamS geom (backAdv0 nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 W names A) true)}[x = true]).toReal)
+    ((Pr{let x ← Protocols.RSOR.Property.play names A false}[x = true]).toReal)
+  rw [abs_sub_comm] at h0
+  rw [abs_sub_comm] at k0
+  linarith
+
 end Final
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
