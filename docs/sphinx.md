@@ -941,7 +941,11 @@ when the adversary's onion builds (`backView0_real_exit`) and on the backward pa
 reply's packet builds and its last layer has at least a header's length
 (`backView0_real_back`). So world 0 is the key game's real world against `backAdv0`, up to
 the chance of the draws on which those packets do not build (`backward_false_sub_keyGame_le`,
-the event `backBad0`, not bounded). World 1 is not yet reduced. Nothing
+the event `backBad0`, not bounded). World 1 has the same step: its view around the relay's
+keys carries the adversary's first layer, the header of the relay's own reply layer and the
+header of the relay's own forward layer (`backView1`, `backView1_real_exit`,
+`backView1_real_back`), and world 1 is the key game's real world against `backAdv1` off its
+bad draws (`backward_true_sub_keyGame_le`, the event `backBad1`, not bounded). Nothing
 else of SLU← is proved for NIKE Sphinx; the plan is the
 order of the KEM proof above, with the blinding game once more for the hops after the relay on
 the backward path. STI↔ is not started for NIKE Sphinx.
