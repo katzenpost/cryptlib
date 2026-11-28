@@ -992,8 +992,12 @@ property itself is split through the onion built like a reply layer (`replySwap`
 Sphinx, `backwardUnlinkable_le_split` in `NIKESphinxSLUSplit.lean`): the advantage is at most
 the advantage in telling the fresh forward onion from that onion in world 1 (a game at the
 honest sender, not started for NIKE Sphinx), the chained terms with that onion sent on, and
-the distance between the two worlds with it from a uniform keystream at the relay (not
-started for NIKE Sphinx). SLU← uses the general step for world 0
+the distance between the two worlds with it from a uniform keystream at the relay. For that
+distance only the first two lemmas exist (`NIKESphinxSLURelay.lean`): a game played from the
+relay's keystream is a game against the relay in the closed form of the TLU→ proof
+(`propStrRun_eq_hdrRelay`), and a sender that refuses one header is part of the relays'
+answers (`hdrRelay_refuse`). On the backward path the comparison is to follow TLU→'s last
+one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
 nothing under it and the world does not read it (`backViewTAt_back`), so the block is one the
