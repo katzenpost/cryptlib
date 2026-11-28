@@ -1000,7 +1000,11 @@ answers (`hdrRelay_refuse`). With them, world 0 on the backward path before its 
 game against the forwarding relay (`backRun0_fwd`, from the general `hdrRelay_hdrFn`): under
 the challenge header the relay forwards the header of the reply's next layer with the block
 it decrypts, and the sender refuses the reply's last header; this holds when the reply's
-header builds up to the relay's layer. World 1's side, the comparison of the two, the last
+header builds up to the relay's layer. World 1 there is a game against the same relay
+(`backRun1_fwd`, from `hdrRelay_sentOn`): under the same header the relay forwards the onion
+sent on, whatever block it is given, and the sender refuses the header that goes with it; this
+holds when the reply's header builds. So before the end of the backward path the two worlds
+differ in what the relay forwards and what the sender refuses. Comparing those, the last
 backward hop and the exit are not done. On the backward path the comparison is to follow TLU→'s last
 one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
