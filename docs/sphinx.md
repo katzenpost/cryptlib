@@ -1053,7 +1053,9 @@ spliced there the long header's later layers are a short header's layers
 (`layerHdr_spliceAt_drop`); and the front of the padding as the tail of the relay's keystream
 under a mask that does not read that keystream (`frontMask`, `frontPad_mask`,
 `frontMask_congr`). World 1 on the backward path is written on the hops' functions as world
-0 is (`backFnRun1`, `backRun1_fnMac`). The split of the draws and the comparison itself are
+0 is (`backFnRun1`, `backRun1_fnMac`). Both are one game (`backJoinRun`, `backFnRun0_join`,
+`backFnRun1_join`) on what they differ in: the header the adversary's onion carries, the header
+the relay answers, the header and block it forwards, and the header the sender refuses. The split of the draws and the comparison itself are
 not done. On the backward path the comparison is to follow TLU→'s last
 one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the

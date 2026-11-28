@@ -535,6 +535,82 @@ theorem backRun1_fnMac {names : Role → Name} {A : (Protocols.RSOR.backwardWith
         h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS
         geom hvalid hmactag h16 W names) x.2.2), ← hMS, hL]
 
+/-- **The game the two worlds share on the backward path**, from what they differ in: the
+header `H0` of the reply's first layer, which the adversary's onion carries; the header `Hv`
+the honest relay answers, by forwarding to `name` the header `Lh` with the block `g`; and the
+header the sender refuses. -/
+def backJoinRun {Oth : Type} {names : Role → Name} {A : (Protocols.RSOR.backwardWith W).Adversary}
+    (D : PropDraw nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names Oth A) (r : RSOR.Randomness nike geom)
+    (H0 : ByteArray) (Hv refuse : Vector UInt8 geom.headerLength) (name : Name) (Lh : ByteArray)
+    (g : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength)) : ProbComp Bool :=
+  (simulateQ (fwdRelay nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (fun (h : Role) (o : Onion geom) =>
+        if h = Role.sender ∧ o.1 = refuse then none
+        else (fun h o => if h = Role.relay then
+          stepOf geom (noneAns nike cipher macS kdfS streamS geom D.k.2
+            (drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+                (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS
+                streamS geom hvalid hmactag h16 W names) D) (join o))
+        else RSOR.proc nike cipher macS kdfS streamS geom (D.keys h).2 o) h o)
+      (fun h msg o => if h = Role.relay then
+          replyOf cipher geom msg (noneAns nike cipher macS kdfS streamS geom D.k.2
+            (drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+                (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS
+                streamS geom hvalid hmactag h16 W names) D) (join o))
+        else RSOR.reply nike cipher macS kdfS streamS geom (D.keys h).2 msg o)
+      Hv name Lh (fun _ => g))
+    (A.guess D.st (backOnionOfHdr nike cipher macS kdfS streamS geom D.c.req r
+      (Nat.zero_lt_of_lt D.c.pos.isLt) H0))).run' D.log
+
+/-- World 0 with one block handed on is that game: the relay forwards the header of the
+reply's next layer, and the sender refuses the header of its last. -/
+theorem backFnRun0_join {names : Role → Name} {A : (Protocols.RSOR.backwardWith W).Adversary} (x :
+    PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W)
+    .relay names (RSOR.Randomness nike geom × (Vector UInt8 (geom.payloadTagLength +
+    geom.forwardPayloadLength))) A)
+    (g : Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray) :
+    backFnRun0 nike cipher macS kdfS streamS geom hvalid hmactag h16 W x (fun _ => g) ks tag ge
+      = backJoinRun nike cipher macS kdfS streamS geom hvalid hmactag h16 W x.2.2 x.2.2.o.1
+        (backHdrBytes nike geom x.2.2.c.req x.2.2.o.1 ks tag ge)
+        (Util.Bytes.toVecN geom.headerLength (layerHdr geom ks tag ge (RSOR.filler nike geom
+          (RSOR.path nike x.2.2.c.req.back [.surbReply x.2.2.o.1.2.2.2]) x.2.2.o.1.2.1) (RSOR.path
+          nike x.2.2.c.req.back [.surbReply x.2.2.o.1.2.2.2]) (drawPos nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 W names) x.2.2)))
+        (backHdrFn nike geom x.2.2.c.req x.2.2.o.1 ks tag ge (x.2.2.c.req.back.hops.length - 1))
+        (RSOR.path nike x.2.2.c.req.back [.surbReply x.2.2.o.1.2.2.2])[(drawPos nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names
+          (backPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 W names) x.2.2) + 1]!.id
+        (layerHdr geom ks tag ge (RSOR.filler nike geom (RSOR.path nike x.2.2.c.req.back
+          [.surbReply x.2.2.o.1.2.2.2]) x.2.2.o.1.2.1) (RSOR.path nike x.2.2.c.req.back
+          [.surbReply x.2.2.o.1.2.2.2]) ((drawPos nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names) x.2.2) + 1)) g :=
+  rfl
+
+/-- World 1 is that game: the relay forwards the onion sent on, and the sender refuses the
+header that goes with it. -/
+theorem backFnRun1_join {names : Role → Name} {A : (Protocols.RSOR.backwardWith W).Adversary} (x :
+    PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W)
+    .relay names (RSOR.Randomness nike geom × W.X) A)
+    (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray) :
+    backFnRun1 nike cipher macS kdfS streamS geom hvalid hmactag h16 W x ks tag ge
+      = backJoinRun nike cipher macS kdfS streamS geom hvalid hmactag h16 W x.2.2 x.2.2.o.1
+        (backHdrBytes nike geom x.2.2.c.req x.2.2.o.1 ks tag ge)
+        (Util.Bytes.toVecN geom.headerLength (layerHdr geom ks tag ge (RSOR.filler nike geom
+          (RSOR.path nike x.2.2.c.req.back [.surbReply x.2.2.o.1.2.2.2]) x.2.2.o.1.2.1) (RSOR.path
+          nike x.2.2.c.req.back [.surbReply x.2.2.o.1.2.2.2]) (drawPos nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 W names) x.2.2)))
+        (backRefuse nike cipher macS kdfS streamS geom hvalid hmactag h16 W x)
+        (x.2.2.c.req.back.hops[x.2.2.c.pos].name)
+        (Util.Bytes.ofVector (backSentOn nike cipher macS kdfS streamS geom hvalid hmactag h16 W
+          x).1)
+        (backSentOn nike cipher macS kdfS streamS geom hvalid hmactag h16 W x).2 :=
+  rfl
+
 end Final
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
