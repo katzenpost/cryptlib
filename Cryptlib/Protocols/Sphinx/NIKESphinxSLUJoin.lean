@@ -306,6 +306,235 @@ theorem backFnRun0_fresh {names : Role → Name} {A : (Protocols.RSOR.backwardWi
           ge) :=
   fwdRelay_fresh nike cipher macS kdfS streamS geom hvalid hmactag h16 _ _ _ _ _ _ _
 
+/-- **World 1 on the backward path, from the hops' functions.** The adversary's onion carries
+the header of the reply's first layer; under the header of the layer at the honest relay the
+relay forwards the onion sent on; and the sender refuses the header that goes with it. -/
+def backFnRun1 {names : Role → Name} {A : (Protocols.RSOR.backwardWith W).Adversary} (x : PropStrX
+    nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay
+    names (RSOR.Randomness nike geom × W.X) A)
+    (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray) :
+    ProbComp Bool :=
+  (simulateQ (fwdRelay nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (fun (h : Role) (o : Onion geom) =>
+        if h = Role.sender ∧ o.1 = backRefuse nike cipher macS kdfS streamS geom hvalid hmactag h16
+            W x then none
+        else (fun h o => if h = Role.relay then
+          stepOf geom (noneAns nike cipher macS kdfS streamS geom x.2.2.k.2
+            (drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+                (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS
+                streamS geom hvalid hmactag h16 W names) x.2.2) (join o))
+        else RSOR.proc nike cipher macS kdfS streamS geom (x.2.2.keys h).2 o) h o)
+      (fun h msg o => if h = Role.relay then
+          replyOf cipher geom msg (noneAns nike cipher macS kdfS streamS geom x.2.2.k.2
+            (drawElem nike cipher macS kdfS streamS geom hvalid hmactag h16
+                (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS
+                streamS geom hvalid hmactag h16 W names) x.2.2) (join o))
+        else RSOR.reply nike cipher macS kdfS streamS geom (x.2.2.keys h).2 msg o)
+      (Util.Bytes.toVecN geom.headerLength (layerHdr geom ks tag ge (RSOR.filler nike geom
+          (RSOR.path nike x.2.2.c.req.back [.surbReply x.2.2.o.1.2.2.2]) x.2.2.o.1.2.1) (RSOR.path
+          nike x.2.2.c.req.back [.surbReply x.2.2.o.1.2.2.2]) (drawPos nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace
+          nike cipher macS kdfS streamS geom hvalid hmactag h16 W names) x.2.2)))
+      (x.2.2.c.req.back.hops[x.2.2.c.pos].name)
+      (Util.Bytes.ofVector (backSentOn nike cipher macS kdfS streamS geom hvalid hmactag h16 W
+          x).1) (fun _ => (backSentOn nike cipher macS kdfS streamS geom hvalid hmactag h16 W x).2))
+    (A.guess x.2.2.st (backOnionOfHdr nike cipher macS kdfS streamS geom x.2.2.c.req x.2.2.o.1
+      (Nat.zero_lt_of_lt x.2.2.c.pos.isLt)
+      (backHdrBytes nike geom x.2.2.c.req x.2.2.o.1 ks tag ge)))).run' x.2.2.log
+
+/-- **World 1 before the end of the backward path is that game** on the hops' keystreams, the
+honest relay's replaced by the uniform one; their tags, the relay's its MAC; and their
+elements. This holds when the reply's header builds. -/
+theorem backRun1_fnMac {names : Role → Name} {A : (Protocols.RSOR.backwardWith W).Adversary} (x :
+    PropStrX nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W)
+    .relay names (RSOR.Randomness nike geom × W.X) A)
+    (U : KEMSphinx.Keystream geom) (u v : Vector UInt8 (geom.payloadTagLength +
+        geom.forwardPayloadLength)) (k : ℕ) (hk : x.2.2.c.pos.val = k + 1)
+    (hT : pathBuilds geom (RSOR.path nike x.2.2.c.req.back [.surbReply x.2.2.o.1.2.2.2]) (RSOR.path
+        nike x.2.2.c.req.back [.surbReply x.2.2.o.1.2.2.2]).size) :
+    propStrRun nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith
+        W) .relay names (backPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 W names) A
+        (backMS1 nike cipher macS kdfS streamS geom hvalid hmactag h16 W) (backPlainS1 nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 W) (backViewS1 nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 W) x U u v
+      = backFnRun1 nike cipher macS kdfS streamS geom hvalid hmactag h16 W x (Function.update
+          (keysKs geom streamS (drawKeys nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x)
+          default) default).toArray) (drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names) x.2.2) (Util.Bytes.ofVector U)) (Function.update
+          (keysTag macS (drawKeys nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x)
+          default) default).toArray) (drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names) x.2.2) (fun m => Util.Bytes.ofVector (macS.mac
+          (Util.Bytes.ofVector x.1) m))) (blindElem nike (groupElem nike (drawKey nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x.2.2)
+          (drawKeys nike cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x)
+          default) default).toArray 0) (drawKeys nike cipher macS kdfS streamS geom hvalid hmactag
+          h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS geom hvalid
+          hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS
+          kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x)
+          default) default).toArray) := by
+  have hlt : x.2.2.c.pos.val < x.2.2.c.req.back.hops.length := x.2.2.c.pos.isLt
+  have hn : k + 1 < x.2.2.c.req.back.hops.length := by omega
+  have hJ : (drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 W names) x.2.2) = k := backPos_back nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 W x.2.2 k hk
+  have hsz := RSOR.path_size nike x.2.2.c.req.back [.surbReply x.2.2.o.1.2.2.2]
+  have hJs : (drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 W names) x.2.2) < (RSOR.path nike x.2.2.c.req.back [.surbReply
+      x.2.2.o.1.2.2.2]).size := by
+    rw [hsz, hJ]
+    exact lt_trans (Nat.lt_succ_self k) hn
+  have hMS : (backMS1 nike cipher macS kdfS streamS geom hvalid hmactag h16 W x U) = hdrMsg geom
+      (Function.update (keysKs geom streamS (drawKeys nike cipher macS kdfS streamS geom hvalid
+      hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x) default)
+      default).toArray) (drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 W names) x.2.2) (Util.Bytes.ofVector U)) (keysTag macS (drawKeys nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names
+      (backPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 W names) (propPayRest nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names
+      (propStrPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names x) default) default).toArray) (blindElem nike
+      (groupElem nike (drawKey nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names x.2.2) (drawKeys nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x)
+      default) default).toArray 0) (drawKeys nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x) default)
+      default).toArray) (RSOR.filler nike geom (RSOR.path nike x.2.2.c.req.back [.surbReply
+      x.2.2.o.1.2.2.2]) x.2.2.o.1.2.1) (RSOR.path nike x.2.2.c.req.back [.surbReply
+      x.2.2.o.1.2.2.2]) (drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 W names) x.2.2) :=
+    backMS1_back nike cipher macS kdfS streamS geom hvalid hmactag h16 W x U k hk
+  have hL : layerHdr geom (Function.update (keysKs geom streamS (drawKeys nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS
+      streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names
+      x) default) default).toArray) (drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 W names) x.2.2) (Util.Bytes.ofVector U)) (Function.update (keysTag macS
+      (drawKeys nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith
+      W) .relay names (backPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 W names)
+      (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x) default) default).toArray)
+      (drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith
+      W) .relay names (backPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 W names)
+      x.2.2) fun _ => Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector x.1) (backMS1 nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 W x U))) (blindElem nike (groupElem nike (drawKey
+      nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay
+      names x.2.2) (drawKeys nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x) default)
+      default).toArray 0) (drawKeys nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag
+      h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS kdfS streamS
+      geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x) default)
+      default).toArray) (RSOR.filler nike geom (RSOR.path nike x.2.2.c.req.back [.surbReply
+      x.2.2.o.1.2.2.2]) x.2.2.o.1.2.1) (RSOR.path nike x.2.2.c.req.back [.surbReply
+      x.2.2.o.1.2.2.2]) (drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 W names) x.2.2)
+      = (backMS1 nike cipher macS kdfS streamS geom hvalid hmactag h16 W x U) ++
+          Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector x.1) (backMS1 nike cipher macS kdfS
+          streamS geom hvalid hmactag h16 W x U)) := by
+    unfold layerHdr
+    rw [hdrMsg_update_tag geom _ _ _ _ _ (drawPos nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 W names) x.2.2) hJs, Function.update_self, ← hMS]
+  rw [backRun1_fwd nike cipher macS kdfS streamS geom hvalid hmactag h16 W x U u v k hk hn hT]
+  unfold backFnRun1
+  rw [backHdrBytes_tagAt nike geom x.2.2.c.req x.2.2.o.1 (Function.update (keysKs geom streamS
+      (drawKeys nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith
+      W) .relay names (backPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 W names)
+      (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x) default) default).toArray)
+      (drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith
+      W) .relay names (backPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 W names)
+      x.2.2) (Util.Bytes.ofVector U)) (keysTag macS (drawKeys nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x) default)
+      default).toArray) (blindElem nike (groupElem nike (drawKey nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x.2.2) (drawKeys nike cipher
+      macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names
+      (backPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 W names) (propPayRest nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names
+      (propStrPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names x) default) default).toArray 0) (drawKeys nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names
+      (backPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 W names) (propPayRest nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names
+      (propStrPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+      (Protocols.RSOR.backwardWith W) .relay names x) default) default).toArray) (drawPos nike
+      cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names
+      (backPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 W names) x.2.2) hJs (fun m
+      => Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector x.1) m)),
+    layerHdr_tagAt geom (Function.update (keysKs geom streamS (drawKeys nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 W names) (propPayRest nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names
+        (propStrPay nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardWith W) .relay names x) default) default).toArray) (drawPos nike
+        cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay
+        names (backPlace nike cipher macS kdfS streamS geom hvalid hmactag h16 W names) x.2.2)
+        (Util.Bytes.ofVector U)) (keysTag macS (drawKeys nike cipher macS kdfS streamS geom hvalid
+        hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher
+        macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x)
+        default) default).toArray) (blindElem nike (groupElem nike (drawKey nike cipher macS kdfS
+        streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x.2.2)
+        (drawKeys nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x) default)
+        default).toArray 0) (drawKeys nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 W names) (propPayRest nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 (Protocols.RSOR.backwardWith W) .relay names (propStrPay nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 (Protocols.RSOR.backwardWith W) .relay names x) default)
+        default).toArray) (RSOR.filler nike geom (RSOR.path nike x.2.2.c.req.back [.surbReply
+        x.2.2.o.1.2.2.2]) x.2.2.o.1.2.1) (RSOR.path nike x.2.2.c.req.back [.surbReply
+        x.2.2.o.1.2.2.2]) (drawPos nike cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS geom
+        hvalid hmactag h16 W names) x.2.2) hJs (fun m => Util.Bytes.ofVector (macS.mac
+        (Util.Bytes.ofVector x.1) m)) (drawPos nike cipher macS kdfS streamS geom hvalid hmactag
+        h16 (Protocols.RSOR.backwardWith W) .relay names (backPlace nike cipher macS kdfS streamS
+        geom hvalid hmactag h16 W names) x.2.2), ← hMS, hL]
+
 end Final
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx
