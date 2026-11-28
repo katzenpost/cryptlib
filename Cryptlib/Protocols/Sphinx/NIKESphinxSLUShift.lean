@@ -458,4 +458,72 @@ theorem nikeHdrTrace_drop_isSome (ks : ℕ → ByteArray) (tag : ℕ → ByteArr
 
 end Shift
 
+section Front
+
+variable (nike : NIKE) (geom : Geometry)
+
+open Cryptlib.Protocols.Sphinx.KEMSphinx (padAt)
+
+/-- **Two headers whose bytes under hop `j`'s tag agree are the same up to hop `j`**, when the
+hops in front are the same and hop `j` has the same tagging function: the headers of their
+layers up to `j`, and whether and how they build. Their paths may differ after `j`. -/
+theorem layerHdr_front (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ge ge' : ℕ → ByteArray) (filler filler' : ByteArray) (path path' : Array PathHop)
+    (j : ℕ) (hj : j < path.size) (hj' : j < path'.size)
+    (h : ∀ i < j, ks i = ks' i ∧ tag i = tag' i ∧ ge i = ge' i
+      ∧ path[i]!.commands = path'[i]!.commands ∧ path[i + 1]!.id = path'[i + 1]!.id)
+    (hM : hdrMsg geom ks tag ge filler path j = hdrMsg geom ks' tag' ge' filler' path' j)
+    (htj : tag j = tag' j)
+    (hT : (nikeHdrTrace geom ks tag ge filler path (path.size - j)).isSome)
+    (hT' : (nikeHdrTrace geom ks' tag' ge' filler' path' (path'.size - j)).isSome)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
+    (hn : path.size ≤ geom.nrHops) (hn' : path'.size ≤ geom.nrHops)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hfill' : filler'.size = (geom.nrHops - path'.size) * geom.perHopRoutingInfoLength)
+    (htag : ∀ i m, (tag i m).size = macLength) (htag' : ∀ i m, (tag' i m).size = macLength)
+    (hgej : (ge j).size = nike.publicKeySize) (hgej' : (ge' j).size = nike.publicKeySize) :
+    nikeHdrTrace geom ks tag ge filler path path.size
+        = nikeHdrTrace geom ks' tag' ge' filler' path' path'.size
+      ∧ ∀ i, i ≤ j → layerHdr geom ks tag ge filler path i
+        = layerHdr geom ks' tag' ge' filler' path' i := by
+  obtain ⟨s, hs0⟩ := Option.isSome_iff_exists.mp hT
+  obtain ⟨s', hs1⟩ := Option.isSome_iff_exists.mp hT'
+  obtain ⟨a1, a2⟩ := nikeHdrTrace_at_msg nike geom ks tag ge filler path j hj hgej s hs0
+  obtain ⟨b1, b2⟩ := nikeHdrTrace_at_msg nike geom ks' tag' ge' filler' path' j hj' hgej' s' hs1
+  have hsize : s.1.size = s'.1.size := by
+    rw [(nikeHdrTrace_size geom ks tag ge filler path hnnh hle hfill htag _ s hs0).1,
+      (nikeHdrTrace_size geom ks' tag' ge' filler' path' hnnh hle hfill' htag' _ s' hs1).1]
+    congr 1
+    omega
+  have hst : nikeHdrTrace geom ks tag ge filler path (path.size - j)
+      = nikeHdrTrace geom ks' tag' ge' filler' path' (path'.size - j) := by
+    rw [hs0, hs1]
+    exact congrArg some (Prod.ext (by rw [a1, b1, hM, hsize]) (by rw [a2, b2, hM, htj]))
+  have hfr := nikeHdrTrace_front geom ks ks' tag tag' ge ge' filler filler' path path' j hj hj'
+    h hst
+  refine ⟨?_, fun i hi => ?_⟩
+  · have := hfr j le_rfl
+    rwa [show path.size - j + j = path.size by omega,
+      show path'.size - j + j = path'.size by omega] at this
+  · by_cases hij : i = j
+    · rw [hij]
+      unfold layerHdr
+      rw [hM, htj]
+    · have hlt : i < j := by omega
+      obtain ⟨h1, h2, h3, h4, h5⟩ := h i hlt
+      have ht := hfr (j - 1 - i) (by omega)
+      rw [show path.size - j + (j - 1 - i) = path.size - 1 - i by omega,
+        show path'.size - j + (j - 1 - i) = path'.size - 1 - i by omega] at ht
+      have hm : hdrMsg geom ks tag ge filler path i
+          = hdrMsg geom ks' tag' ge' filler' path' i := by
+        unfold hdrMsg
+        rw [ht]
+        simp only [h1, h3, nikeFragment_congr_path geom path path' _ i (by omega) (by omega) h4
+          h5, KEMSphinx.padAt_congr geom ks ks' (i - 1) fun m hm => (h m (by omega)).1]
+      unfold layerHdr
+      rw [hm, h2]
+
+end Front
+
 end Cryptlib.Protocols.Sphinx.NIKESphinx
