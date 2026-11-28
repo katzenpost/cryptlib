@@ -96,47 +96,6 @@ theorem nikeHdrTrace_isSome (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → Byt
           | error e' => rw [hf2] at hf; cases hf
           | ok F' => rfl
 
-/-- **The layer after hop `j` reads the hops up to `j` through the padding after hop `j`
-only.** -/
-theorem layerFn_congr (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom)
-    (ks ks' : ℕ → ByteArray) (tag tag' enc enc' : ℕ → ByteArray → ByteArray)
-    (ge ge' : ℕ → ByteArray) (j : ℕ) (hj : j + 1 < (RSOR.path nike q.fwd [.recipient
-        q.receiver]).size)
-    (h : ∀ i, j < i → ks i = ks' i ∧ tag i = tag' i ∧ ge i = ge' i ∧ enc i = enc' i)
-    (hp : KEMSphinx.padAt geom ks j = KEMSphinx.padAt geom ks' j) :
-    layerFn nike macS kdfS streamS geom q r ks tag enc ge (j + 1)
-      = layerFn nike macS kdfS streamS geom q r ks' tag' enc' ge' (j + 1) := by
-  have hL := layerHdr_congr_tail geom ks ks' tag tag' ge ge' (RSOR.filler nike geom (RSOR.path nike
-      q.fwd [.recipient q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver]) j hj
-    (fun i hi => ⟨(h i hi).1, (h i hi).2.1, (h i hi).2.2.1⟩) hp
-  have hE := encTrace_congr enc enc' (RSOR.path nike q.fwd [.recipient q.receiver]).size
-      ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ (RSOR.body nike macS kdfS streamS
-      geom q r)) ((RSOR.path nike q.fwd [.recipient q.receiver]).size - (j + 1)) (by omega)
-    fun i hi _ => (h i (by omega)).2.2.2
-  have hS := nikeHdrTrace_isSome geom ks ks' tag tag' ge ge' (RSOR.filler nike geom (RSOR.path nike
-      q.fwd [.recipient q.receiver]) r.1) (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient
-      q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver]) (RSOR.path nike q.fwd
-      [.recipient q.receiver]).size
-  unfold layerFn
-  rw [hL, hE]
-  cases h1 : nikeHdrTrace geom ks tag ge (RSOR.filler nike geom (RSOR.path nike q.fwd [.recipient
-      q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver]) (RSOR.path nike q.fwd
-      [.recipient q.receiver]).size with
-  | none =>
-    rw [h1] at hS
-    cases h2 : nikeHdrTrace geom ks' tag' ge' (RSOR.filler nike geom (RSOR.path nike q.fwd
-        [.recipient q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver]) (RSOR.path
-        nike q.fwd [.recipient q.receiver]).size with
-    | none => rfl
-    | some s' => rw [h2] at hS; cases hS
-  | some s =>
-    rw [h1] at hS
-    cases h2 : nikeHdrTrace geom ks' tag' ge' (RSOR.filler nike geom (RSOR.path nike q.fwd
-        [.recipient q.receiver]) r.1) (RSOR.path nike q.fwd [.recipient q.receiver]) (RSOR.path
-        nike q.fwd [.recipient q.receiver]).size with
-    | none => rw [h2] at hS; cases hS
-    | some s' => rfl
-
 omit nike cipher macS kdfS streamS in
 /-- A header's bytes followed by any bytes split into the two. -/
 theorem split_append_bytes (L X : ByteArray) (hL : L.size = geom.headerLength) :
@@ -1321,16 +1280,6 @@ theorem blindElem_size (a : ByteArray) (K : Array HopKeys) (i : ℕ) :
   | succ i ih =>
     show (nikeBlind nike (blindElem nike a K i) _).size = _
     rw [size_nikeBlind, ih]
-
-private theorem last_arith (N j p R : ℕ) (hR : R = p * N) (hj : j + 1 ≤ N) :
-    R + p - (j + 1) * p = p + (N - (j + 1)) * p := by
-  obtain ⟨k, rfl⟩ : ∃ k, N = j + 1 + k := ⟨N - (j + 1), by omega⟩
-  have e : j + 1 + k - (j + 1) = k := by omega
-  subst hR
-  rw [e]
-  have h1 : p * (j + 1 + k) = j * p + p + k * p := by ring
-  have h2 : (j + 1) * p = j * p + p := by ring
-  omega
 
 end Shift
 

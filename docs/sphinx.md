@@ -172,8 +172,9 @@ The zero-tag event is bounded: a draw of world 1 is not good with at most the ch
 layer cannot be built, plus one in the number of payload tags (`prEvent_not_finalGood_le`,
 from `prEvent_zeroPrefix`).
 
-Not proved yet: those two; all three for NIKE Sphinx. SLU← and STI↔ for KEM Sphinx are below,
-each with its own explicit events.
+Not proved yet: those two. For NIKE Sphinx, TLU→ is proved down to its terms
+(`NIKESphinx.forwardUnlinkable_le`, see the NIKE Sphinx section); SLU← and STI↔ are not. SLU←
+and STI↔ for KEM Sphinx are below, each with its own explicit events.
 
 ### SLU← (in progress)
 
@@ -469,7 +470,11 @@ wrap-resistance (§4.3, `WrapResistance.lean`) and indistinguishability (§4.4,
 `Indistinguishability.lean`), each with the limits its file states.
 
 From the RSOR paper (Scherer, Weis, Strufe), RSOR-Correctness is proved: NIKE Sphinx is a value
-of `Protocols.RSOR.Scheme` (`NIKESphinxRSOR.scheme`). TLU→, SLU← and STI↔ are not proved yet.
+of `Protocols.RSOR.Scheme` (`NIKESphinxRSOR.scheme`). TLU→ is proved down to its terms
+(`forwardUnlinkable_le` in `NIKESphinxTLUFinal.lean`): advantage terms on the primitives and on
+two games stated for the NIKE (`keyGame`, `blindGame`), and explicit events on the draws. The
+events are not bounded, and neither game is reduced to a standard assumption. SLU← and STI↔
+are not proved yet.
 
 The KEM Sphinx proofs do not carry over. There each hop has its own seed, and a proof replaces
 one hop's keys in a game around that hop's ciphertext. NIKE Sphinx has one secret per path,
@@ -671,10 +676,10 @@ steps (`NIKESphinxTLUNext.lean`):
    a hop reads that hop's header key and IV through its keystream only and does not read its
    payload key (`onionOfKeys_succ`, `nextOfStream`, `nextOfStream_congr`).
 
-**The last comparison of the two worlds is not proved.** After the steps above, world 0 is
-played from a uniform keystream for the relay's hop of the original onion, and world 1 from
-one for the replacement and one for the original's next layer. The plan, and what is proved
-for it:
+**The last comparison of the two worlds.** After the steps above, world 0 is played from a
+uniform keystream for the relay's hop of the original onion, and world 1 from one for the
+replacement and one for the original's next layer. It is proved; its parts, in the order they
+were built:
 
 1. A peeled header in closed form, for any keys. Proved (`NIKESphinxPeel.lean`): one peel
    undoes the sender's step for that hop (`peelHdr_step`, from `cascading_xor_step`); the
@@ -847,13 +852,27 @@ for it:
      the draws alone; none is bounded. This uses `abs_prEvent_bind_sub_le_bad_dist` of
      `KEMSphinxSLURelay.lean`, which `NIKESphinxTLUFn.lean` imports; the lemma is general and
      would sit better in a shared file.
-     Not yet done: the bound over the game's draws, that `world0E` with `exitE` is world 0,
-     and the assembled bound for TLU→.
-     The last comparison is in eight files, so that no file is large to build:
+     Over the game's draws, world 1 is `world0B` off the draws that are not good (`fin_le`),
+     and `world0E` with `exitE` is world 0 after its chain (`world0E_evalDistEq`).
+     **TLU→ for NIKE Sphinx** is `forwardUnlinkable_le` (`NIKESphinxTLUFinal.lean`). Its
+     terms: the chain of each world down to its draws (`forward_world0_le`,
+     `forward_world1_le`); for the original's hidden layer in world 1, the draws that are not
+     good (`nextBad`), `keyAdvantage` of `nextAdv`, the chance that the adversary sends a
+     packet carrying the original's element (once when the relay starts to refuse it, once
+     when it answers it again), the keystream generator's advantage for `nextStreamAdv`, and
+     the draws on which the bytes under the relay's tag do not carry the replacement's
+     element (`finCar`); for the last comparison, the draws of world 1 that are not good
+     (`finAll`), the draws of world 0 whose path does not build (`fwdBad0`), and
+     `blindAdvantage` of `blindAdv`. What it does not say: none of the events is bounded
+     (several should be zero whenever the onions build, and the zero-tag event should be
+     `2^(-8·payloadTagLength)`); `keyGame` and `blindGame` are games on our NIKE and KDF,
+     not reduced to Gap Diffie-Hellman; the statement was not compared line by line with the
+     paper's Theorem for TLU→.
+     The last comparison is in nine files, so that no file is large to build:
      `NIKESphinxTLUFn.lean` (the hops' functions, no games), `NIKESphinxTLURelay.lean`,
      `NIKESphinxTLUBlind.lean`, `NIKESphinxTLUWorld1.lean`, `NIKESphinxTLUJoin.lean`,
-     `NIKESphinxTLUDraws.lean`, `NIKESphinxTLUExit.lean` and
-     `NIKESphinxTLUExitDraws.lean`.
+     `NIKESphinxTLUDraws.lean`, `NIKESphinxTLUExit.lean`, `NIKESphinxTLUExitDraws.lean` and
+     `NIKESphinxTLUFinal.lean`.
      Not yet proved: that `world0E` is world 0 for the right `E`; the
      two games over their draws (that the joined keystream and the relabelled draws are
      uniform, by `evalDistEq_headTail`); `finNoReply`; the end of the path.
@@ -873,12 +892,12 @@ for it:
      hop's blinding factor uniform. In a prime-order group with uniform scalars the advantage
      is zero; that is not proved for any NIKE here. No axiom is added. The tail of a path
      with replaced keys is `tailOf` (`tailOf_hopKeysWith`), and the next layer is a function
-     of the later hops and the padding (`layerFn`, `layerFn_congr`,
-     `nextOfStream_eq_layerFn`). The onion shown, at any layer up to the relay's, is the same
-     function (`onionOfStream_eq_layerFn`, from `peels_enc`, `hdr_size`,
-     `encTrace_size_const`). The reduction to the game is not written.
+     of the later hops and the padding (`layerFn`, `nextOfStream_eq_layerFn`). The onion
+     shown, at any layer up to the relay's, is the same function (`onionOfStream_eq_layerFn`,
+     from `peels_enc`, `hdr_size`, `encTrace_size_const`). The reduction to the game is
+     `blindAdv` (below).
    - World 1 after its hidden-layer steps is the same game under a relabelling of its draws.
-   How the pieces fit, for whoever continues this:
+   How the pieces fit:
    - Both final games are `strRunP`: world 0 on the original with the empty patch, world 1 on
      the replacement with `patchWith` around the original's next layer. World 1 reaches that
      form by undoing the refusal of step 3 after step 4 (`Relay.gameHand_sub_le` again, one
