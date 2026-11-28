@@ -133,6 +133,7 @@ import Cryptlib.Protocols.Sphinx.NIKESphinxTLUWorld1
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLUJoin
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLUDraws
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLUExit
+import Cryptlib.Protocols.Sphinx.NIKESphinxTLUExitDraws
 import Cryptlib.Protocols.Sphinx.RelayMac
 import Cryptlib.Protocols.RSORPayload
 import Cryptlib.Protocols.Sphinx.Schemes

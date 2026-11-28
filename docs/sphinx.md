@@ -840,12 +840,18 @@ for it:
      path builds, both bodies have a payload's length, the original's two paths build, and
      that block does not begin with the zero tag. Two headers that end at the same hop have
      the same bytes under that hop's tag when the head of the one's keystream is the other's
-     shifted by the difference of what the two mask (`hdrMsg_shift_last`). Not yet done at the
-     end of the path: applying that shift to the draws, and the two games over their draws.
-     The last comparison is in seven files, so that no file is large to build:
+     shifted by the difference of what the two mask (`hdrMsg_shift_last`). So at the end of
+     the path, world 1 on a draw is world 0 on the replacement's keystream with its head
+     shifted by a constant (`finOwnRun_eq_fwd0_last`, `finShift`, in
+     `NIKESphinxTLUExitDraws.lean`), whatever blinding seed world 0's relay has, when both
+     paths build, both bodies have a payload's length, the original's two paths build, and the
+     block a changed payload is decrypted to does not begin with the zero tag. Not yet done:
+     the two games over their draws at the end of the path, and the assembled bound.
+     The last comparison is in eight files, so that no file is large to build:
      `NIKESphinxTLUFn.lean` (the hops' functions, no games), `NIKESphinxTLURelay.lean`,
      `NIKESphinxTLUBlind.lean`, `NIKESphinxTLUWorld1.lean`, `NIKESphinxTLUJoin.lean`,
-     `NIKESphinxTLUDraws.lean` and `NIKESphinxTLUExit.lean`.
+     `NIKESphinxTLUDraws.lean`, `NIKESphinxTLUExit.lean` and
+     `NIKESphinxTLUExitDraws.lean`.
      Not yet proved: that `world0E` is world 0 for the right `E`; the
      two games over their draws (that the joined keystream and the relabelled draws are
      uniform, by `evalDistEq_headTail`); `finNoReply`; the end of the path.
