@@ -728,8 +728,8 @@ for it:
      Applied to world 0: a world after its payload step is a game against `hdrRelay`
      (`strRunP_eq`, `strGuess`), and world 0 on a draw, before the end of the path, is the
      game against `fwdRelay` on the next layer's header of the adversary's onion
-     (`hdrRelay_onion`, `strRun_fwd0_eq`), when the header builds up to the relay's layer and
-     the bytes under its tag have their length. The end of the path is not treated.
+     (`hdrRelay_onion`, `strRun_fwd0_eq`), when the header builds up to the relay's layer.
+     The end of the path is not treated.
      World 1's last game refuses the original's element at the relay. The relay may answer
      it again (`prgIdeal_nextStreamAdv_sub_le`, from `Relay.gameHand_sub_le`): the game is then
      the replacement's run against the relay patched with the original's next layer
@@ -748,7 +748,11 @@ for it:
      keystream, tagging function, encryption and element (`fnRun`, `strRun_fwd0_fn`), so that
      the hops after the relay can be given apart from those in front. A path's functions
      spliced with those of its own later hops are the path's (`spliceAt`, `spliceAt_drop`,
-     `spliceAt_blindElem`, `blindElem_drop`). The reduction itself is not written.
+     `spliceAt_blindElem`, `blindElem_drop`), and so that game reads the hops after the relay
+     through `tailOf` (`fnRun_tailOf`). The one condition left on a draw of world 0 is that
+     the path's header builds through the relay's layer (`pathBuilds`), which depends on the
+     path alone (`nikeHdrTrace_isSome`); the length of the bytes under the relay's tag follows
+     from it (`hdrMsg_size`). The reduction itself is not written.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).
