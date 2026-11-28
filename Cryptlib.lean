@@ -143,6 +143,7 @@ import Cryptlib.Protocols.Sphinx.NIKESphinxSLUStream1
 import Cryptlib.Protocols.Sphinx.NIKESphinxSLUChain
 import Cryptlib.Protocols.Sphinx.NIKESphinxSLUSplit
 import Cryptlib.Protocols.Sphinx.NIKESphinxSLURelay
+import Cryptlib.Protocols.Sphinx.NIKESphinxSLUFn
 import Cryptlib.Protocols.Sphinx.RelayMac
 import Cryptlib.Protocols.RSORPayload
 import Cryptlib.Protocols.Sphinx.Schemes

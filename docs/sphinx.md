@@ -1004,8 +1004,16 @@ header builds up to the relay's layer. World 1 there is a game against the same 
 (`backRun1_fwd`, from `hdrRelay_sentOn`): under the same header the relay forwards the onion
 sent on, whatever block it is given, and the sender refuses the header that goes with it; this
 holds when the reply's header builds. So before the end of the backward path the two worlds
-differ in what the relay forwards and what the sender refuses. Comparing those, the last
-backward hop and the exit are not done. On the backward path the comparison is to follow TLU→'s last
+differ in what the relay forwards and what the sender refuses. World 0 there is also written
+as a run on the hops' functions (`backFnRun0`, `backRun0_fn` in `NIKESphinxSLUFn.lean`), the
+form in which the hops after the relay can be replaced. Comparing the two worlds, the last
+backward hop and the exit are not done.
+
+The comparison needs one more game on the NIKE, not written yet. The reply's next layer starts
+from the sender's element blinded by the relay's uniform factor; the paper's world 1 sends a
+fresh onion over the rest of the path, which starts from a fresh element. That these look the
+same needs group structure the NIKE type does not state, so it is to be a game with an
+advantage term and no axiom, as `blindGame` is for TLU→. On the backward path the comparison is to follow TLU→'s last
 one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
