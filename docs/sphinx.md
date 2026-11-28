@@ -1046,7 +1046,9 @@ relay's tag agree are the same up to the relay, whatever lies after it (`layerHd
 These are not yet used on the draws. The comparison of the two worlds through one game
 has begun in `NIKESphinxSLUJoin.lean` with one fact: the forwarding relay answers its header
 once, so the block it hands on in world 0 is one uniform block (`fwdRelay_fresh`,
-`backFnRun0_fresh`). On the backward path the comparison is to follow TLU→'s last
+`backFnRun0_fresh`). It also has the lemma that joins two headers at the relay: they are the
+same up to the relay when what the relay's keystream head masks comes out the same
+(`layerHdr_join`). The split of the draws and the comparison itself are not done. On the backward path the comparison is to follow TLU→'s last
 one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts

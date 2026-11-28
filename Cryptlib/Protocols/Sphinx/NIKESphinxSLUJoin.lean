@@ -61,6 +61,55 @@ theorem fwdRelay_fresh (procO : Role → Onion geom → Option (Protocols.RSOR.S
   simp only [map_bind] at h
   exact h
 
+omit cipher macS kdfS streamS hvalid hmactag h16 in
+/-- **Two headers are the same up to hop `j` when what hop `j`'s keystream head masks comes out
+the same**, the hops in front are the same, and hop `j` has the same element and tagging
+function. What lies after hop `j` may differ. -/
+theorem layerHdr_join (ks ks' : ℕ → ByteArray) (tag tag' : ℕ → ByteArray → ByteArray)
+    (ge ge' : ℕ → ByteArray) (filler filler' : ByteArray) (path path' : Array PathHop)
+    (j : ℕ) (hj : j + 1 < path.size) (hj' : j + 1 < path'.size)
+    (h : ∀ i < j, ks i = ks' i ∧ tag i = tag' i ∧ ge i = ge' i
+      ∧ path[i]!.commands = path'[i]!.commands ∧ path[i + 1]!.id = path'[i + 1]!.id)
+    (hgj : ge j = ge' j) (htj : tag j = tag' j)
+    (hX : xorBytes (hopContent nike geom ks tag ge filler path j)
+        ((ks j).extract 0 ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+            geom.perHopRoutingInfoLength))
+      = xorBytes (hopContent nike geom ks' tag' ge' filler' path' j)
+        ((ks' j).extract 0 ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (j + 1) *
+            geom.perHopRoutingInfoLength)))
+    (hT : (nikeHdrTrace geom ks tag ge filler path (path.size - j)).isSome)
+    (hT' : (nikeHdrTrace geom ks' tag' ge' filler' path' (path'.size - j)).isSome)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
+    (hrouting : geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hn : path.size ≤ geom.nrHops) (hn' : path'.size ≤ geom.nrHops)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hfill' : filler'.size = (geom.nrHops - path'.size) * geom.perHopRoutingInfoLength)
+    (hks : ∀ k, (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength)) (hks' : ∀ k,
+        (ks' k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (htag : ∀ i m, (tag i m).size = macLength) (htag' : ∀ i m, (tag' i m).size = macLength)
+    (hcmd : path[j]!.commands = []) (hcmd' : path'[j]!.commands = [])
+    (hgej : (ge j).size = nike.publicKeySize)
+    (hge1 : (ge (j + 1)).size = nike.publicKeySize)
+    (hge1' : (ge' (j + 1)).size = nike.publicKeySize) :
+    nikeHdrTrace geom ks tag ge filler path path.size
+        = nikeHdrTrace geom ks' tag' ge' filler' path' path'.size
+      ∧ ∀ i, i ≤ j → layerHdr geom ks tag ge filler path i
+        = layerHdr geom ks' tag' ge' filler' path' i := by
+  have hpad : (if j > 0 then KEMSphinx.padAt geom ks (j - 1) else ByteArray.empty)
+      = (if j > 0 then KEMSphinx.padAt geom ks' (j - 1) else ByteArray.empty) := by
+    by_cases h0 : j > 0
+    · rw [ite_eq_left h0, ite_eq_left h0]
+      exact KEMSphinx.padAt_congr geom ks ks' (j - 1) fun m hm => (h m (by omega)).1
+    · rw [ite_eq_right h0, ite_eq_right h0]
+  have hM : hdrMsg geom ks tag ge filler path j = hdrMsg geom ks' tag' ge' filler' path' j := by
+    rw [(hdrMsg_content nike geom ks tag ge filler path j hj hnnh hle hrouting hn hfill hks htag
+        hcmd hT hge1).1,
+      (hdrMsg_content nike geom ks' tag' ge' filler' path' j hj' hnnh hle hrouting hn' hfill'
+        hks' htag' hcmd' hT' hge1').1, hX, hpad, hgj]
+  exact layerHdr_front nike geom ks ks' tag tag' ge ge' filler filler' path path' j (by omega)
+    (by omega) h hM htj hT hT' hnnh hle hn hn' hfill hfill' htag htag' hgej (hgj ▸ hgej)
+
 variable (W : Protocols.RSOR.BackSwap (sphinx nike cipher macS kdfS streamS geom hvalid hmactag
   h16))
 
