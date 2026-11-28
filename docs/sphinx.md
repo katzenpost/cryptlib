@@ -1013,11 +1013,17 @@ lies after the relay only, the element that reaches the next hop and those hops'
 (`backPost0`, `backPost0_real` in `NIKESphinxSLUTail.lean`, from `tail_splice`). Comparing the two worlds, the last
 backward hop and the exit are not done.
 
-The comparison needs one more game on the NIKE, not written yet. The reply's next layer starts
-from the sender's element blinded by the relay's uniform factor; the paper's world 1 sends a
-fresh onion over the rest of the path, which starts from a fresh element. That these look the
-same needs group structure the NIKE type does not state, so it is to be a game with an
-advantage term and no axiom, as `blindGame` is for TLU→. On the backward path the comparison is to follow TLU→'s last
+The comparison uses one more game on the NIKE (`dropGame`, `NIKESphinxSLUDrop.lean`). The
+reply's next layer starts from the sender's element blinded by the hops up to the relay, the
+relay's factor uniform; the paper's world 1 sends a fresh onion over the rest of the path,
+which starts from a fresh element. That these look the same needs group structure the NIKE
+type does not state, so it is a game with an advantage term and no axiom, as `blindGame` is
+for TLU→: what lies after a hop comes from the adversary's secret through the hop's uniform
+blinding factor (`tailOf`), or from a fresh secret over the rest of the path (`freshTail`).
+World 0 gives an adversary on it (`backDropAdv`), and replacing what lies after the relay by a
+fresh start costs that adversary's advantage and the chance that the reply's header does not
+build from the relay's layer on (`back0E_sub_back0F_le`, the event `backBadT`, not bounded).
+The world it leaves (`back0F`) is not yet shown to be world 1 with the reply-like onion. On the backward path the comparison is to follow TLU→'s last
 one, with its blinding game; at the exit it is a step on one encryption, as for KEM Sphinx. SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
