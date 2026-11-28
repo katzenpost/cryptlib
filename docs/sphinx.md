@@ -963,7 +963,9 @@ key, and the world shown is some `viewE` at the encryption of some `plain` under
 the game after the MAC step differs from its payload game with an ideal cipher by a one-query
 advantage against the cipher and the chance of a draw that is not good. The TLU→ proof has its
 own copy of this step, typed to its game (`forward_only_sub_ideal_le`); it could be restated
-through the general one. SLU← does not use the general step yet. Nothing
+through the general one. SLU← does not use the general step yet; two lemmas it needs on the
+backward path are in place (`peels_append_hdr`, `hdrPeels_congr`: a peeled packet's header
+does not read the payload or the hops' payload keys). Nothing
 else of SLU← is proved for NIKE Sphinx; the plan is the
 order of the KEM proof above, with the blinding game once more for the hops after the relay on
 the backward path. STI↔ is not started for NIKE Sphinx.

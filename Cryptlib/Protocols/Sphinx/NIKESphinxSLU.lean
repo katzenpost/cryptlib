@@ -356,6 +356,67 @@ theorem nikePktFn_restKeys (a : ByteArray) (c : nike.PrivateKey) (hops : Array P
   rw [hks, henc, hge, htag, nikePktFn_tagAt geom _ _ _ _ _ _ _ j hjp
     (fun m => Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector km) m))]
 
+/-! ## A peeled packet's header -/
+
+/-- **Peeling a header and a payload peels the header, whatever the payload**: after `i`
+relays the packet is the header peeled `i` times and a payload of the same length. -/
+theorem peels_append_hdr (ks : List HopKeys) (H P : ByteArray) (hH : H.size = 2 +
+    nike.publicKeySize + geom.routingInfoLength + macLength)
+    (hP : 0 < P.size) (i : ℕ) (hik : i ≤ ks.length) :
+    ∃ P' : ByteArray, P'.size = P.size
+      ∧ peels nike cipher streamS geom ks i (H ++ P) = hdrPeels nike streamS geom ks i H ++ P'
+      ∧ (hdrPeels nike streamS geom ks i H).size = 2 + nike.publicKeySize + geom.routingInfoLength
+          + macLength := by
+  induction i with
+  | zero => exact ⟨P, rfl, rfl, hH⟩
+  | succ i ih =>
+    obtain ⟨P', hP', ihp, ihs⟩ := ih (by omega)
+    have hi : i < ks.length := hik
+    have hs : peels nike cipher streamS geom ks (i + 1) (H ++ P)
+        = RSOR.peel nike cipher streamS geom ks[i] (peels nike cipher streamS geom ks i
+          (H ++ P)) := by
+      unfold peels
+      rw [List.take_succ_eq_append_getElem hi, List.foldl_append]
+      rfl
+    have hh : hdrPeels nike streamS geom ks (i + 1) H
+        = peelHdr nike geom (streamS.keystream (Util.Bytes.ofVector ks[i].headerEncryption)
+            (Util.Bytes.ofVector ks[i].headerEncryptionIV) (geom.routingInfoLength +
+            geom.perHopRoutingInfoLength)) ks[i].blindingFactor
+          (hdrPeels nike streamS geom ks i H) := by
+      unfold hdrPeels
+      rw [List.take_succ_eq_append_getElem hi, List.foldl_append]
+      rfl
+    refine ⟨cipher.decrypt ks[i].payloadEncryption.toArray
+      (Util.Bytes.ofVector ks[i].headerEncryptionIV) P', ?_, ?_, ?_⟩
+    · rw [cipher.decrypt_size, hP']
+    · rw [hs, ihp, peel_append nike cipher streamS geom _ _ _ ihs (by omega), hh]
+    · rw [hh]
+      exact peelHdr_size nike geom _ _ _ ihs
+
+/-- **Peeling a header reads the hops' header keys, IVs and blinding factors only.** -/
+theorem hdrPeels_congr (ks ks' : List HopKeys) (i : ℕ) (H : ByteArray)
+    (h : ∀ m : ℕ, (ks[m]?).map (fun k : HopKeys => (k.headerEncryption, k.headerEncryptionIV,
+        k.blindingFactor))
+      = (ks'[m]?).map (fun k : HopKeys => (k.headerEncryption, k.headerEncryptionIV,
+          k.blindingFactor))) :
+    hdrPeels nike streamS geom ks i H = hdrPeels nike streamS geom ks' i H := by
+  have hmap : ks.map (fun k : HopKeys => (k.headerEncryption, k.headerEncryptionIV,
+      k.blindingFactor))
+      = ks'.map (fun k : HopKeys => (k.headerEncryption, k.headerEncryptionIV, k.blindingFactor)) :=
+    List.ext_getElem? fun m => by rw [List.getElem?_map, List.getElem?_map, h m]
+  have e : ∀ l : List HopKeys,
+      l.foldl (fun h (k : HopKeys) => peelHdr nike geom (streamS.keystream (Util.Bytes.ofVector
+          k.headerEncryption) (Util.Bytes.ofVector k.headerEncryptionIV) (geom.routingInfoLength +
+          geom.perHopRoutingInfoLength)) k.blindingFactor h) H
+        = (l.map (fun k : HopKeys => (k.headerEncryption, k.headerEncryptionIV,
+            k.blindingFactor))).foldl
+          (fun h (t : Vector UInt8 32 × Vector UInt8 16 × ByteArray) => peelHdr nike geom
+            (streamS.keystream (Util.Bytes.ofVector t.1) (Util.Bytes.ofVector t.2.1)
+              (geom.routingInfoLength + geom.perHopRoutingInfoLength)) t.2.2 h) H :=
+    fun l => by rw [List.foldl_map]
+  unfold hdrPeels
+  rw [e, e, List.map_take, List.map_take, hmap]
+
 /-! ## The reply's packet, with one hop's tag given -/
 
 /-- The bytes of the reply's packet over the backward path that hop `j`'s tag covers. -/
