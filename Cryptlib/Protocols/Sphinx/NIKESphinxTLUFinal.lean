@@ -2265,6 +2265,68 @@ theorem blindGame_false_sub_le (names : Role → Name) (A : (Protocols.RSOR.forw
           (U, km, D, u, v) tail hj
       simp only [hx, hj, ↓reduceIte]
 
+/-- **World 0 with the hops after the relay from an independent secret**: the draws of
+`world0E`, then a secret `d0`, and the blinding adversary's game on the tail of the path from
+`d0`. -/
+def world0B (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S := 𝒮)).Adversary) (E :
+    KEMSphinx.Keystream geom × Vector UInt8 32 × (PropDraw nike cipher macS kdfS streamS geom
+    hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names (fwd0 nike cipher
+    macS kdfS streamS geom hvalid hmactag h16 names).Oth A) × (Vector UInt8 (geom.payloadTagLength
+    + geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength +
+    geom.forwardPayloadLength)) → ProbComp Bool) : ProbComp Bool :=
+  forwardDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0 nike cipher macS
+      kdfS streamS geom hvalid hmactag h16 names) A >>= fun D => do
+    let U ← $ᵗ (KEMSphinx.Keystream geom)
+    let km ← $ᵗ (Vector UInt8 32)
+    let u ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    let v ← $ᵗ (Vector UInt8 (geom.payloadTagLength + geom.forwardPayloadLength))
+    let seed ← $ᵗ (Vector UInt8 32)
+    let d0 ← $ᵗ (Vector UInt8 nike.privateKeySize)
+    blindPost nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E (U, km, D, u, v)
+      (tailOf nike kdfS ((nike.decodePrivateKey d0).getD default) (RSOR.path nike D.c.req.fwd
+          [.recipient D.c.req.receiver]) D.c.pos seed)
+
+/-- The blinding game's side with an independent secret is `world0B`. -/
+theorem blindGame_true_evalDistEq (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S
+    := 𝒮)).Adversary) (E : KEMSphinx.Keystream geom × Vector UInt8 32 × (PropDraw nike cipher macS
+    kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+    (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth A) × (Vector UInt8
+    (geom.payloadTagLength + geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength +
+    geom.forwardPayloadLength)) → ProbComp Bool) :
+    blindGame kdfS (blindAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E) true
+        =ᵈ world0B nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E := by
+  unfold blindGame blindAdv world0B
+  simp only [bind_assoc, pure_bind, ↓reduceIte]
+  refine EvalDistEq.trans (EvalDistEq.bind_right _ fun U =>
+    OracleComp.EvalDistEq.bind_bind_swap _ _ _) ?_
+  exact OracleComp.EvalDistEq.bind_bind_swap _ _ _
+
+/-- **Replacing the secret behind the hops after the relay** costs the blinding advantage of
+`blindAdv` and the chance of a draw on which the path's header does not build. -/
+theorem world0E_sub_world0B_le (names : Role → Name) (A : (Protocols.RSOR.forwardUnlinkable (S :=
+    𝒮)).Adversary) (E : KEMSphinx.Keystream geom × Vector UInt8 32 × (PropDraw nike cipher macS
+    kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.forwardUnlinkable (S := 𝒮)) .relay names
+    (fwd0 nike cipher macS kdfS streamS geom hvalid hmactag h16 names).Oth A) × (Vector UInt8
+    (geom.payloadTagLength + geom.forwardPayloadLength)) × (Vector UInt8 (geom.payloadTagLength +
+    geom.forwardPayloadLength)) → ProbComp Bool) :
+    |(Pr{let b ← (world0E nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E)}[b =
+        true]).toReal
+      - (Pr{let b ← (world0B nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E)}[b =
+          true]).toReal|
+    ≤ (Pr{let D ← (forwardDraw nike cipher macS kdfS streamS geom hvalid hmactag h16 names (fwd0
+        nike cipher macS kdfS streamS geom hvalid hmactag h16 names) A)}[fwdBad0 nike cipher macS
+        kdfS streamS geom hvalid hmactag h16 D]).toReal
+      + blindAdvantage kdfS (blindAdv nike cipher macS kdfS streamS geom hvalid hmactag h16 names A
+          E) := by
+  have h1 := blindGame_false_sub_le nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E
+  rw [abs_sub_comm] at h1
+  rw [← (blindGame_true_evalDistEq nike cipher macS kdfS streamS geom hvalid hmactag h16 names A E)
+      (fun b => b = true)]
+  refine (abs_sub_le _ (Pr{let b ← (blindGame kdfS (blindAdv nike cipher macS kdfS streamS geom
+      hvalid hmactag h16 names A E)
+    false)}[b = true]).toReal _).trans (add_le_add h1 (le_of_eq ?_))
+  exact abs_sub_comm _ _
+
 end Final
 
 end Cryptlib.Protocols.Sphinx.NIKESphinx

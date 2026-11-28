@@ -761,8 +761,11 @@ for it:
      blinding seed, `hopKeysWith_front`). So the blinding game's side with the sender's own
      secret is world 0 over its draws with `E` at the end of the path (`world0E`), off the
      draws on which the relay is before the end of a path whose header does not build
-     (`blindGame_false_sub_le`, the event `fwdBad0`). Not yet proved: that `world0E` is world
-     0 for the right `E`, and the side with an independent secret against world 1.
+     (`blindGame_false_sub_le`, the event `fwdBad0`). The side with an independent secret is
+     the same game with the hops after the relay from that secret (`world0B`,
+     `blindGame_true_evalDistEq`), so the two differ by `blindAdvantage` of `blindAdv` and the
+     chance of `fwdBad0` (`world0E_sub_world0B_le`). Not yet proved: that `world0E` is world 0
+     for the right `E`, and `world0B` against world 1.
      Proved for it: two packets that agree at the relay's hop and on the hops in front are
      the same packet, though their paths differ after the relay (`nikePktFn_front`,
      `nikeHdrTrace_front`, `encTrace_front`).
