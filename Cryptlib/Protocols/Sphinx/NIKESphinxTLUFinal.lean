@@ -1037,6 +1037,176 @@ theorem padAt_combStream (ks ksI : ℕ → ByteArray) (hks : ∀ k, (ks k).size 
 
 end Comb
 
+/-! ## The relay as the last hop -/
+
+section Last
+
+variable (nike : NIKE) (macS : MAC) (streamS : StreamCipher) (geom : Geometry)
+
+set_option maxHeartbeats 2000000 in
+/-- **What a relay does as the last hop, for a header and a payload.** With its tag right and
+commands that name no next hop and no reply block, it hands over what follows the zero tag of
+the decrypted payload, when that tag is zero, and refuses the packet otherwise. -/
+theorem procD_last_append {L : ℕ} (t : HopKeys)
+    (D : HopKeys → Vector UInt8 L → Vector UInt8 L) (H P : ByteArray)
+    (cmds : List RoutingCommand) (hH : H.size = (2 + nike.publicKeySize + geom.routingInfoLength) +
+        macLength) (hP : P.size = L) (hL : 0 < L)
+    (hLt : geom.payloadTagLength ≤ L) (hver : H.extract 0 2 = v0AD)
+    (hmac : Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector t.headerMAC) (H.extract 0 (2 +
+        nike.publicKeySize + geom.routingInfoLength)))
+      = H.extract (2 + nike.publicKeySize + geom.routingInfoLength) ((2 + nike.publicKeySize +
+          geom.routingInfoLength) + macLength))
+    (hparse : parseAll ((xorBytes (H.extract (2 + nike.publicKeySize) (2 + nike.publicKeySize +
+        geom.routingInfoLength)
+        ++ ⟨Array.replicate geom.perHopRoutingInfoLength 0⟩)
+        (streamS.keystream (Util.Bytes.ofVector t.headerEncryption)
+          (Util.Bytes.ofVector t.headerEncryptionIV)
+          (geom.routingInfoLength + geom.perHopRoutingInfoLength))).extract 0
+        geom.perHopRoutingInfoLength) = .ok cmds)
+    (hnext : cmds.findSome? RSOR.nextHop = none)
+    (hsr : (cmds.any fun c => match c with
+      | RoutingCommand.surbReply _ => true
+      | _ => false) = false) :
+    procD nike macS streamS geom (fun _ => .ok t) D (H ++ P)
+      = if ((Util.Bytes.ofVector (D t (Util.Bytes.toVecN L P))).extract 0
+          geom.payloadTagLength).data.all (· == 0) = true then
+          some (some ((Util.Bytes.ofVector (D t (Util.Bytes.toVecN L P))).extract
+              geom.payloadTagLength L),
+            Primitives.Hash.Sha512.sha512_256 (H.extract 2 (2 + nike.publicKeySize)), cmds, none)
+        else none := by
+  have hz : (⟨Array.replicate geom.perHopRoutingInfoLength (0 : UInt8)⟩ : ByteArray).size
+      = geom.perHopRoutingInfoLength := Array.size_replicate
+  have ex : ∀ a b, b ≤ H.size → (H ++ P).extract a b = H.extract a b := fun a b hb =>
+    Util.Bytes.extract_append_of_le H P hb
+  have e3 : (H ++ P).extract ((2 + nike.publicKeySize + geom.routingInfoLength) + macLength) (H ++
+      P).size = P := by
+    rw [ByteArray.size_append, ← hH]
+    exact Util.Bytes.extract_append_right H P
+  have e4 : (H.extract (2 + nike.publicKeySize) (2 + nike.publicKeySize + geom.routingInfoLength)
+      ++ (⟨Array.replicate geom.perHopRoutingInfoLength 0⟩ : ByteArray)).size
+      = geom.routingInfoLength + geom.perHopRoutingInfoLength := by
+    rw [ByteArray.size_append, ByteArray.size_extract, hz]
+    omega
+  have hPpos : P.size > 0 := by omega
+  have hbd : blockDec D t P = (Util.Bytes.ofVector (D t (Util.Bytes.toVecN L P))) := by
+    unfold blockDec
+    exact ite_eq_left hP
+  have E := procD_last nike macS streamS geom t D (H ++ P) cmds
+    (by rw [ByteArray.size_append]; omega) (by rw [ex _ _ (by omega), hver])
+    (by rw [ex _ _ (by omega), ex _ _ (by omega), hmac])
+    (by rw [ex _ _ (by omega), e4]; exact hparse) hnext hsr
+    (by rw [e3, ite_eq_left hPpos, hbd, Util.Bytes.size_ofVector]; omega)
+  rw [E, e3, ite_eq_left hPpos, hbd, Util.Bytes.size_ofVector, ex _ _ (by omega)]
+
+omit nike macS streamS in
+/-- The last hop's fragment parses to its commands. -/
+theorem nikeFragment_parse_last (path : Array PathHop) (mac : ByteArray) (i : ℕ)
+    (hi : i + 1 = path.size) (hnull : ∀ c ∈ path[i]!.commands, c ≠ .null) (F : ByteArray)
+    (h : nikeFragment geom path mac i = .ok F) : parseAll F = .ok path[i]!.commands := by
+  unfold nikeFragment at h
+  have hb : (i == path.size - 1) = true := beq_iff_eq.mpr (by omega)
+  rw [hb] at h
+  simp only [↓reduceIte] at h
+  obtain ⟨f0, hf0, h⟩ := Cryptlib.Protocols.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+  obtain rfl := Except.ok.inj h
+  exact Cryptlib.Protocols.Sphinx.Common.parseAll_commandsToBytes geom.perHopRoutingInfoLength
+      geom.perHopRoutingInfoLength _ hnull
+    _ hf0 (Cryptlib.Protocols.Sphinx.Common.commandsToBytes_size_le hf0)
+
+set_option maxHeartbeats 2000000 in
+/-- **A relay given the last layer of a path** hands over what follows the zero tag of the
+decrypted payload, with the hop's commands, when that tag is zero, and refuses otherwise. The
+relay's keys give the layer's keystream and tag. -/
+theorem procD_lastHdr {L : ℕ} (t : HopKeys) (D : HopKeys → Vector UInt8 L → Vector UInt8 L)
+    (ks : ℕ → ByteArray) (tag : ℕ → ByteArray → ByteArray) (ge : ℕ → ByteArray)
+    (filler : ByteArray) (path : Array PathHop) (i : ℕ) (P : ByteArray)
+    (hi : i + 1 = path.size) (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hle : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
+    (hrouting : geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops)
+    (hn : path.size ≤ geom.nrHops)
+    (hfill : filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength)
+    (hks : ∀ k, (ks k).size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    (htag : ∀ m x, (tag m x).size = macLength) (hge : (ge i).size = nike.publicKeySize)
+    (F : ByteArray) (hF : nikeFragment geom path ByteArray.empty i = .ok F)
+    (hnull : ∀ c ∈ path[i]!.commands, c ≠ .null)
+    (hnext : path[i]!.commands.findSome? RSOR.nextHop = none)
+    (hsr : (path[i]!.commands.any fun c => match c with
+      | RoutingCommand.surbReply _ => true
+      | _ => false) = false)
+    (hksi : streamS.keystream (Util.Bytes.ofVector t.headerEncryption)
+      (Util.Bytes.ofVector t.headerEncryptionIV)
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength) = ks i)
+    (htagi : Util.Bytes.ofVector (macS.mac (Util.Bytes.ofVector t.headerMAC) (hdrMsg geom ks tag ge
+        filler path i)) = tag i (hdrMsg geom ks tag ge filler path i))
+    (hP : P.size = L) (hL : 0 < L) (hLt : geom.payloadTagLength ≤ L) :
+    procD nike macS streamS geom (fun _ => .ok t) D (layerHdr geom ks tag ge filler path i ++ P)
+      = if ((Util.Bytes.ofVector (D t (Util.Bytes.toVecN L P))).extract 0
+          geom.payloadTagLength).data.all (· == 0) = true then
+          some (some ((Util.Bytes.ofVector (D t (Util.Bytes.toVecN L P))).extract
+              geom.payloadTagLength L),
+            Primitives.Hash.Sha512.sha512_256 (ge i), path[i]!.commands, none)
+        else none := by
+  obtain ⟨k, hk⟩ : ∃ k, geom.nrHops = i + 1 + k := ⟨geom.nrHops - (i + 1), by omega⟩
+  have e1 : geom.routingInfoLength = (i + 1) * geom.perHopRoutingInfoLength
+      + k * geom.perHopRoutingInfoLength := by
+    rw [hrouting, hk, Nat.mul_comm, Nat.add_mul]
+  have e2 : (i + 1) * geom.perHopRoutingInfoLength
+      = i * geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength := Nat.succ_mul _ _
+  have hjp : (i + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength := by omega
+  have hFs : F.size = geom.perHopRoutingInfoLength :=
+    nikeFragment_size geom path _ i hnnh hle F hF
+  have hB : (if geom.nrHops > path.size then filler else ByteArray.empty).size = k *
+      geom.perHopRoutingInfoLength := by
+    by_cases hg : geom.nrHops > path.size
+    · rw [ite_eq_left hg, hfill, show geom.nrHops - path.size = k by omega]
+    · rw [ite_eq_right hg, show k = 0 by omega, Nat.zero_mul]
+      rfl
+  have hPd : (if i > 0 then KEMSphinx.padAt geom ks (i - 1) else ByteArray.empty).size = i *
+      geom.perHopRoutingInfoLength := padFront_size geom ks hks i hjp
+  have hFB : F.size + (if geom.nrHops > path.size then filler else ByteArray.empty).size =
+      ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+      geom.perHopRoutingInfoLength) := by
+    rw [hFs, hB]
+    omega
+  have hR : ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+      geom.perHopRoutingInfoLength) + (if i > 0 then KEMSphinx.padAt geom ks (i - 1) else
+      ByteArray.empty).size = geom.routingInfoLength := by
+    rw [hPd]
+    omega
+  have hU : (ks i).size = ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+      geom.perHopRoutingInfoLength) + (if i > 0 then KEMSphinx.padAt geom ks (i - 1) else
+      ByteArray.empty).size + geom.perHopRoutingInfoLength := by
+    rw [hks, hPd]
+    omega
+  have hm0 : (hdrMsg geom ks tag ge filler path i) = v0AD ++ ge i ++ (xorBytes (F ++ (if
+      geom.nrHops > path.size then filler else ByteArray.empty)) ((ks i).extract 0
+      ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+      geom.perHopRoutingInfoLength)) ++ (if i > 0 then KEMSphinx.padAt geom ks (i - 1) else
+      ByteArray.empty)) :=
+    (hdrMsg_last geom ks tag ge filler path i hi F hF).trans ByteArray.append_assoc
+  obtain ⟨b0, b1, -, -, b4, b5, b6⟩ := peel_bytes nike geom (ks i) (ge i) F (if geom.nrHops >
+      path.size then filler else ByteArray.empty) (if i > 0 then KEMSphinx.padAt geom ks (i - 1)
+      else ByteArray.empty) (tag i (hdrMsg geom ks tag ge filler path i))
+    ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) *
+        geom.perHopRoutingInfoLength) hU hFB hR hge
+  have hL0 : layerHdr geom ks tag ge filler path i
+      = v0AD ++ ge i ++ (xorBytes (F ++ (if geom.nrHops > path.size then filler else
+          ByteArray.empty)) ((ks i).extract 0 ((geom.routingInfoLength +
+          geom.perHopRoutingInfoLength) - (i + 1) * geom.perHopRoutingInfoLength)) ++ (if i > 0
+          then KEMSphinx.padAt geom ks (i - 1) else ByteArray.empty)) ++ tag i (hdrMsg geom ks tag
+          ge filler path i) :=
+    congrArg (· ++ tag i (hdrMsg geom ks tag ge filler path i)) hm0
+  rw [htag i (hdrMsg geom ks tag ge filler path i)] at b5
+  rw [hL0, procD_last_append nike macS streamS geom t D _ P path[i]!.commands
+      (by rw [ByteArray.size_append, b6, htag]) hP hL hLt b0
+      (by rw [b4, b5, ← hm0]; exact htagi)
+      (by
+        rw [hksi, peel_cmdBuf nike geom (ks i) (ge i) F (if geom.nrHops > path.size then filler
+            else ByteArray.empty) _ _ _ hU hFB hFs hR hge]
+        exact nikeFragment_parse_last geom path _ i hi hnull F hF) hnext hsr, b1]
+
+end Last
+
 /-! ## The original and the replacement at the relay's hop -/
 
 section Shift

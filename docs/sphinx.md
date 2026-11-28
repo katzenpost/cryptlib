@@ -810,6 +810,10 @@ for it:
      (`fin_fixed_fwd_le`); and `world0B` is the game's draws followed by `world0P`
      (`world0B_evalDistEq`). Before the end of the path the comparison is complete up to
      `finNoReply` and the events.
+     For the end of the path, and for `finNoReply`: a relay given the last layer of a path
+     hands over what follows the zero tag of the decrypted payload, with the hop's commands,
+     when that tag is zero, and refuses otherwise (`procD_lastHdr`, from `procD_last` through
+     `procD_last_append` and `nikeFragment_parse_last`). Not yet applied to the games.
      Not yet proved: that `world0E` is world 0 for the right `E`; the
      two games over their draws (that the joined keystream and the relabelled draws are
      uniform, by `evalDistEq_headTail`); `finNoReply`; the end of the path.
