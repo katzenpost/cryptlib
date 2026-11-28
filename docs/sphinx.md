@@ -970,7 +970,10 @@ on that keystream, it is the real experiment of the keystream generator. The rel
 that is general too (`propStrRun`, `propPayIdealRun_eq_strRun`): the relay answers one header
 and reads its keystream as given, so the game is such a `run` as soon as its tagged bytes,
 the sender's block and the world shown are given from the keystream. Those three are left to
-the property; SLU← does not have them yet. SLU← uses the general step for world 0
+the property; SLU← does not have them yet. Towards them, `NIKESphinxSLUStream.lean` writes the reply
+packet's headers in closed form: the header of each layer is `layerHdr` on the hops'
+keystreams, tags and group elements (`backHdrFn`, `backLayerOfTag_fst`), and the reply
+block's header is the first of them (`backHdrBytes`, `backHdrOfTag_eq`). SLU← uses the general step for world 0
 (`backward0_macOnly_sub_pay_le`): at the exit the relay's payload key encrypts one block, the
 onion's block at the relay (`backViewTAt_exit`); on the backward path the sender encrypts
 nothing under it and the world does not read it (`backViewTAt_back`), so the block is one the
