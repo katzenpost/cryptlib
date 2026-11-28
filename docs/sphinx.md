@@ -713,18 +713,16 @@ for it:
      `hdrMsg_content`), which read the hops in front through the padding only
      (`hopContent_congr`, `padAt_congr_rest`); shifting the head of the keystream by the
      difference of the two contents gives the replacement's bytes (`xorBytes_shift`, shared
-     with the KEM proof). For a request and its replacement cut after the relay, with the
-     hops' keys of the two games, the bytes under the relay's tag agree under the shift
-     (`onionMsgStream_shift`), and then the onions shown are one packet
-     (`onionOfStream_shift`: the header's state at the relay is read off those bytes,
-     `nikeHdrTrace_at_msg`). Not yet applied to the games' runs.
+     with the KEM proof). Two packets are then one when the bytes under the relay's tag
+     agree and the hops in front are the same (`nikePktFn_shift`: the header's state at the
+     relay is read off those bytes, `nikeHdrTrace_at_msg`).
      The two relays are brought to one form, `fwdRelay`: under one header the relay forwards a
      given header with the block it decrypts, and does not reply. World 0's relay, which
      answers that header from its tag and keystream (`hdrRelay`), is that form on the next
      layer's header (`hdrRelay_eq_fwdRelay`). World 1's relay with its patch, the random
      payload drawn first, is that form on the original's next layer
      (`hdrRelay_patchDrawn_eq`), when it would not reply to the replacement. These
-     use `split_append` of `KEMSphinxTLUFinal.lean`, which this file now imports.
+     use `split_append` of `KEMSphinxTLUFinal.lean`, which `NIKESphinxTLUFn.lean` imports.
      Applied to world 0: a world after its payload step is a game against `hdrRelay`
      (`strRunP_eq`, `strGuess`), and world 0 on a draw, before the end of the path, is the
      game against `fwdRelay` on the next layer's header of the adversary's onion
@@ -799,8 +797,9 @@ for it:
      (`finOwnRun_blindPost`). Over the draws after the game's own (`finRest`, `finDraw_bind`),
      for fixed game draws before the end of the path, world 1 differs from that game by at
      most the chance of a draw that is not good (`finRest_sub_le`, `finGood`). This uses
-     `abs_prEvent_bind_sub_le_bad_dist` of `KEMSphinxSLURelay.lean`, which this file now
-     imports; the lemma is general and would sit better in a shared file. The joined keystream
+     `abs_prEvent_bind_sub_le_bad_dist` of `KEMSphinxSLURelay.lean`, which
+     `NIKESphinxTLUFn.lean` imports; the lemma is general and would sit better in a shared
+     file. The joined keystream
      is uniform: it reads the head of the replacement's keystream under a mask of the tail of
      the other, and that tail under a fixed mask (`finComb_eq`, `padMask_congr`), so by
      `evalDistEq_headTail` the blinding adversary's game on it is its game on one uniform
@@ -813,7 +812,16 @@ for it:
      For the end of the path, and for `finNoReply`: a relay given the last layer of a path
      hands over what follows the zero tag of the decrypted payload, with the hop's commands,
      when that tag is zero, and refuses otherwise (`procD_lastHdr`, from `procD_last` through
-     `procD_last_append` and `nikeFragment_parse_last`). Not yet applied to the games.
+     `procD_last_append` and `nikeFragment_parse_last`; in the games' form,
+     `procD_join_last`). With it, world 1's relay does not reply to the replacement before the
+     end of the path (`finNoReply_of`): the replacement has no reply block (`body_get_zero`),
+     and a changed payload is decrypted to a uniform block, which the relay refuses unless it
+     begins with the zero tag. That last case is a carried event. Not yet applied to the end
+     of the path.
+     The last comparison is in seven files, so that no file is large to build:
+     `NIKESphinxTLUFn.lean` (the hops' functions, no games), `NIKESphinxTLURelay.lean`,
+     `NIKESphinxTLUBlind.lean`, `NIKESphinxTLUWorld1.lean`, `NIKESphinxTLUJoin.lean`,
+     `NIKESphinxTLUDraws.lean` and `NIKESphinxTLUFinal.lean`.
      Not yet proved: that `world0E` is world 0 for the right `E`; the
      two games over their draws (that the joined keystream and the relabelled draws are
      uniform, by `evalDistEq_headTail`); `finNoReply`; the end of the path.
@@ -827,7 +835,7 @@ for it:
      sender's secret and the replaced blinding factor. World 1 draws an independent secret
      for the original. That the two are distributed alike is a property of the NIKE
      (blinding by a uniform factor). It is stated as a game, `blindGame`, with advantage
-     `blindAdvantage` (`NIKESphinxTLUFinal.lean`): the adversary names a secret, a path and
+     `blindAdvantage` (`NIKESphinxTLUFn.lean`): the adversary names a secret, a path and
      a hop, and is given what lies after the hop (`tailOf`: the element that reaches the next
      hop and the later hops' keys), from its secret or from an independent uniform one, the
      hop's blinding factor uniform. In a prime-order group with uniform scalars the advantage

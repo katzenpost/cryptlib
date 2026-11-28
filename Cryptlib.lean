@@ -126,6 +126,12 @@ import Cryptlib.Protocols.Sphinx.NIKESphinxProp
 import Cryptlib.Protocols.Sphinx.NIKESphinxPeel
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLU
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLUNext
+import Cryptlib.Protocols.Sphinx.NIKESphinxTLUFn
+import Cryptlib.Protocols.Sphinx.NIKESphinxTLURelay
+import Cryptlib.Protocols.Sphinx.NIKESphinxTLUBlind
+import Cryptlib.Protocols.Sphinx.NIKESphinxTLUWorld1
+import Cryptlib.Protocols.Sphinx.NIKESphinxTLUJoin
+import Cryptlib.Protocols.Sphinx.NIKESphinxTLUDraws
 import Cryptlib.Protocols.Sphinx.NIKESphinxTLUFinal
 import Cryptlib.Protocols.Sphinx.RelayMac
 import Cryptlib.Protocols.RSORPayload
