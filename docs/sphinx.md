@@ -794,21 +794,15 @@ for it:
      world 1. Its conditions: both paths build and both bodies have a payload's length. So
      world 1 on such a draw, when the relay would not reply to the replacement, is the
      blinding adversary's game on the joined keystream with `g` drawn
-     (`finOwnRun_blindPost`). Over the draws after the game's own (`finRest`, `finDraw_bind`),
-     for fixed game draws before the end of the path, world 1 differs from that game by at
-     most the chance of a draw that is not good (`finRest_sub_le`, `finGood`). This uses
-     `abs_prEvent_bind_sub_le_bad_dist` of `KEMSphinxSLURelay.lean`, which
-     `NIKESphinxTLUFn.lean` imports; the lemma is general and would sit better in a shared
-     file. The joined keystream
+     (`finOwnRun_blindPost`). The draws after the game's own are `finRest`
+     (`finDraw_bind`). The joined keystream
      is uniform: it reads the head of the replacement's keystream under a mask of the tail of
      the other, and that tail under a fixed mask (`finComb_eq`, `padMask_congr`), so by
      `evalDistEq_headTail` the blinding adversary's game on it is its game on one uniform
-     keystream, and the draws it does not read drop out (`finRest_comb_evalDistEq`). So for
-     fixed game draws before the end of the path, world 1 is world 0 with the hops after the
-     relay from an independent secret (`world0P`), off the draws that are not good
-     (`fin_fixed_fwd_le`); and `world0B` is the game's draws followed by `world0P`
-     (`world0B_evalDistEq`). Before the end of the path the comparison is complete up to
-     `finNoReply` and the events.
+     keystream, and the draws it does not read drop out (`finRest_comb_evalDistEq`). That
+     game is world 0 with the hops after the relay from an independent secret, for fixed game
+     draws (`world0P`), and `world0B` is the game's draws followed by `world0P`
+     (`world0B_evalDistEq`).
      For the end of the path, and for `finNoReply`: a relay given the last layer of a path
      hands over what follows the zero tag of the decrypted payload, with the hop's commands,
      when that tag is zero, and refuses otherwise (`procD_lastHdr`, from `procD_last` through
@@ -816,11 +810,7 @@ for it:
      `procD_join_last`). With it, world 1's relay does not reply to the replacement before the
      end of the path (`finNoReply_of`): the replacement has no reply block (`body_get_zero`),
      and a changed payload is decrypted to a uniform block, which the relay refuses unless it
-     begins with the zero tag. That last case is a carried event. Not yet applied to the end
-     of the path.
-     So the draws that are not good for `fin_fixed_fwd_le` are events on the draws alone
-     (`finGood`): a path does not build, a body does not have a payload's length, or that
-     block begins with the zero tag.
+     begins with the zero tag. That last case is a carried event.
      At the end of the path the two relays have one closed form too
      (`NIKESphinxTLUExit.lean`): `lastRelay` answers one header as the last hop for a
      recipient, handing over what follows the zero tag of the decrypted block (`lastRes`). A
@@ -845,8 +835,20 @@ for it:
      shifted by a constant (`finOwnRun_eq_fwd0_last`, `finShift`, in
      `NIKESphinxTLUExitDraws.lean`), whatever blinding seed world 0's relay has, when both
      paths build, both bodies have a payload's length, the original's two paths build, and the
-     block a changed payload is decrypted to does not begin with the zero tag. Not yet done:
-     the two games over their draws at the end of the path, and the assembled bound.
+     block a changed payload is decrypted to does not begin with the zero tag. The shifted
+     keystream is uniform (`finRest_last_evalDistEq`, by `evalDistEq_headPad`), and at the end
+     of the path `world0P` is world 0's run on its own draws, the blinding adversary's game
+     there being that run with a blinding seed of its own (`exitE`,
+     `world0P_exit_evalDistEq`).
+     **For fixed game draws, world 1 is `world0P`, before the end of the path and at it**
+     (`fin_fixed_le`), off the draws that are not good (`finAll`): a path does not build, a
+     body does not have a payload's length, the original's two paths do not build, or the
+     block a changed payload is decrypted to begins with the zero tag. These are events on
+     the draws alone; none is bounded. This uses `abs_prEvent_bind_sub_le_bad_dist` of
+     `KEMSphinxSLURelay.lean`, which `NIKESphinxTLUFn.lean` imports; the lemma is general and
+     would sit better in a shared file.
+     Not yet done: the bound over the game's draws, that `world0E` with `exitE` is world 0,
+     and the assembled bound for TLU→.
      The last comparison is in eight files, so that no file is large to build:
      `NIKESphinxTLUFn.lean` (the hops' functions, no games), `NIKESphinxTLURelay.lean`,
      `NIKESphinxTLUBlind.lean`, `NIKESphinxTLUWorld1.lean`, `NIKESphinxTLUJoin.lean`,
