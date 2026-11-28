@@ -122,6 +122,92 @@ theorem evalDistEq_relayKey {δ : Type} (pos : ℕ) (K : RSOR.Randomness nike ge
       (EvalDistEq.bind_right _ fun r =>
         OracleComp.EvalDistEq.bind_const ($ᵗ (Vector UInt8 nike.privateKeySize)) (K r))
 
+/-! ## The first layer, from the backward path's hop keys -/
+
+/-- The sender's payload with `hdr` as the header of the reply's first layer. -/
+def bodyH (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (hb : 0 < q.back.hops.length)
+    (hdr : ByteArray) : ByteArray :=
+  ⟨#[if q.back.hops.isEmpty then 0 else 1, 0]⟩
+    ++ (hdr ++ Util.Bytes.ofVector (q.back.hops[0]'hb).name ++ Util.Bytes.ofVector r.2.2.1)
+    ++ Util.Bytes.ofVector q.msg
+
+include hvalid hmactag in
+/-- The sender's payload, with the header of the reply's first layer written out. -/
+theorem body_eq (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (payload x0 :
+    ByteArray)
+    (hb : 0 < q.back.hops.length)
+    (hx0 : RSOR.layer nike cipher macS kdfS streamS geom (RSOR.path nike q.back [.surbReply
+        r.2.2.2]) r.2.1 payload 0 = .ok x0) :
+    RSOR.body nike macS kdfS streamS geom q r
+      = bodyH nike geom q r hb (x0.extract 0 geom.headerLength) := by
+  unfold RSOR.body bodyH
+  rw [surb_fst nike cipher macS kdfS streamS geom hvalid hmactag q r payload x0 hb hx0]
+
+/-- The header of the reply's first layer, from the backward path's first group element and
+its hops' keys. -/
+def backHdrOfKeys (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (a : ByteArray) (ks
+    : List HopKeys) :
+    ByteArray :=
+  match nikePktFn geom (keysKs geom streamS ks.toArray) (keysTag macS ks.toArray)
+      (keysEnc cipher ks.toArray) (blindElem nike a ks.toArray)
+      (RSOR.filler nike geom (RSOR.path nike q.back [.surbReply r.2.2.2]) r.2.1) (RSOR.path nike
+          q.back [.surbReply r.2.2.2]) (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray)
+          with
+  | some pkt => pkt.extract 0 geom.headerLength
+  | none => ByteArray.empty
+
+/-- The first layer of `q`'s onion, from the backward path's first group element and its
+hops' keys: they enter through the reply block in the sender's payload. -/
+def backOnionOfKeys (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom) (hb : 0 <
+    q.back.hops.length)
+    (a : ByteArray) (ks : List HopKeys) : Onion geom :=
+  match RSOR.layer nike cipher macS kdfS streamS geom (RSOR.path nike q.fwd [.recipient
+      q.receiver]) r.1
+      (bodyH nike geom q r hb (backHdrOfKeys nike cipher macS streamS geom q r a ks)) 0 with
+  | .ok pkt => split geom pkt
+  | .error _ => default
+
+include hvalid hmactag in
+/-- **On the sender's own keys it is the sender's onion**, when the reply's first layer
+builds. -/
+theorem backOnionOfKeys_real (q : RSOR.Request nike geom) (r : RSOR.Randomness nike geom)
+    (d : Vector UInt8 nike.privateKeySize) (k : ℕ) (hb : 0 < q.back.hops.length)
+    (x0 : ByteArray)
+    (hx0 : RSOR.layer nike cipher macS kdfS streamS geom (RSOR.path nike q.back [.surbReply
+        r.2.2.2]) (relayKey (k + 1) r d).2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ :
+        ByteArray) 0
+      = .ok x0) :
+    backOnionOfKeys nike cipher macS kdfS streamS geom q r hb
+        (groupElem nike ((nike.decodePrivateKey d).getD default) (RSOR.hopKeys nike kdfS
+            ((nike.decodePrivateKey d).getD default) (RSOR.path nike q.back [.surbReply r.2.2.2])
+            (RSOR.path nike q.back [.surbReply r.2.2.2]).size).toArray 0) (RSOR.hopKeys nike kdfS
+            ((nike.decodePrivateKey d).getD default) (RSOR.path nike q.back [.surbReply r.2.2.2])
+            (RSOR.path nike q.back [.surbReply r.2.2.2]).size)
+      = RSOR.form nike cipher macS kdfS streamS geom q (relayKey (k + 1) r d) q.first := by
+  have hp := layer_zero_pktFn nike cipher macS kdfS streamS geom (RSOR.path nike q.back [.surbReply
+      r.2.2.2]) (relayKey (k + 1) r d).2.1
+    (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) x0 hx0 (RSOR.path_keys nike q.back
+        [.surbReply r.2.2.2])
+  have hbody := body_eq nike cipher macS kdfS streamS geom hvalid hmactag q (relayKey (k + 1) r d)
+    (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) x0 hb hx0
+  unfold backOnionOfKeys backHdrOfKeys
+  rw [show blindElem nike (groupElem nike ((nike.decodePrivateKey d).getD default) (RSOR.hopKeys
+      nike kdfS ((nike.decodePrivateKey d).getD default) (RSOR.path nike q.back [.surbReply
+      r.2.2.2]) (RSOR.path nike q.back [.surbReply r.2.2.2]).size).toArray 0) (RSOR.hopKeys nike
+      kdfS ((nike.decodePrivateKey d).getD default) (RSOR.path nike q.back [.surbReply r.2.2.2])
+      (RSOR.path nike q.back [.surbReply r.2.2.2]).size).toArray
+      = groupElem nike ((nike.decodePrivateKey d).getD default) (RSOR.hopKeys nike kdfS
+          ((nike.decodePrivateKey d).getD default) (RSOR.path nike q.back [.surbReply r.2.2.2])
+          (RSOR.path nike q.back [.surbReply r.2.2.2]).size).toArray from
+    funext fun i => (groupElem_eq_blindElem nike _ _ i).symm]
+  dsimp only [relayKey, RSOR.clientKey, RSOR.filler] at hp ⊢
+  rw [hp]
+  dsimp only
+  unfold RSOR.form
+  dsimp only [relayKey] at hbody ⊢
+  rw [hbody]
+  rfl
+
 variable (W : Protocols.RSOR.BackSwap (sphinx nike cipher macS kdfS streamS geom hvalid hmactag
     h16))
 

@@ -927,7 +927,11 @@ any onion sent on in world 1 (`backwardWith`, in `KEMSphinxSLU.lean`) are stated
 and will be used as they are. Both worlds are written as their draws with the secret of the
 honest relay's path drawn apart (`backward_play_false_evalDistEq`,
 `backward_play_true_evalDistEq`, `relayKey`): the forward path's secret when the relay is the
-exit relay, the backward path's otherwise. Nothing else of SLU← is proved for NIKE Sphinx; the plan is the
+exit relay, the backward path's otherwise. The adversary's first layer is written as a
+function of the backward path's first group element and hop keys, which enter through the
+reply block in the sender's payload (`backOnionOfKeys`, `backHdrOfKeys`, `bodyH`, `body_eq`); on
+the sender's own keys it is the sender's onion when the reply's first layer builds
+(`backOnionOfKeys_real`). Nothing else of SLU← is proved for NIKE Sphinx; the plan is the
 order of the KEM proof above, with the blinding game once more for the hops after the relay on
 the backward path. STI↔ is not started for NIKE Sphinx.
 
