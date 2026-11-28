@@ -1,0 +1,594 @@
+/-
+SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
+SPDX-License-Identifier: AGPL-3.0-only
+-/
+
+import Cryptlib.Protocols.Sphinx.KEMSphinxSLURelay
+import Cryptlib.Protocols.Sphinx.KEMSphinxBuilds
+
+namespace Cryptlib.Protocols.Sphinx.KEMSphinx
+
+open OracleComp OracleSpec ENNReal
+open Cryptlib.Protocols.Sphinx.Constants
+open Cryptlib.Protocols.Sphinx.Geometry (Geometry)
+open Cryptlib.Protocols.Sphinx.Commands
+open Cryptlib.Protocols.Sphinx.Types
+open Cryptlib.Protocols.Sphinx.Common
+open Cryptlib.Protocols.Sphinx.NIKESphinx (HopKeys deriveHopKeys)
+open Cryptlib.Primitives.WideBlockCipher (WideBlockCipher)
+open Cryptlib.Primitives.MAC (MAC)
+open Cryptlib.Primitives.KDF (KDF)
+open Cryptlib.Primitives.StreamCipher (StreamCipher)
+open Cryptlib.Primitives.KEM.KEM (KEM)
+open Cryptlib.Protocols.Sphinx.KEMSphinx.RSOR (Key keygen)
+open Cryptlib.Util.Bytes (ofVector)
+
+/-! # The events of SLU← on the KEM alone
+
+The bound of SLU← for KEM Sphinx carries events on draws: a key pair that is not one, a seed
+that is not reliable, a layer that cannot be built. A relay's key pair is a key pair, and with
+reliable seeds every layer of a route builds (`KEMSphinxBuilds`). So each event has a seed that
+is not reliable. A forward layer needs the sender's payload to have the forward payload's
+length, which a geometry with room for a reply block gives (`hsurb`). -/
+
+section PastBuilds
+
+variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+  (geom : Geometry)
+
+set_option maxHeartbeats 2000000 in
+/-- **A layer past a keyed hop builds**, for any draw and any keystream of the keyed hop: it is
+a packet over the rest of the route, whose filler has the right length. -/
+theorem layerPast_builds (hvalid : geom.ValidForKEM kem)
+    (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem)) (last : List RoutingCommand)
+    (hlast : (∃ r, last = [.recipient r]) ∨ ∃ id, last = [.surbReply id])
+    (d : RSOR.Draw geom) (payload : ByteArray) (hp : payload.size = geom.forwardPayloadLength)
+    (j : ℕ) (U : ByteArray) (hU : U.size = (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+        (i : ℕ) (hi : i < R.hops.length) :
+    ∃ fwd, layerPast kem cipher macS kdfS streamS geom (RSOR.path kem R last) d payload j U i = .ok
+        fwd := by
+  obtain ⟨-, -, hrouting, -⟩ := id hvalid
+  have hn := RSOR.path_size kem R last
+  have hle := R.length_le
+  have hnd : (RSOR.path kem (R.drop i) last).size = R.hops.length - i := by
+    rw [RSOR.path_size]
+    simp [Protocols.RSOR.Route.drop]
+  have hb : (geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength
+      ≤ geom.routingInfoLength := by
+    rw [hrouting, Nat.mul_comm geom.perHopRoutingInfoLength]
+    exact Nat.mul_le_mul_right _ (Nat.sub_le _ _)
+  have hfs := fillerAtF_size kem kdfS streamS geom hrouting (RSOR.path kem R last)
+    (d.1.toArray.extract 0 (RSOR.path kem R last).size)
+    ((ofVector d.2).extract 0
+      ((geom.nrHops - (RSOR.path kem R last).size) * geom.perHopRoutingInfoLength)) j U
+    (by omega) (by rw [ByteArray.size_extract, Util.Bytes.size_ofVector]; omega) hU i (by omega)
+  unfold layerPast
+  dsimp only
+  rw [path_extract_drop kem geom R last i (le_of_lt hi)]
+  refine newKEMPacket_builds kem geom cipher macS kdfS streamS _ _ _ payload (by omega) (by omega)
+      (by simp; omega)
+    (fun _ => by
+      rw [hfs, hnd, hn]
+      exact congrArg (· * geom.perHopRoutingInfoLength) (by omega))
+    hp (fun k hk => ?_)
+    (fun k hk ke mac => by
+      have := path_fragment_builds kem hvalid (R.drop i) last hlast ke mac k
+        (by simpa [Protocols.RSOR.Route.drop] using (hnd ▸ hk))
+      exact this)
+  rw [RSOR.path_getElem! kem (R.drop i) last k (by simpa [Protocols.RSOR.Route.drop] using
+    (hnd ▸ hk))]
+  exact kemEncap_key kem _ _
+
+omit cipher in
+/-- **On the backward path the draws are always good**: the reply's next layer and the first
+layer over the rest of the path build. -/
+theorem backGoodF_holds (hvalid : geom.ValidForKEM kem)
+    (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem)) (j : ℕ)
+    (hj : j + 1 < R.hops.length)
+    (p : RSOR.Randomness geom × RSOR.Randomness geom × Keystream geom) :
+    backGoodF kem macS kdfS streamS geom R j p :=
+  ⟨layerPast_builds kem default macS kdfS streamS geom hvalid R [.surbReply p.1.2.2.2]
+      (Or.inr ⟨_, rfl⟩) p.1.2.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray)
+          Array.size_replicate j (ofVector p.2.2)
+      (Util.Bytes.size_ofVector _) (j + 1) hj,
+    layer_zero_builds kem default macS kdfS streamS hvalid (R.drop (j + 1))
+      (by simp [Protocols.RSOR.Route.drop]; omega) [.surbReply p.2.1.2.2.2] (Or.inr ⟨_, rfl⟩)
+      p.2.1.1 (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) Array.size_replicate⟩
+
+end PastBuilds
+
+section BackEvents
+
+open Cryptlib.Protocols.RSOR (Role)
+
+variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+  (geom : Geometry)
+  (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+  (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+
+local notation "𝒮" => sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16
+
+variable (W : Protocols.RSOR.BackSwap (sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16))
+
+set_option maxHeartbeats 2000000 in
+/-- **A bad draw of world 0 has a seed that is not reliable**: the honest relay's. Its key pair
+is a key pair, and the first layer that carries its ciphertext builds. -/
+theorem prEvent_backBad0_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith W).Adversary) :
+    Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardWith W) .relay names _ (backDraw0 geom) A)}[backBad0 kem cipher
+        macS kdfS streamS geom hvalid hmactag h16 W d]
+      ≤ Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.backwardWith W) .relay names _ (backDraw0 geom) A)}[¬ kem.Reliable
+          (kem.stateFromSeed d.s)] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood => hbad ?_
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold propDrawOf at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, k₁, -, k₂, -, out, -, o, -, s, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  refine ⟨hk, hgood, ?_⟩
+  have hlt : d.c.pos.val < d.c.req.back.hops.length := d.c.pos.isLt
+  cases hp : d.c.pos.val with
+  | zero =>
+    exact layer_zero_builds kem cipher macS kdfS streamS hvalid d.c.req.fwd
+      (List.length_pos_iff.2 d.c.req.fwd_ne) _ (Or.inl ⟨_, rfl⟩) _ _
+      ((RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm)
+  | succ k =>
+    exact layer_zero_builds kem cipher macS kdfS streamS hvalid d.c.req.back (Nat.zero_lt_of_lt
+        hlt) _
+      (Or.inr ⟨_, rfl⟩) _ _ Array.size_replicate
+
+set_option maxHeartbeats 2000000 in
+/-- **A bad draw of world 1 has a seed that is not reliable**: the honest relay's, or one on
+the path its layer is on. With reliable seeds every layer of that path builds. -/
+theorem prEvent_backBad1_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith W).Adversary) :
+    Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.backwardWith W) .relay names _
+        (swapDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 W) A)}[backBad1 kem cipher
+            macS kdfS streamS geom hvalid hmactag h16 W d]
+      ≤ Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.backwardWith W) .relay names _
+        (swapDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 W) A)}[¬ (kem.Reliable
+            (kem.stateFromSeed d.s)
+        ∧ match d.c.pos.val with
+          | 0 => ∀ i, i < d.c.req.fwd.hops.length → kem.Reliable (kem.stateFromSeed
+              (setSeed geom d.o.1 (d.c.req.fwd.hops.length - 1) d.s).1.1.toArray[i]!)
+          | k + 1 => ∀ i, i < d.c.req.back.hops.length → kem.Reliable (kem.stateFromSeed
+              (setSeedBack geom d.o.1 k d.s).2.1.1.toArray[i]!))] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood => hbad ?_
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold propDrawOf at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, k₁, -, k₂, -, out, -, o, -, s, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  obtain ⟨hr, hm⟩ := hgood
+  refine ⟨hk, hr, ?_⟩
+  have hlt : d.c.pos.val < d.c.req.back.hops.length := d.c.pos.isLt
+  have hf : 0 < d.c.req.fwd.hops.length := List.length_pos_iff.2 d.c.req.fwd_ne
+  revert hm
+  cases hp : d.c.pos.val with
+  | zero =>
+    intro hm
+    have L := layer_builds_of_reliable kem cipher macS kdfS streamS hvalid hmactag h16 d.c.req.fwd
+      [.recipient d.c.req.receiver] (Or.inl ⟨_, rfl⟩)
+      (setSeed geom d.o.1 (d.c.req.fwd.hops.length - 1) d.s).1
+      (RSOR.body kem macS kdfS streamS geom d.c.req
+        (setSeed geom d.o.1 (d.c.req.fwd.hops.length - 1) d.s))
+      ((RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm) hm
+    obtain ⟨pkt, h0⟩ := L 0 hf
+    obtain ⟨pktL, hL⟩ := L (d.c.req.fwd.hops.length - 1) (Nat.sub_one_lt (Nat.ne_of_gt hf))
+    exact ⟨pkt, pktL, h0, hL⟩
+  | succ k =>
+    intro hm
+    have hk1 : k + 1 < d.c.req.back.hops.length := hp ▸ hlt
+    have L := layer_builds_of_reliable kem cipher macS kdfS streamS hvalid hmactag h16 d.c.req.back
+      [.surbReply d.o.1.2.2.2] (Or.inr ⟨_, rfl⟩) (setSeedBack geom d.o.1 k d.s).2.1
+      (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) Array.size_replicate hm
+    obtain ⟨x0, h0⟩ := L 0 (Nat.zero_lt_of_lt hlt)
+    obtain ⟨xk, hxk⟩ := L k (Nat.lt_of_succ_lt hk1)
+    exact ⟨x0, xk, h0, hxk⟩
+
+/-- The seeds that must be reliable for a draw of the relay's keyed games to be good: the
+honest relay's, and those of the hops in front of it on the path its layer is on. -/
+def relaySeedsGood {names : Role → RSOR.Name} {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith
+        W) .relay names pk)
+    (r : RSOR.Randomness geom) (s : Vector UInt8 32) : Prop :=
+  kem.Reliable (kem.stateFromSeed s) ∧
+    match ch.c.pos.val with
+    | 0 => ∀ m, m < ch.c.req.fwd.hops.length - 1 →
+        kem.Reliable (kem.stateFromSeed r.1.1.toArray[m]!)
+    | k + 1 => ∀ m, m < k → kem.Reliable (kem.stateFromSeed r.2.1.1.toArray[m]!)
+
+set_option maxHeartbeats 2000000 in
+/-- With those seeds reliable a draw is good: the first layer that carries the relay's
+ciphertext builds. -/
+theorem backGoodAt_of_reliable
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) {pk : Key kem}
+    (ch : PropCh kem cipher macS kdfS streamS geom hvalid hmactag h16 (Protocols.RSOR.backwardWith
+        W) .relay names pk)
+    (sk : kem.PrivateKey) (r : RSOR.Randomness geom) (s : Vector UInt8 32)
+    (hpk : pk.1 = kem.derivePublicKey sk) (h : relaySeedsGood kem cipher macS kdfS streamS geom
+        hvalid hmactag h16 W ch r s) :
+    backGoodAt kem cipher macS kdfS streamS geom hvalid hmactag h16 W names ch sk r s := by
+  obtain ⟨hr, hm⟩ := h
+  refine ⟨hpk, hr, ?_⟩
+  have hlt : ch.c.pos.val < ch.c.req.back.hops.length := ch.c.pos.isLt
+  revert hm
+  cases hp : ch.c.pos.val with
+  | zero =>
+    intro hm
+    exact ⟨layer_zero_builds kem cipher macS kdfS streamS hvalid ch.c.req.fwd
+      (List.length_pos_iff.2 ch.c.req.fwd_ne) _ (Or.inl ⟨_, rfl⟩) _ _
+      ((RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm), hm⟩
+  | succ k =>
+    intro hm
+    exact ⟨layer_zero_builds kem default macS kdfS streamS hvalid ch.c.req.back
+      (Nat.zero_lt_of_lt hlt) _ (Or.inr ⟨_, rfl⟩) _ _ Array.size_replicate, hm⟩
+
+set_option maxHeartbeats 2000000 in
+/-- **A draw of world 0 that is not good has a seed that is not reliable.** -/
+theorem prEvent_not_backGood0_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith W).Adversary) :
+    Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (backAdv0 kem cipher macS kdfS streamS geom
+        hvalid hmactag h16 W names A))}[¬ backGood0 kem cipher macS kdfS streamS geom hvalid
+        hmactag h16 W d]
+      ≤ Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (backAdv0 kem cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names A))}[¬ relaySeedsGood kem cipher macS kdfS streamS geom
+          hvalid hmactag h16 W (propChOf d)
+        (propOthOf d).1 d.s] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood => hbad ?_
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold keyedDraw at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, cs, -, s, -, o, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  exact backGoodAt_of_reliable kem cipher macS kdfS streamS geom hvalid hmactag h16 W hsurb names
+      (propChOf d) d.k.2 (propOthOf d).1 d.s hk
+    hgood
+
+set_option maxHeartbeats 2000000 in
+/-- **A draw of world 1 that is not good has a seed that is not reliable.** -/
+theorem prEvent_not_backGood1_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith W).Adversary) :
+    Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (backAdv1 kem cipher macS kdfS streamS geom
+        hvalid hmactag h16 W names A))}[¬ backGood1 kem cipher macS kdfS streamS geom hvalid
+        hmactag h16 W d]
+      ≤ Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (backAdv1 kem cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names A))}[¬ relaySeedsGood kem cipher macS kdfS streamS geom
+          hvalid hmactag h16 W (propChOf d)
+        (propOthOf d).1 d.s] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood => hbad ?_
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold keyedDraw at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, cs, -, s, -, o, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  exact backGoodAt_of_reliable kem cipher macS kdfS streamS geom hvalid hmactag h16 W hsurb names
+      (propChOf d) d.k.2 (propOthOf d).1 d.s hk
+    hgood
+
+set_option maxHeartbeats 2000000 in
+/-- **A draw of world 0 that is not good for the payload step has a seed that is not reliable.** -/
+theorem prEvent_not_backGoodP0_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith W).Adversary) :
+    Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (backAdv0 kem cipher macS kdfS streamS geom
+        hvalid hmactag h16 W names A))}[¬ backGoodP0 kem cipher macS kdfS streamS geom hvalid
+        hmactag h16 W d]
+      ≤ Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (backAdv0 kem cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names A))}[¬ relaySeedsGood kem cipher macS kdfS streamS geom
+          hvalid hmactag h16 W (propChOf d)
+        (propOthOf d).1 d.s] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood => hbad ⟨?_, fun hp k => ?_⟩
+  · have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+      unfold keyedDraw at hd
+      simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+      obtain ⟨k, hk, cs, -, s, -, o, -, rfl⟩ := hd
+      exact RSOR.key_of_keygen kem k.1 k.2 hk
+    exact backGoodAt_of_reliable kem cipher macS kdfS streamS geom hvalid hmactag h16 W hsurb names
+        (propChOf d) d.k.2 (propOthOf d).1 d.s hk
+      hgood
+  · have hf : 0 < (propChOf d).c.req.fwd.hops.length :=
+      List.length_pos_iff.2 (propChOf d).c.req.fwd_ne
+    refine (congrArg ByteArray.size (relayBackAt_last kem cipher macS kdfS streamS geom _ _ _ _ _
+      ((Nat.sub_add_cancel hf).trans (RSOR.path_size kem _ _).symm))).trans ?_
+    rw [ByteArray.size_append]
+    exact congrArg₂ (· + ·) Array.size_replicate
+      ((RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm)
+
+set_option maxHeartbeats 2000000 in
+/-- **A draw of world 1 that is not good for the payload step has a seed that is not reliable.** -/
+theorem prEvent_not_backGoodP1_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.backwardWith W).Adversary) :
+    Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (backAdv1 kem cipher macS kdfS streamS geom
+        hvalid hmactag h16 W names A))}[¬ backGoodP1 kem cipher macS kdfS streamS geom hvalid
+        hmactag h16 W d]
+      ≤ Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (backAdv1 kem cipher macS kdfS streamS
+          geom hvalid hmactag h16 W names A))}[¬ relaySeedsGood kem cipher macS kdfS streamS geom
+          hvalid hmactag h16 W (propChOf d)
+        (propOthOf d).1 d.s] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood => hbad ⟨?_, fun hp k => ?_⟩
+  · have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+      unfold keyedDraw at hd
+      simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+      obtain ⟨k, hk, cs, -, s, -, o, -, rfl⟩ := hd
+      exact RSOR.key_of_keygen kem k.1 k.2 hk
+    exact backGoodAt_of_reliable kem cipher macS kdfS streamS geom hvalid hmactag h16 W hsurb names
+        (propChOf d) d.k.2 (propOthOf d).1 d.s hk
+      hgood
+  · have hf : 0 < (propChOf d).c.req.fwd.hops.length :=
+      List.length_pos_iff.2 (propChOf d).c.req.fwd_ne
+    refine (congrArg ByteArray.size (relayBackAt_last kem cipher macS kdfS streamS geom _ _ _ _ _
+      ((Nat.sub_add_cancel hf).trans (RSOR.path_size kem _ _).symm))).trans ?_
+    rw [ByteArray.size_append]
+    exact congrArg₂ (· + ·) Array.size_replicate
+      ((RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm)
+
+end BackEvents
+
+section SwapEvents
+
+open Cryptlib.Protocols.RSOR (Role)
+
+variable (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+  (geom : Geometry)
+  (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+  (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+
+local notation "𝒮" => sphinx kem cipher macS kdfS streamS geom hvalid hmactag h16
+
+set_option maxHeartbeats 2000000 in
+/-- **A bad draw of the world with a fresh onion has a seed that is not reliable**: the
+sender's, or one on the rest of the backward path. -/
+theorem prEvent_swapFreshBad_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)) .sender names _
+        (shortDraw geom) A)}[swapFreshBad kem cipher macS kdfS streamS geom hvalid hmactag h16 d]
+      ≤ Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)) .sender names _
+        (shortDraw geom) A)}[¬ (kem.Reliable (kem.stateFromSeed d.s)
+        ∧ ∀ i, i < (d.c.req.back.drop d.c.pos).hops.length → kem.Reliable (kem.stateFromSeed
+          (setSeed geom d.o.2.2.2 ((d.c.req.back.drop d.c.pos).hops.length - 1)
+            d.s).1.1.toArray[i]!))] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood => hbad ?_
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold propDrawOf at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, k₁, -, k₂, -, out, -, o, -, s, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  have hf : 0 < (d.c.req.back.drop d.c.pos).hops.length :=
+    List.length_pos_iff.2 (d.c.req.back.drop_ne d.c.pos.isLt)
+  have L := layer_builds_of_reliable kem cipher macS kdfS streamS hvalid hmactag h16
+    (Protocols.RSOR.BackwardChallenge.swapReq d.c d.o.2.1 d.o.2.2.1).fwd
+    [.recipient (Protocols.RSOR.BackwardChallenge.swapReq d.c d.o.2.1 d.o.2.2.1).receiver]
+    (Or.inl ⟨_, rfl⟩)
+    (setSeed geom d.o.2.2.2 ((d.c.req.back.drop d.c.pos).hops.length - 1) d.s).1
+    (RSOR.body kem macS kdfS streamS geom
+      (Protocols.RSOR.BackwardChallenge.swapReq d.c d.o.2.1 d.o.2.2.1)
+      (setSeed geom d.o.2.2.2 ((d.c.req.back.drop d.c.pos).hops.length - 1) d.s))
+    ((RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm) hgood.2
+  obtain ⟨pkt, h0⟩ := L 0 hf
+  obtain ⟨pktL, hL⟩ := L ((d.c.req.back.drop d.c.pos).hops.length - 1)
+    (Nat.sub_one_lt (Nat.ne_of_gt hf))
+  exact ⟨hk, hgood.1, pkt, pktL, h0, hL⟩
+
+set_option maxHeartbeats 2000000 in
+/-- **A bad draw of the world where a reply layer is sent on has a seed that is not
+reliable**: the sender's, or one on the rest of the backward path. -/
+theorem prEvent_swapReplyBad_le (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair
+    (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+        (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)) .sender names _
+        (replyDraw geom) A)}[swapReplyBad kem cipher macS kdfS streamS geom hvalid hmactag h16 d]
+      ≤ Pr{let d ← (propDrawOf kem cipher macS kdfS streamS geom hvalid hmactag h16
+          (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)) .sender names _
+        (replyDraw geom) A)}[¬ (kem.Reliable (kem.stateFromSeed d.s)
+        ∧ ∀ i, i < (d.c.req.back.drop d.c.pos).hops.length → kem.Reliable (kem.stateFromSeed
+          (setSeed geom d.o.2.1 ((d.c.req.back.drop d.c.pos).hops.length - 1)
+            d.s).1.1.toArray[i]!))] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood => hbad ?_
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold propDrawOf at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, k₁, -, k₂, -, out, -, o, -, s, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  have hf : 0 < (d.c.req.back.drop d.c.pos).hops.length :=
+    List.length_pos_iff.2 (d.c.req.back.drop_ne d.c.pos.isLt)
+  have L := layer_builds_of_reliable kem cipher macS kdfS streamS hvalid hmactag h16
+      (d.c.req.back.drop d.c.pos)
+    [.surbReply d.o.2.1.2.2.2] (Or.inr ⟨_, rfl⟩)
+    (setSeed geom d.o.2.1 ((d.c.req.back.drop d.c.pos).hops.length - 1) d.s).1
+    (⟨Array.replicate geom.forwardPayloadLength 0⟩ : ByteArray) Array.size_replicate hgood.2
+  obtain ⟨pkt, h0⟩ := L 0 hf
+  obtain ⟨pktL, hL⟩ := L ((d.c.req.back.drop d.c.pos).hops.length - 1)
+    (Nat.sub_one_lt (Nat.ne_of_gt hf))
+  exact ⟨hk, hgood.1, pkt, pktL, h0, hL⟩
+
+/-- The draws of the two keyed games of the sender on which no seed fails: the sender's, and
+those of the hops in front of it on the rest of the backward path. -/
+def swapSeedsGood (s : Vector UInt8 32) (n : ℕ) (seeds : Array (Vector UInt8 32)) : Prop :=
+  kem.Reliable (kem.stateFromSeed s) ∧ ∀ m, m < n - 1 → kem.Reliable (kem.stateFromSeed seeds[m]!)
+
+set_option maxHeartbeats 2000000 in
+/-- With reliable seeds a draw of the world with a fresh onion is good: the sender's key pair
+is a key pair and the fresh onion's first layer builds. -/
+theorem swapFreshGood_of_reliable
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary)
+    (d : KeyedDraw (swapFreshAdv kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)) (hd
+        : d ∈ support (keyedDraw cipher macS kdfS streamS geom (swapFreshAdv kem cipher macS kdfS
+        streamS geom hvalid hmactag h16 names A)))
+    (hgood : swapSeedsGood kem d.s ((propChOf d).c.req.back.drop (propChOf d).c.pos).hops.length
+      (propOthOf d).2.2.2.1.1.toArray) :
+    swapFreshGood kem cipher macS kdfS streamS geom hvalid hmactag h16 d := by
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold keyedDraw at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, cs, -, s, -, o, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  exact ⟨hk, hgood.1,
+    layer_zero_builds kem cipher macS kdfS streamS hvalid
+      (Protocols.RSOR.BackwardChallenge.swapReq (propChOf d).c (propOthOf d).2.1
+        (propOthOf d).2.2.1).fwd
+      (List.length_pos_iff.2 ((propChOf d).c.req.back.drop_ne (propChOf d).c.pos.isLt)) _
+      (Or.inl ⟨_, rfl⟩) _ _
+      ((RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm),
+    hgood.2⟩
+
+/-- **A draw of the world with a fresh onion that is not good has a seed that is not
+reliable.** -/
+theorem prEvent_not_swapFreshGood_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (swapFreshAdv kem cipher macS kdfS streamS
+        geom hvalid hmactag h16 names A))}[¬ swapFreshGood kem cipher macS kdfS streamS geom hvalid
+        hmactag h16 d]
+      ≤ Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (swapFreshAdv kem cipher macS kdfS
+          streamS geom hvalid hmactag h16 names A))}[¬ swapSeedsGood kem d.s
+        ((propChOf d).c.req.back.drop (propChOf d).c.pos).hops.length
+        (propOthOf d).2.2.2.1.1.toArray] :=
+  prEvent_mono_of_support _ _ _ fun d hd hbad hgood =>
+    hbad (swapFreshGood_of_reliable kem cipher macS kdfS streamS geom hvalid hmactag h16 hsurb
+        names A d hd hgood)
+
+set_option maxHeartbeats 2000000 in
+/-- **So has one that is not good for the payload step**: at the sender, the last hop of the
+fresh onion's path, the bytes behind the tag are the zero tag and the payload. -/
+theorem prEvent_not_swapFreshGoodP_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (swapFreshAdv kem cipher macS kdfS streamS
+        geom hvalid hmactag h16 names A))}[¬ swapFreshGoodP kem cipher macS kdfS streamS geom
+        hvalid hmactag h16 d]
+      ≤ Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (swapFreshAdv kem cipher macS kdfS
+          streamS geom hvalid hmactag h16 names A))}[¬ swapSeedsGood kem d.s
+        ((propChOf d).c.req.back.drop (propChOf d).c.pos).hops.length
+        (propOthOf d).2.2.2.1.1.toArray] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood =>
+    hbad ⟨swapFreshGood_of_reliable kem cipher macS kdfS streamS geom hvalid hmactag h16 hsurb
+        names A d hd hgood, fun k => ?_⟩
+  have hf : 0 < ((propChOf d).c.req.back.drop (propChOf d).c.pos).hops.length :=
+    List.length_pos_iff.2 ((propChOf d).c.req.back.drop_ne (propChOf d).c.pos.isLt)
+  refine (congrArg ByteArray.size (relayBackAt_last kem cipher macS kdfS streamS geom _ _ _ _ _
+    ((Nat.sub_add_cancel hf).trans (RSOR.path_size kem _ _).symm))).trans ?_
+  rw [ByteArray.size_append]
+  exact congrArg₂ (· + ·) Array.size_replicate
+    ((RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm)
+
+set_option maxHeartbeats 2000000 in
+/-- **A draw of the world where a reply layer is sent on that is not good has a seed that is
+not reliable.** -/
+theorem prEvent_not_swapReplyGood_le (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair
+    (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (swapReplyAdv kem cipher macS kdfS streamS
+        geom hvalid hmactag h16 names A))}[¬ swapReplyGood kem cipher macS kdfS streamS geom hvalid
+        hmactag h16 d]
+      ≤ Pr{let d ← (keyedDraw cipher macS kdfS streamS geom (swapReplyAdv kem cipher macS kdfS
+          streamS geom hvalid hmactag h16 names A))}[¬ swapSeedsGood kem d.s
+        ((propChOf d).c.req.back.drop (propChOf d).c.pos).hops.length
+        (propOthOf d).2.1.1.1.toArray] := by
+  refine prEvent_mono_of_support _ _ _ fun d hd hbad hgood => hbad ?_
+  have hk : d.k.1.1 = kem.derivePublicKey d.k.2 := by
+    unfold keyedDraw at hd
+    simp only [support_bind, support_pure, Set.mem_iUnion, Set.mem_singleton_iff] at hd
+    obtain ⟨k, hk, cs, -, s, -, o, -, rfl⟩ := hd
+    exact RSOR.key_of_keygen kem k.1 k.2 hk
+  exact ⟨hk, hgood.1,
+    layer_zero_builds kem default macS kdfS streamS hvalid
+      ((propChOf d).c.req.back.drop (propChOf d).c.pos)
+      (List.length_pos_iff.2 ((propChOf d).c.req.back.drop_ne (propChOf d).c.pos.isLt)) _
+      (Or.inr ⟨_, rfl⟩) _ _ Array.size_replicate,
+    hgood.2⟩
+
+omit cipher macS kdfS streamS hvalid hmactag h16 in
+/-- A hop of a route has a ciphertext of the KEM's ciphertext length, whatever its seed: the
+encapsulation to its key does not fail. -/
+theorem kemHopCt_route_size (R : Protocols.RSOR.Route geom.nrHops RSOR.Name (Key kem))
+    (last : List RoutingCommand) (seeds : Array (Vector UInt8 32)) (i : ℕ)
+    (hi : i < R.hops.length) :
+    (kemHopCt kem ((RSOR.path kem R last).extract i (RSOR.path kem R last).size) seeds 0).size
+      = kem.ciphertextSize := by
+  rw [path_extract_drop kem geom R last i (le_of_lt hi)]
+  unfold kemHopCt
+  rw [RSOR.path_getElem! kem (R.drop i) last 0 (by simp [Protocols.RSOR.Route.drop]; omega)]
+  obtain ⟨ct, ss, h⟩ := kemEncap_key kem ((R.drop i).hops[0]'(by
+    simp [Protocols.RSOR.Route.drop]; omega)).key (seeds[0]!)
+  rw [h]
+  exact kemEncap_size kem _ _ ct ss h
+
+set_option maxHeartbeats 2000000 in
+/-- **A draw of the last comparison is not good with the chance of one tag.** Its hops'
+ciphertexts have the right length and the fresh onion's payload fits, so what is left is that
+the ideal cipher's second block begins with the zero tag. -/
+theorem prEvent_not_swapFinalGood_le
+    (hsurb : geom.forwardPayloadLength = 2 + geom.surbLength + geom.userForwardPayloadLength)
+    (names : Role → RSOR.Name) (A : (Protocols.RSOR.swapPair (Protocols.RSOR.freshSwap (S := 𝒮))
+      (replySwap kem cipher macS kdfS streamS geom hvalid hmactag h16)).Adversary) :
+    Pr{let x ← (swapFinalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A)}[¬
+        swapFinalGood kem cipher macS kdfS streamS geom hvalid hmactag h16 x]
+      ≤ (Fintype.card (Vector UInt8 geom.payloadTagLength) : ENNReal)⁻¹ := by
+  have hE : (swapFinalDraw kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+        (pure (((ofVector x.2.2.2.1).extract 0 geom.payloadTagLength).data.all (· == 0)) :
+          ProbComp Bool))
+      =ᵈ ($ᵗ (Block geom) >>= fun v =>
+        (pure (((ofVector v).extract 0 geom.payloadTagLength).data.all (· == 0)) :
+          ProbComp Bool)) := by
+    simp only [swapFinalDraw, bind_assoc, pure_bind]
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    refine EvalDistEq.trans (OracleComp.EvalDistEq.bind_const _ _) ?_
+    exact EvalDistEq.bind_right _ fun v => EvalDistEq.trans
+      (OracleComp.EvalDistEq.bind_const _ _) (OracleComp.EvalDistEq.bind_const _ _)
+  have key := hE (fun b => b = true)
+  simp only [bind_pure_comp, prEvent_map] at key
+  have hz := key.trans (prEvent_zeroPrefix (a := geom.payloadTagLength)
+    (b := geom.forwardPayloadLength) rfl)
+  refine (prEvent_mono _ _ _ fun x h => ?_).trans (le_of_eq hz)
+  by_contra hzero
+  have hlen : ∀ i, i < ((propChOf x.2.1).c.req.back.drop (propChOf x.2.1).c.pos).hops.length - 1 →
+      i < ((propChOf x.2.1).c.req.back.drop (propChOf x.2.1).c.pos).hops.length :=
+    fun i hi => lt_of_lt_of_le hi (Nat.sub_le _ _)
+  exact h ⟨fun i hi => kemHopCt_route_size kem geom _ _ _ i (hlen i hi),
+    fun i hi => kemHopCt_route_size kem geom _ _ _ i (hlen i hi),
+    (RSOR.body_size kem macS kdfS streamS geom hvalid hmactag _ _).trans hsurb.symm, hzero⟩
+
+/-- **The backward-path term of the SLU← bound is zero**: there the draws are always good. -/
+theorem prEvent_not_backGoodF_eq_zero (names : Role → RSOR.Name)
+    (A : (Protocols.RSOR.backwardWith (replySwap kem cipher macS kdfS streamS geom hvalid hmactag
+        h16)).Adversary) :
+    Pr{let z ← (backPre kem cipher macS kdfS streamS geom hvalid hmactag h16 names A >>= fun x =>
+        (fun p => (x, p)) <$> (do
+        let r ← $ᵗ (RSOR.Randomness geom)
+        let r' ← $ᵗ (RSOR.Randomness geom)
+        let U ← $ᵗ (Keystream geom)
+        pure (r, r', U)))}[z.1.cs.1.c.pos.val ≠ 0
+          ∧ ¬ backGoodF kem macS kdfS streamS geom z.1.cs.1.c.req.back
+            (z.1.cs.1.c.pos.val - 1) z.2] = 0 :=
+  prEvent_eq_zero_of_forall_not _ _ fun z h =>
+    h.2 (backGoodF_holds kem macS kdfS streamS geom hvalid z.1.cs.1.c.req.back _
+      (lt_of_eq_of_lt (Nat.sub_add_cancel (Nat.pos_of_ne_zero h.1)) z.1.cs.1.c.pos.isLt) z.2)
+
+end SwapEvents
+
+end Cryptlib.Protocols.Sphinx.KEMSphinx

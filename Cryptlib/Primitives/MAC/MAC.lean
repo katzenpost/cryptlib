@@ -23,4 +23,11 @@ instance : Inhabited MAC := ⟨{
   mac := fun _ _ => #v[]
 }⟩
 
+/-- The "MAC" that gives one fixed tag. A reduction that holds a tag and not its key runs a
+verifier with it in place of the MAC. -/
+def MAC.const {n : Nat} (tag : Vector UInt8 n) : MAC where
+  keySize := 32
+  tagSize := n
+  mac _ _ := tag
+
 end Cryptlib.Primitives.MAC

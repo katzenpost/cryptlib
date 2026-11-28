@@ -28,9 +28,11 @@ TESTS := \
 	Cryptlib.Protocols.BACAP.test \
 	Cryptlib.Protocols.Sphinx.crypto_test \
 	Cryptlib.Primitives.WideBlockCipher.test \
+	Cryptlib.Primitives.WideBlockCipher.lioness_test \
 	Cryptlib.Protocols.Sphinx.commands_test \
 	Cryptlib.Protocols.Sphinx.geometry_test \
 	Cryptlib.Protocols.Sphinx.nike_selftest \
+	Cryptlib.Protocols.Sphinx.nike_rsor_selftest \
 	Cryptlib.Protocols.Sphinx.kem_selftest \
 	Cryptlib.Protocols.Sphinx.nike_vectors_test \
 	Cryptlib.Protocols.Sphinx.kem_vectors_test \
@@ -172,8 +174,8 @@ check-bacap-vectors: build ## generate hpqc's BACAP vectors with the Lean implem
 verify-vectors: ## sha256sum-compare vendored testdata/ files against their hpqc/katzenpost/katzenqt source copies
 	@./scripts/verify-vectors.sh "$(HPQC_DIR)" "$(KATZENPOST_DIR)" "$(KATZENQT_DIR)"
 
-axioms: build ## fail if a group chat theorem rests on sorry, native_decide or a declared axiom
-	@./scripts/check-axioms.sh
+axioms: build ## fail if a theorem rests on sorry, native_decide or an axiom Cryptlib/check_axioms.lean does not list
+	@$(LAKE) lint
 
 tla: ## model-check every GroupChat/tla protocol and impl config against its EXPECT line (needs java and tla2tools.jar)
 	@./Cryptlib/Protocols/GroupComm/GroupChatKatzenqt1/tla/check.sh

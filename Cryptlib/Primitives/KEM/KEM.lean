@@ -57,6 +57,9 @@ structure KEM where
   honestRoundTrip : ∀ sk, ∀ s, Reliable s → ∀ c k s', encap (derivePublicKey sk) s = .ok (c, k) s' →
     ∀ t, ∃ t', decap sk c t = .ok k t'
 
+  /-- Encapsulation to a derived public key does not fail. -/
+  encap_derived : ∀ sk s, ∃ c k s', encap (derivePublicKey sk) s = .ok (c, k) s'
+
   /-- Every byte string of the right width decodes to a private key. -/
   decodePrivateKey_total : ∀ b, ∃ sk, decodePrivateKey b = some sk
 
@@ -93,6 +96,7 @@ instance : Inhabited KEM := ⟨{
   stateFromSeed := fun _ => ()
   derivePublicKey := fun _ => ()
   honestRoundTrip := fun _ _ _ _ _ _ _ t => ⟨t, rfl⟩
+  encap_derived := fun _ s => ⟨(), (), s, rfl⟩
   decodePrivateKey_total := fun _ => ⟨(), rfl⟩
 
   decode_encode_pub  := fun _ => rfl

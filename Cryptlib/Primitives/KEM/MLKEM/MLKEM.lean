@@ -211,6 +211,7 @@ def kem : KEM where
   stateFromSeed := stateFromSeed
   derivePublicKey := (derivePublicKeyM ps)
   honestRoundTrip := (honestRoundTripM ps)
+  encap_derived := fun _ _ => ⟨_, _, _, rfl⟩
   decodePrivateKey_total := (decodePrivateKey_totalM ps)
 
   decode_encode_pub := (decode_encode_pub ps)
@@ -319,6 +320,7 @@ def kemSeed : KEM where
   stateFromSeed := stateFromSeed
   derivePublicKey := (derivePublicKeyFromSeed ps)
   honestRoundTrip := (honestRoundTripFromSeed ps)
+  encap_derived := fun _ _ => ⟨_, _, _, rfl⟩
   decodePrivateKey_total := (decodePrivateKeyFromSeed_total ps)
 
   decode_encode_pub := (decode_encode_pub ps)
