@@ -954,7 +954,16 @@ uses the replaced hop's MAC key for one tag only (`nikePktFn_restKeys`, `peels_r
 `backOnionOfKeys_tag`, `backLayerOfKeys_tag`, `backView0_tag`), so the relay may answer the
 element of its place under the challenge's header only, at the cost of a forgery and the
 chance that the bytes its tag covers do not have a header's length. World 1 has the same
-step (`backward1_keyGame_sub_macOnly_le`, `backView1_tag`). Nothing
+step (`backward1_keyGame_sub_macOnly_le`, `backView1_tag`).
+
+The payload cipher step is stated once for any property of NIKE Sphinx, in
+`NIKESphinxPay.lean` (`macOnly_sub_propPay_le`, the game `propPay`): if the bytes under the
+relay's tag have a header's length, carry the element of its place and do not read its payload
+key, and the world shown is some `viewE` at the encryption of some `plain` under that key, then
+the game after the MAC step differs from its payload game with an ideal cipher by a one-query
+advantage against the cipher and the chance of a draw that is not good. The TLU→ proof has its
+own copy of this step, typed to its game (`forward_only_sub_ideal_le`); it could be restated
+through the general one. SLU← does not use the general step yet. Nothing
 else of SLU← is proved for NIKE Sphinx; the plan is the
 order of the KEM proof above, with the blinding game once more for the hops after the relay on
 the backward path. STI↔ is not started for NIKE Sphinx.
